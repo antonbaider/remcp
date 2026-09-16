@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.1
+
+Full surface and review-aligned annotations. (0.2.0 was published from an earlier snapshot that
+carried 23 tools; 0.2.1 is the release that matches this repository.)
+
+- 35 tools: binary transfer in both directions (`read_binary`, `write_binary`, base64 chunks),
+  archives (`create_archive`, `extract_archive` for tar, tar.gz, tar.bz2, tar.xz, zip), screenshots
+  (`take_screenshot`), `read_image`, `hash_file`, `diff_files`, `replace_lines`, `replace_in_files`,
+  `move_to_trash`, `get_system_info`, `wait_for_process_output`, runtime introspection, and a glob
+  filter on `list_directory`;
+- no approval step anywhere: writes replace by default, moves and copies replace the destination,
+  `replace_in_files` applies immediately, and `dry_run` is opt-in for callers who want a preview;
+- `dangerousCommands` defaults to `warn`: a catastrophic command runs and the result carries a note,
+  with `allow` for silence and `block` to refuse;
+- annotations say what the tools do: 19 read-only, 14 destructive (including the tools that replace a
+  destination by default), 2 open-world;
+- crash-resistance: a bad shell, a closed stdin, a stream with no newlines, a dead parent, or an
+  unparseable `runtime.json` cannot leave a device silently offline;
+- `read_process_output` offsets are documented and implemented as zero-based line numbers, ranged
+  reads no longer consume the new-output cursor, and reads never sleep over buffered data;
+- the contract commands work with no dependencies installed, so CI can diff the advertised tool
+  surface against the published tarball.
+
 ## 0.2.0
 
 First feature-complete first-party release. ReMCP no longer needs to install an upstream MCP server
