@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1
+## 0.2.2
 
 Full surface and review-aligned annotations. (0.2.0 was published from an earlier snapshot that
 carried 23 tools; 0.2.1 is the release that matches this repository.)
