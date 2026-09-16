@@ -52,18 +52,21 @@ file) and no `write_pdf`/spreadsheet/DOCX tooling (that is what drags Puppeteer,
 `--print-tools` prints the exact JSON contract (schemas and annotations) the runtime advertises, and
 `src/catalog.mjs` is the single source of truth for it.
 
-## Nothing is blocked, nothing is confirmed
+## No approval staircase
 
-ReMCP is a remote control for computers you own, with the same trust model as SSH: the tool call runs.
-There is no approval prompt, no "are you sure", and no dry-run detour unless you ask for one.
+ReMCP is a remote control for computers you own, with the same trust model as SSH: the tool call runs,
+and the user's request is the authorization. There is no approval prompt, no "are you sure", and no
+dry-run detour unless you ask for one.
 
 - file writes replace by default (`mode: "append"` to add), moves and copies replace the destination
   (`overwrite: false` refuses instead), `replace_in_files` applies immediately (`dry_run: true`
   previews), and `move_to_trash` is there when you want an undo;
-- the catastrophic-command guardrail is **off by default** (`dangerousCommands: "allow"`). Set it to
-  `warn` for a note in the output or `block` to refuse, and put your own strings in
-  `blockedCommands` if you want a device-level deny list;
-- `allowedRoots` is empty, so the device reaches everything the agent's account can reach.
+- the destructive-command guardrail defaults to `warn`: the command runs and the result carries a note
+  when it matches the catastrophic list (`mkfs`, raw device writes, repartitioning, host power
+  control, fork bombs, recursive root deletion). `allow` removes even the note, `block` refuses
+  before running, and `blockedCommands` adds your own deny list;
+- `allowedRoots` is empty, so the device reaches everything the agent's account can reach. Set it to
+  confine a device to specific directories, enforced against the resolved real path.
 
 The guarantees that remain are about correctness rather than permission: a bad shell, a closed stdin,
 or a 40 MB line cannot take the runtime down; a crashed runtime is restarted by the agent; terminal
@@ -105,10 +108,10 @@ in `~/.config/remcp/runtime.json`. `--describe` always reports the current state
   against the resolved real path of the deepest existing ancestor rather than the lexical string, so
   `<allowed>/link -> /etc` cannot be used to read or write outside the allowed directories.
   `allowedRoots: ["/"]` means the whole filesystem and works as written.
-- **Optional command guardrail.** `dangerousCommands` defaults to `allow`. `warn` runs a catastrophic
-  command and adds a note to the output; `block` refuses it before it runs. Rules match the *command
-  word* of each shell segment, so `grep -n format README.md` is never affected. User `blockedCommands`
-  entries are always enforced.
+- **Command guardrail.** `dangerousCommands` defaults to `warn`: a catastrophic command still runs and
+  the result carries a note. `allow` silences the note, `block` refuses before running. Rules match the
+  *command word* of each shell segment, so `grep -n format README.md` is never affected. User
+  `blockedCommands` entries are always enforced.
 - **A bad configuration is loud.** If `runtime.json` cannot be parsed, the device refuses to start and
   says why, instead of quietly dropping your `allowedRoots` and re-enabling usage metrics.
 - **Secret masking.** `list_processes` masks command arguments that look like tokens, passwords, or
@@ -140,7 +143,7 @@ Optional settings live in `~/.config/remcp/runtime.json` (override the directory
   "name": "workstation",
   "allowedRoots": ["~/projects", "/srv/data"],
   "blockedCommands": ["rm -rf /", "shutdown"],
-  "dangerousCommands": "allow",
+  "dangerousCommands": "warn",
   "telemetryEnabled": true,
   "maxOutputBytes": 1048576,
   "maxReadLines": 2000,
@@ -192,7 +195,7 @@ MCP server.
 | Telemetry | opt-out, 51 event names, remote feature flags, A/B assignment, third-party processor | opt-out, whitelisted event schema, no endpoint, no flags |
 | Install size | 3.78 MB unpacked, 249 files | ~110 kB unpacked, 20 files |
 | `read_file` | also fetches arbitrary URLs (SSRF surface) | local files only; `read_binary` transfers any file as base64 |
-| Command guardrails | always on, 32 substring-blocked commands, advisory; also refuses read-only mentions | off by default, opt-in `warn`/`block` with command-word matching |
+| Command guardrails | always on, 32 substring-blocked commands, advisory; also refuses read-only mentions | `warn` by default (never blocks), `allow`/`block` opt-in, command-word matching |
 | Confinement | always on, checked against the lexical path | opt-in, checked against the resolved real path |
 | Local history | writes tool arguments to disk unredacted | none |
 | Images | file preview UI in a specific client | `read_image` returns the image to any MCP client |

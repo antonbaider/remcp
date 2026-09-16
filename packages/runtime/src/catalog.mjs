@@ -246,7 +246,7 @@ export const toolDefinitions = [
       required: ['source'],
       additionalProperties: false,
     },
-    annotations: additive,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     handler: fileToolHandlers.move_to_trash,
   },
   {
@@ -278,7 +278,7 @@ export const toolDefinitions = [
       required: ['source', 'destination'],
       additionalProperties: false,
     },
-    annotations: additive,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     handler: fileToolHandlers.move_file,
   },
   {
@@ -295,7 +295,7 @@ export const toolDefinitions = [
       required: ['source', 'destination'],
       additionalProperties: false,
     },
-    annotations: additive,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     handler: fileToolHandlers.copy_file,
   },
   {
@@ -312,7 +312,7 @@ export const toolDefinitions = [
       required: ['paths', 'destination'],
       additionalProperties: false,
     },
-    annotations: additive,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     handler: fileToolHandlers.create_archive,
   },
   {

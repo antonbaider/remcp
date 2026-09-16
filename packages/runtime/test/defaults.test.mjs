@@ -17,9 +17,9 @@ test('nothing is blocked by default: the agent can run anything the account can 
   assert.doesNotMatch(body(result), /blocked by ReMCP device policy/);
 });
 
-test('the destructive-command guardrail reports itself as off', () => {
+test('the destructive-command guardrail only annotates by default', () => {
   const described = describeConfig();
-  assert.equal(described.dangerousCommands, 'allow');
+  assert.equal(described.dangerousCommands, 'warn');
   assert.equal(described.blockedCommands.length, 0);
 });
 

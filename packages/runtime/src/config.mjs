@@ -61,7 +61,10 @@ function booleanValue(value, fallback) {
 
 const DANGEROUS_MODES = ['block', 'warn', 'allow'];
 
-function dangerousMode(value, fallback = 'allow') {
+// `warn` runs the command and adds a note when it matches the destructive-command list:
+// nothing is ever blocked or delayed, but a catastrophic command is visible in the tool
+// result. Set `allow` for zero noise or `block` to refuse.
+function dangerousMode(value, fallback = 'warn') {
   const normalized = String(value ?? '').trim().toLowerCase();
   return DANGEROUS_MODES.includes(normalized) ? normalized : fallback;
 }
