@@ -1,92 +1,73 @@
-<p align="center">
-  <img src="./assets/remcp-logo.png" width="168" alt="ReMCP logo">
-</p>
+# ReMCP
 
-<h1 align="center">ReMCP</h1>
+ReMCP is an open-source remote MCP bridge for computers you control. A lightweight device agent
+connects **outbound** to a ReMCP relay, so ChatGPT, Codex, or another MCP client can work with local
+files, directories, searches, terminal sessions, and processes without exposing an inbound port on
+the computer.
 
-<p align="center"><strong>Your computer. Your tools. One secure MCP connection.</strong></p>
+- Hosted service: <https://remcp.delio24.com>
+- MCP endpoint: `https://remcp.delio24.com/mcp`
+- Plugin manifest: [`plugin.json`](plugin.json) · MCP configuration: [`mcp.json`](mcp.json)
+- License: MIT
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/@remcp/remcp"><img alt="npm" src="https://img.shields.io/npm/v/%40remcp%2Fremcp?style=flat-square&label=npm"></a>
-  <a href="https://www.npmjs.com/package/@remcp/remcp"><img alt="downloads" src="https://img.shields.io/npm/dm/%40remcp%2Fremcp?style=flat-square&label=downloads"></a>
-  <img alt="Node.js" src="https://img.shields.io/node/v/%40remcp%2Fremcp?style=flat-square&label=node">
-  <a href="./LICENSE"><img alt="license" src="https://img.shields.io/npm/l/%40remcp%2Fremcp?style=flat-square"></a>
-  <a href="https://github.com/antonbaider/remcp/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/antonbaider/remcp?style=flat-square"></a>
-</p>
+## Packages
 
-<p align="center">
-  <a href="https://remcp.delio24.com">Website</a> ·
-  <a href="https://remcp.delio24.com/docs">Docs</a> ·
-  <a href="https://remcp.delio24.com/security">Security</a> ·
-  <a href="https://remcp.delio24.com/support">Support</a>
-</p>
+| Package | Directory | What it does |
+| --- | --- | --- |
+| [`@remcp/remcp`](packages/client) | `packages/client` | Device client: pairing, the outbound agent, and the user service (`remcp start`, `status`, `update`, `install`, `uninstall`, `telemetry`). |
+| [`@remcp/runtime`](packages/runtime) | `packages/runtime` | First-party local device runtime: 23 MCP tools for files, search, terminal sessions, and processes, with one dependency. |
 
-ReMCP is the lightweight device client that connects a computer you own or administer to your ReMCP workspace. The agent makes an outbound connection only; you do not need to expose an inbound port on the machine.
+Both packages are published from this repository. The hosted relay and workspace are operated
+separately; this repository is everything that runs on your own computer.
 
-## Install
+## Quick start
 
-**Requires Node.js 22.5 or newer.**
+Requires Node.js 22.5 or newer.
 
 ```bash
 npm install --global @remcp/remcp@latest
 ```
 
-Then open **[ReMCP → Connect a machine](https://remcp.delio24.com/app/connect)** and generate a one-time pairing command. Run that exact command on the computer you want to connect.
+Then open <https://remcp.delio24.com/app/connect>, sign in, choose **Generate pairing command**, and
+run the generated command on the computer you want to pair. Verify with `remcp status`, and add
+`https://remcp.delio24.com/mcp` to your MCP client. Authentication uses OAuth 2.1 authorization code
+with PKCE and rotating refresh credentials.
 
-> Pairing codes are generated in the authenticated workspace, expire automatically, and are single-use. Do not invent or reuse a code from documentation.
+## Usage metrics
 
-## Commands
+The agent and the runtime collect **opt-out** usage metrics: tool names, durations, outcomes, coarse
+error classes, session counts, and device health samples (uptime, load, memory, versions). They never
+include file paths, file contents, command strings, tool arguments, or tool output — the event schema
+is a whitelist, so those fields cannot be emitted even by accident.
 
-| Command | Purpose |
-| --- | --- |
-| `remcp start` | Start the device agent in the foreground |
-| `remcp status` | Show pairing and service health |
-| `remcp doctor` | Run the same connectivity diagnostics in JSON form |
-| `remcp install` | Install the persistent Linux user service |
-| `remcp update` | Update ReMCP and the compatible local runtime |
-| `remcp uninstall` | Stop and remove the user service |
-| `remcp uninstall --purge` | Remove the service and global packages |
-| `remcp --version` | Print the installed client version |
-
-## How pairing works
-
-1. Sign in to your ReMCP workspace.
-2. Generate a one-time pairing command.
-3. Run the command on your machine.
-4. ReMCP stores the device credential locally with restrictive permissions.
-5. The agent establishes an outbound WebSocket connection to the configured ReMCP service.
-
-For the official service, compatible runtime metadata is delivered as part of the pairing response. A custom ReMCP server must be explicitly trusted with `--trust-runtime` before the client accepts runtime metadata from it.
-
-## Security model
-
-- Outbound-only device connection.
-- Per-device revocable credential.
-- Local client configuration stored with restrictive permissions.
-- Runtime metadata validated before installation.
-- Custom servers require an explicit runtime trust decision.
-- No pairing secrets belong in issues, screenshots, logs, or documentation.
-
-If a machine should no longer be connected, revoke it from the workspace and remove the local service.
-
-## Update
+There is no telemetry endpoint and no third-party processor. Events travel as MCP notifications from
+the runtime to the agent, and the agent forwards them over the authenticated WebSocket it already
+holds to your own ReMCP account. There is no install ping, no postinstall script, no remote feature
+flags, and no A/B assignment.
 
 ```bash
-remcp update
-remcp --version
-remcp status
+remcp telemetry off     # one switch for the client and the runtime
+remcp telemetry status
 ```
+
+## Security
+
+- no inbound port on paired computers; the agent only dials out;
+- one revocable credential per paired device, stored as a hash server-side;
+- pairing codes are short-lived and single-use;
+- the runtime opens no sockets of its own and has no postinstall script;
+- device metrics are opt-out, self-hosted, and limited to a whitelisted event schema.
+
+See [`SECURITY.md`](SECURITY.md) for vulnerability reporting.
 
 ## Development
 
 ```bash
-npm ci
+npm install
 npm run check
 npm test
-npm audit --omit=dev
-npm pack --dry-run
 ```
 
 ## License
 
-MIT © ReMCP contributors. See [LICENSE](LICENSE).
+MIT.

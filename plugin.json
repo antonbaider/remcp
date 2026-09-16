@@ -1,0 +1,37 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "remcp",
+  "version": "0.2.0",
+  "description": "Securely use files, directories, searches, terminal sessions, and processes on computers you have paired with ReMCP.",
+  "homepage": "https://remcp.delio24.com",
+  "repository": "https://github.com/antonbaider/remcp",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "remote-computer",
+    "developer-tools",
+    "files",
+    "terminal"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "ReMCP",
+        "shortDescription": "Control your own computers",
+        "longDescription": "ReMCP securely connects ChatGPT and Codex to computers you have explicitly paired. Inspect files and directories, search local content, and manage terminal sessions and processes through an authenticated remote MCP endpoint.",
+        "category": "Developer Tools",
+        "websiteURL": "https://remcp.delio24.com",
+        "privacyPolicyURL": "https://remcp.delio24.com/privacy",
+        "termsOfServiceURL": "https://remcp.delio24.com/terms",
+        "defaultPrompt": [
+          "Show my paired ReMCP computers and tell me which ones are online.",
+          "On my laptop, list the files in my project folder and summarize what is there without changing anything.",
+          "On my server, list the running processes and help me identify the one using the most memory."
+        ],
+        "brandColor": "#4C50D8",
+        "composerIcon": "./assets/remcp-icon.png",
+        "logo": "./assets/remcp-icon.png"
+      }
+    }
+  }
+}

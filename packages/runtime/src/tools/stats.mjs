@@ -1,0 +1,71 @@
+import process from 'node:process';
+import { describeConfig, runtimeConfig } from '../config.mjs';
+import { dangerousPatternIds } from '../policy.mjs';
+import { listProcessSessions, listSearchSessions } from '../sessions.mjs';
+import { telemetryStatus } from '../telemetry.mjs';
+import { VERSION } from '../version.mjs';
+import { text } from '../util.mjs';
+
+// Read-only introspection. Unlike the upstream Desktop Commander there is deliberately
+// no set_config_value: a model must not be able to rewrite its own device limits.
+export async function getRuntimeInfoTool() {
+  const telemetry = telemetryStatus();
+  return text(JSON.stringify({
+    version: VERSION,
+    runtime: describeConfig(),
+    policy: {
+      allowedRoots: [...runtimeConfig.allowedRoots],
+      blockedCommands: [...runtimeConfig.blockedCommands],
+      dangerousCommands: runtimeConfig.dangerousCommands,
+      builtinGuardrailIds: dangerousPatternIds,
+      note: 'Guardrails reduce accidents and prompt-injected one-liners; they are not an operating-system sandbox.',
+    },
+    telemetry: {
+      enabled: telemetry.enabled,
+      transport: telemetry.transport,
+      endpoint: telemetry.endpoint,
+      thirdParty: telemetry.thirdParty,
+      installPing: telemetry.installPing,
+      remoteFeatureFlags: telemetry.remoteFeatureFlags,
+    },
+    limits: {
+      maxOutputBytes: runtimeConfig.maxOutputBytes,
+      maxReadLines: runtimeConfig.maxReadLines,
+      maxBufferedLines: runtimeConfig.maxBufferedLines,
+      maxWriteBytes: runtimeConfig.maxWriteBytes,
+      maxConcurrentConnections: 1,
+    },
+  }, null, 2));
+}
+
+export async function getRuntimeStatsTool() {
+  const telemetry = telemetryStatus();
+  const processes = listProcessSessions();
+  const searches = listSearchSessions();
+  const running = processes.filter(session => !session.exited).length;
+  return text(JSON.stringify({
+    runtimeVersion: VERSION,
+    uptimeSeconds: telemetry.uptimeSeconds,
+    counters: telemetry.counters,
+    topTools: telemetry.topTools,
+    sessions: {
+      processSessions: processes.length,
+      processSessionsRunning: running,
+      searchSessions: searches.length,
+      searchSessionsRunning: searches.filter(session => session.status === 'running').length,
+    },
+    telemetry: {
+      enabled: telemetry.enabled,
+      transport: telemetry.transport,
+      endpoint: telemetry.endpoint,
+      buffered: telemetry.buffered,
+      sentEvents: telemetry.sentEvents,
+      droppedEvents: telemetry.droppedEvents,
+    },
+  }, null, 2));
+}
+
+export const statsToolHandlers = {
+  get_runtime_info: getRuntimeInfoTool,
+  get_runtime_stats: getRuntimeStatsTool,
+};

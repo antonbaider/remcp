@@ -1,0 +1,50 @@
+{
+  "name": "@remcp/remcp",
+  "version": "0.2.0",
+  "description": "ReMCP device client: pair a computer with ReMCP and run the outbound-only agent that hosts the local MCP runtime.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://remcp.delio24.com",
+  "bin": {
+    "remcp": "bin/remcp.mjs"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "files": [
+    "bin",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "node --check bin/remcp.mjs && node --check src/cli.mjs && node --check src/agent.mjs && node --check src/runtime.mjs && node --check src/version.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ws": "^8.21.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antonbaider/remcp.git",
+    "directory": "packages/client"
+  },
+  "bugs": {
+    "url": "https://github.com/antonbaider/remcp/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "remote",
+    "computer",
+    "cli",
+    "agent",
+    "chatgpt",
+    "codex",
+    "self-hosted"
+  ]
+}
