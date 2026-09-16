@@ -21,6 +21,9 @@ const MAX_PATTERN_LENGTH = 400;
 let ripgrepPath;
 
 function ripgrep() {
+  // REMCP_RUNTIME_FORCE_FALLBACK=1 exercises the dependency-free scanner even where
+  // ripgrep is installed, which is how CI covers both code paths.
+  if (process.env.REMCP_RUNTIME_FORCE_FALLBACK === '1') return null;
   if (ripgrepPath !== undefined) return ripgrepPath;
   try {
     const result = spawnSync('rg', ['--version'], { encoding: 'utf8' });
@@ -29,11 +32,13 @@ function ripgrep() {
   return ripgrepPath;
 }
 
-function normalizePattern(value, literal) {
+function normalizePattern(value, literal, ignoreCase) {
   const pattern = requireString(value, 'pattern');
   if (pattern.length > MAX_PATTERN_LENGTH) fail(`pattern must be at most ${MAX_PATTERN_LENGTH} characters`);
   if (literal) return { regex: null, literal: pattern, patternIsLiteral: true };
-  try { return { regex: new RegExp(pattern, 'g'), literal: null, patternIsLiteral: false }; } catch (error) {
+  // The flag has to be baked into the expression: the fallback scanner has no separate
+  // case-folding step, so `ignoreCase` used to be silently ignored without ripgrep.
+  try { return { regex: new RegExp(pattern, ignoreCase ? 'gi' : 'g'), literal: null, patternIsLiteral: false }; } catch (error) {
     // Silently downgrading an invalid regular expression to a substring search changes the
     // meaning of the call without telling anyone.
     fail(`pattern is not a valid regular expression (${error instanceof Error ? error.message : String(error)}). Pass literalSearch: true to search for this text literally.`);
@@ -182,7 +187,7 @@ export async function startSearchTool(args) {
   const includeIgnored = args.includeIgnored === true;
   const contextLines = clampInteger(args.contextLines, 0, 0, 10);
   const maxResults = clampInteger(args.maxResults, 200, 1, 5000);
-  const matcher = searchType === 'content' ? normalizePattern(pattern, args.literalSearch === true) : { regex: null, literal: pattern, patternIsLiteral: false };
+  const matcher = searchType === 'content' ? normalizePattern(pattern, args.literalSearch === true, ignoreCase) : { regex: null, literal: pattern, patternIsLiteral: false };
   const session = createSearchSession({ type: searchType, pattern, path: target, filePattern });
   countEvent('searchesStarted');
   recordEvent('session_started', { sessionKind: 'search', success: true });
