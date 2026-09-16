@@ -2,15 +2,16 @@
 import process from 'node:process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { toolDefinitions, toolHandlers } from './catalog.mjs';
+import { toolDefinitions } from './catalog.mjs';
 import { describeConfig, runtimeConfigDir } from './config.mjs';
 import { invokeTool } from './invoke.mjs';
 import { shutdownSessions, startSessionSweeper } from './sessions.mjs';
 import { flush, setTelemetrySink, shutdownTelemetry, telemetryEnabled } from './telemetry.mjs';
 import { VERSION } from './version.mjs';
+
+// The MCP SDK is imported lazily so that `--help`, `--version`, `--print-tools` and
+// `--describe` work from a bare checkout or a published tarball with no node_modules.
+// That is what lets CI diff the advertised tool contract against the package users get.
 
 const args = process.argv.slice(2);
 
@@ -58,6 +59,10 @@ function announceTelemetryOnce() {
   } catch { return; }
   console.error('ReMCP runtime: anonymous usage metrics are on (tool names, timings, outcomes only - never file paths, commands or output). They go to your own ReMCP account through the paired agent. Disable with `remcp telemetry off`.');
 }
+
+const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
+const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
+const { CallToolRequestSchema, ListToolsRequestSchema } = await import('@modelcontextprotocol/sdk/types.js');
 
 const server = new Server(
   { name: 'remcp-runtime', version: VERSION },

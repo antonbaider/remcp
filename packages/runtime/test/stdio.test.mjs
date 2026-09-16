@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -50,4 +51,24 @@ test('--print-tools and --describe expose contract metadata', async () => {
   assert.equal(described.telemetryEnabled, true, 'usage metrics are opt-out, so they start on');
   assert.equal(described.telemetryTransport, 'paired-agent-only');
   assert.equal(described.dangerousCommands, 'block');
+});
+
+test('contract metadata works from a bare package with no node_modules', async () => {
+  // CI diffs the advertised contract against the published tarball, which has no
+  // dependencies installed. If the entry point imported the MCP SDK eagerly, that check
+  // would silently stop being able to run.
+  const bare = mkdtempSync(join(tmpdir(), 'remcp-runtime-bare-'));
+  cpSync(path.resolve('src'), join(bare, 'src'), { recursive: true });
+  cpSync('package.json', join(bare, 'package.json'));
+  try {
+    const { stdout } = await run(process.execPath, [join(bare, 'src/index.mjs'), '--print-tools']);
+    const tools = JSON.parse(stdout);
+    assert.ok(tools.length >= 23);
+    const { stdout: described } = await run(process.execPath, [join(bare, 'src/index.mjs'), '--describe']);
+    assert.equal(JSON.parse(described).tools, tools.length);
+    const { stdout: version } = await run(process.execPath, [join(bare, 'src/index.mjs'), '--version']);
+    assert.match(version.trim(), /^\d+\.\d+\.\d+$/);
+  } finally {
+    rmSync(bare, { recursive: true, force: true });
+  }
 });
