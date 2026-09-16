@@ -29,6 +29,24 @@ export const toolDefinitions = [
     handler: fileToolHandlers.read_file,
   },
   {
+    name: 'read_files',
+    title: 'Read files by glob',
+    description: 'Read every file matching a glob under a directory in one call, each section prefixed with its path and line count. Use this to load a whole project area into context quickly instead of one read per file.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute directory (or single file) to start from.' },
+        pattern: { type: 'string', description: 'Glob matched against the relative path and the file name, such as "src/**/*.ts" or "*.md". Default **/* .' },
+        max_files: { type: 'number', description: 'Stop after this many files. Default 50, maximum 200.' },
+        max_lines_per_file: { type: 'number', description: 'Lines kept per file. Default 2000.' },
+        include_ignored: { type: 'boolean', description: 'Also descend into .git and node_modules. Default false.' },
+      },
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+    handler: fileToolHandlers.read_files,
+  },
+  {
     name: 'read_multiple_files',
     title: 'Read multiple files',
     description: 'Read several text files in one call. Each file is returned separately and a failure to read one file does not stop the others.',
@@ -156,6 +174,34 @@ export const toolDefinitions = [
     },
     annotations: mutating,
     handler: fileToolHandlers.write_file,
+  },
+  {
+    name: 'write_files',
+    title: 'Write multiple files',
+    description: 'Create or replace many files in one call, each with its own path, content, and optional mode. Use this to scaffold a project or apply a multi-file change without one round trip per file.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        files: {
+          type: 'array',
+          description: 'Files to write, at most 200 per call.',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'Absolute path of the file.' },
+              content: { type: 'string', description: 'Full file content.' },
+              mode: { type: 'string', enum: ['rewrite', 'append'], description: 'rewrite replaces the file (default), append adds to the end.' },
+            },
+            required: ['path', 'content'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['files'],
+      additionalProperties: false,
+    },
+    annotations: mutating,
+    handler: fileToolHandlers.write_files,
   },
   {
     name: 'edit_block',

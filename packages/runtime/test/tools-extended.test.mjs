@@ -207,6 +207,52 @@ test('list_directory filters by glob and survives an unreadable subdirectory', a
   }
 });
 
+test('read_files loads a whole glob in one call and write_files scaffolds in one call', async () => {
+  const project = join(root, 'bulk-project');
+  mkdirSync(join(project, 'src'), { recursive: true });
+  mkdirSync(join(project, 'node_modules', 'ignored'), { recursive: true });
+  writeFileSync(join(project, 'README.md'), '# bulk\n');
+  writeFileSync(join(project, 'src', 'a.js'), 'export const a = 1;\n');
+  writeFileSync(join(project, 'src', 'b.js'), 'export const b = 2;\n');
+  writeFileSync(join(project, 'node_modules', 'ignored', 'x.js'), 'not me\n');
+
+  const scoped = body(await invokeTool('read_files', { path: project, pattern: '**/*.js' }));
+  assert.match(scoped, /2 file\(s\) matched/);
+  assert.match(scoped, /a\.js \(1 lines\)/);
+  assert.match(scoped, /export const b = 2/);
+  assert.doesNotMatch(scoped, /not me/);
+
+  const everything = body(await invokeTool('read_files', { path: project, max_files: 10 }));
+  assert.match(everything, /README\.md/);
+  assert.match(everything, /a\.js/);
+
+  const created = body(await invokeTool('write_files', {
+    files: [
+      { path: join(project, 'src', 'c.js'), content: 'export const c = 3;\n' },
+      { path: join(project, 'src', 'd.js'), content: 'export const d = 4;\n' },
+      { path: join(project, 'src', 'c.js'), content: '// appended\n', mode: 'append' },
+      { path: join(project, 'src', 'e.js') },
+    ],
+  }));
+  assert.match(created, /2\/3 file\(s\) written|3\/4 file\(s\) written/);
+  assert.equal(readFileSync(join(project, 'src', 'c.js'), 'utf8'), 'export const c = 3;\n// appended\n');
+  assert.equal(readFileSync(join(project, 'src', 'd.js'), 'utf8'), 'export const d = 4;\n');
+});
+
+test('replace_in_files edits every file it finds, in one call', async () => {
+  const project = join(root, 'group-edit');
+  mkdirSync(join(project, 'lib'), { recursive: true });
+  for (const name of ['one', 'two', 'three']) writeFileSync(join(project, 'lib', `${name}.ts`), 'const OLD_NAME = 1;\nexport default OLD_NAME;\n');
+  const result = body(await invokeTool('replace_in_files', { path: project, pattern: 'OLD_NAME', replacement: 'NEW_NAME' }));
+  assert.match(result, /Applied: 3 file\(s\), 6 replacement\(s\)/);
+  for (const name of ['one', 'two', 'three']) {
+    assert.equal(readFileSync(join(project, 'lib', `${name}.ts`), 'utf8'), 'const NEW_NAME = 1;\nexport default NEW_NAME;\n');
+  }
+  const search = body(await invokeTool('start_search', { path: project, pattern: 'OLD_NAME', searchType: 'content' }));
+  assert.match(search, /status: (running|completed)/);
+  assert.doesNotMatch(search, /lib\/one\.ts/);
+});
+
 test('get_system_info reports host facts without leaking anything sensitive', async () => {
   const info = JSON.parse(body(await invokeTool('get_system_info', {})));
   assert.equal(typeof info.hostname, 'string');

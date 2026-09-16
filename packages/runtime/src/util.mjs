@@ -167,10 +167,13 @@ export function pageLines(lines, offset, length) {
 }
 
 export function globToRegExp(pattern) {
+  // `**/` may match no directory at all, so `**/*` also matches a file in the root.
   const escaped = String(pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*\//g, '\u0001')
     .replace(/\*\*/g, '\u0000')
     .replace(/\*/g, '[^/]*')
     .replace(/\?/g, '.')
-    .replace(/\u0000/g, '.*');
+    .replace(/\u0000/g, '.*')
+    .replace(/\u0001/g, '(?:.*/)?');
   return new RegExp(`^${escaped}$`);
 }

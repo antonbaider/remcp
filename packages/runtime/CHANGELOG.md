@@ -1,11 +1,11 @@
 # Changelog
 
-## 0.2.2
+## 0.2.3
 
 Full surface and review-aligned annotations. (0.2.0 was published from an earlier snapshot that
 carried 23 tools; 0.2.1 is the release that matches this repository.)
 
-- 35 tools: binary transfer in both directions (`read_binary`, `write_binary`, base64 chunks),
+- 37 tools: bulk reads and writes (`read_files` by glob, `write_files` for many files at once), binary transfer in both directions (`read_binary`, `write_binary`, base64 chunks),
   archives (`create_archive`, `extract_archive` for tar, tar.gz, tar.bz2, tar.xz, zip), screenshots
   (`take_screenshot`), `read_image`, `hash_file`, `diff_files`, `replace_lines`, `replace_in_files`,
   `move_to_trash`, `get_system_info`, `wait_for_process_output`, runtime introspection, and a glob

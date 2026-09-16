@@ -461,6 +461,88 @@ export async function moveToTrashTool(args) {
   return text(`Moved ${displayPath(source)} to ${displayPath(target)}. Restore it with move_file if this was a mistake.`);
 }
 
+export async function readFilesTool(args) {
+  // Glob-first bulk read: one call fills the model's context with every file that matters
+  // instead of one round trip per path.
+  const root = await resolveSafePath(args.path || '.');
+  const pattern = typeof args.pattern === 'string' && args.pattern.trim() ? args.pattern.trim() : '**/*';
+  const maxFiles = clampInteger(args.max_files, 50, 1, 200);
+  const maxLinesPerFile = clampInteger(args.max_lines_per_file, runtimeConfig.maxReadLines, 1, 10000);
+  const includeIgnored = args.include_ignored === true;
+  const matcher = globToRegExp(pattern);
+  const files = [];
+  async function collect(target) {
+    if (files.length > maxFiles) return;
+    const info = await stat(target).catch(() => null);
+    if (!info) return;
+    if (info.isFile()) {
+      const relative = path.relative(root, target) || path.basename(target);
+      if (matcher.test(relative.split(path.sep).join('/')) || matcher.test(path.basename(target))) files.push(target);
+      return;
+    }
+    if (!info.isDirectory()) return;
+    const entries = await readdir(target, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (files.length > maxFiles) return;
+      if (entry.name.startsWith('.remcp-trash')) continue;
+      if (!includeIgnored && (entry.name === 'node_modules' || entry.name === '.git')) continue;
+      await collect(path.join(target, entry.name));
+    }
+  }
+  if ((await stat(root).catch(() => null))?.isFile()) {
+    files.push(root);
+  } else {
+    await collect(root);
+  }
+  if (!files.length) return text(`No files matched ${pattern} under ${displayPath(root)}.`);
+  const sections = [];
+  let skipped = 0;
+  for (const file of files.slice(0, maxFiles)) {
+    try {
+      const { content, encoding } = await readTextFile(file);
+      const lines = splitLines(content);
+      const slice = lines.slice(0, maxLinesPerFile);
+      const suffix = lines.length > maxLinesPerFile ? `\n… ${lines.length - maxLinesPerFile} more lines (use read_file with offset)` : '';
+      sections.push(`===== ${displayPath(file)} (${lines.length} lines${encoding === 'utf8' ? '' : `, ${encoding}`}) =====\n${slice.join('\n')}${suffix}`);
+    } catch (error) {
+      skipped += 1;
+      sections.push(`===== ${displayPath(file)} =====\n(skipped: ${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+  const header = `${files.length} file(s) matched ${pattern} under ${displayPath(root)}${files.length > maxFiles ? ` (showing the first ${maxFiles})` : ''}${skipped ? `, ${skipped} skipped` : ''}`;
+  return text(`${header}\n\n${sections.join('\n\n')}`);
+}
+
+export async function writeFilesTool(args) {
+  // Bulk write for scaffolding: one call creates or replaces many files.
+  const files = Array.isArray(args.files) ? args.files : fail('files must be an array of { path, content } objects');
+  if (!files.length) fail('files must not be empty');
+  if (files.length > 200) fail('files accepts at most 200 entries per call');
+  const results = [];
+  let totalBytes = 0;
+  for (const entry of files) {
+    const target = typeof entry?.path === 'string' ? entry.path : null;
+    if (!target) { results.push('skipped: entry without a path'); continue; }
+    if (typeof entry.content !== 'string') { results.push(`skipped ${target}: content must be a string`); continue; }
+    try {
+      const absolute = await resolveSafePath(target);
+      const content = entry.content;
+      if (content.includes('\0')) throw new Error('content contains NUL bytes; use write_binary for binary data');
+      const bytes = assertWritableSize(content);
+      totalBytes += bytes;
+      if (totalBytes > runtimeConfig.maxWriteBytes * 4) fail(`This call would write ${totalBytes} bytes, above the ${runtimeConfig.maxWriteBytes * 4}-byte batch limit`);
+      await mkdir(path.dirname(absolute), { recursive: true });
+      await writeFile(absolute, content, entry.mode === 'append' ? { encoding: 'utf8', flag: 'a' } : 'utf8');
+      results.push(`${entry.mode === 'append' ? 'appended' : 'wrote'} ${displayPath(absolute)} (${bytes} bytes)`);
+    } catch (error) {
+      results.push(`failed ${target}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  countEvent('bytesWritten', totalBytes);
+  const failed = results.filter(line => line.startsWith('failed') || line.startsWith('skipped')).length;
+  return text(`${results.length - failed}/${results.length} file(s) written, ${totalBytes} bytes total\n${results.join('\n')}`);
+}
+
 export async function createDirectoryTool(args) {
   const absolute = await resolveSafePath(args.path);
   await mkdir(absolute, { recursive: true });
@@ -619,6 +701,7 @@ export async function takeScreenshotTool(args) {
 
 export const fileToolHandlers = {
   read_file: readFileTool,
+  read_files: readFilesTool,
   read_multiple_files: readMultipleFilesTool,
   read_image: readImageTool,
   read_binary: readBinaryTool,
@@ -626,6 +709,7 @@ export const fileToolHandlers = {
   list_directory: listDirectoryTool,
   get_file_info: getFileInfoTool,
   write_file: writeFileTool,
+  write_files: writeFilesTool,
   write_binary: writeBinaryTool,
   edit_block: editBlockTool,
   replace_lines: replaceLinesTool,

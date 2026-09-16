@@ -32,7 +32,7 @@ runtime.
 | Package | What it is |
 | --- | --- |
 | [`@remcp/remcp`](packages/client) | The device client: pairing, the outbound agent, the background service, and the usage-metrics switch. |
-| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **35 MCP tools** for files, images, binary transfer, archives, screenshots, search, terminal sessions, and processes, with **one dependency**. |
+| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **37 MCP tools** for files, images, binary transfer, archives, screenshots, search, terminal sessions, and processes, with **one dependency**. |
 
 ## Install
 
@@ -69,12 +69,12 @@ runtime and registers the background service.
 with, [DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) or any other MCP
 server.
 
-**35 tools, seven areas:**
+**37 tools, seven areas:**
 
 | Area | Tools |
 | --- | --- |
-| Read | `read_file`, `read_multiple_files`, `read_image`, `read_binary`, `list_directory`, `get_file_info`, `hash_file`, `diff_files` |
-| Write | `write_file`, `write_binary`, `edit_block`, `replace_lines`, `replace_in_files` |
+| Read | `read_file`, `read_files` (glob), `read_multiple_files`, `read_image`, `read_binary`, `list_directory`, `get_file_info`, `hash_file`, `diff_files` |
+| Write | `write_file`, `write_files` (bulk), `write_binary`, `edit_block`, `replace_lines`, `replace_in_files` |
 | Organise | `create_directory`, `move_file`, `copy_file`, `move_to_trash`, `create_archive`, `extract_archive` |
 | Transfer | `read_binary` and `write_binary` move any file in base64 chunks both ways; `create_archive` and `extract_archive` move whole trees |
 | Screen | `take_screenshot` returns the desktop as an image |
