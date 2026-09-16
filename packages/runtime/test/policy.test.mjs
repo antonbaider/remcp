@@ -11,6 +11,9 @@ writeFileSync(join(allowed, 'inside.txt'), 'inside\n');
 writeFileSync(join(root, 'outside.txt'), 'outside\n');
 process.env.REMCP_RUNTIME_ALLOWED_ROOTS = allowed;
 process.env.REMCP_RUNTIME_BLOCKED_COMMANDS = 'rm -rf /';
+// The built-in catastrophic-command guardrail is opt-in; this file tests it, so it is
+// switched on here. The shipped default is `allow` (see the last test in this file).
+process.env.REMCP_RUNTIME_DANGEROUS_COMMANDS = 'block';
 
 const { invokeTool } = await import('../src/invoke.mjs');
 const { describeConfig } = await import('../src/config.mjs');

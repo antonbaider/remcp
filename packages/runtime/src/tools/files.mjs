@@ -1,8 +1,9 @@
 import path from 'node:path';
 import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { access, copyFile, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { runtimeConfig } from '../config.mjs';
 import { diffStats, unifiedDiff } from '../diff.mjs';
@@ -11,6 +12,7 @@ import { clampInteger, decodeText, displayPath, fail, globToRegExp, image, looks
 
 const MAX_INLINE_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_BINARY_CHUNK_BYTES = 512 * 1024;
 const IMAGE_TYPES = new Map([
   ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'], ['.gif', 'image/gif'],
   ['.webp', 'image/webp'], ['.bmp', 'image/bmp'], ['.svg', 'image/svg+xml'], ['.avif', 'image/avif'],
@@ -176,34 +178,81 @@ function assertWritableSize(content) {
   return bytes;
 }
 
-function assertTextContent(content) {
-  if (content.includes('\0')) {
-    countEvent('writeDenials');
-    recordEvent('write_denied', { reason: 'binary_content' });
-    fail('content contains NUL bytes; this tool writes text files only');
-  }
-}
-
 export async function writeFileTool(args) {
   const absolute = await resolveSafePath(args.path);
   const content = typeof args.content === 'string' ? args.content : fail('content must be a string');
-  assertTextContent(content);
-  const bytes = assertWritableSize(content);
   const providedMode = typeof args.mode === 'string' && args.mode.trim() ? args.mode.trim().toLowerCase() : '';
   if (providedMode && !['rewrite', 'append'].includes(providedMode)) fail('mode must be rewrite or append');
-  const existing = await stat(absolute).catch(() => null);
-  // Replacing a non-empty file is the one call that can destroy work with no confirmation,
-  // so the replacement has to be explicit. Creating and appending stay frictionless.
-  if (!providedMode && existing?.isFile() && existing.size > 0) {
-    countEvent('writeDenials');
-    recordEvent('write_denied', { reason: 'implicit_overwrite' });
-    fail(`${displayPath(absolute)} already contains ${existing.size} bytes. Pass mode: "rewrite" to replace it, mode: "append" to add to the end, or use edit_block or replace_lines to change part of it.`);
-  }
   const mode = providedMode || 'rewrite';
+  const bytes = Buffer.byteLength(content, 'utf8');
+  if (mode === 'rewrite') {
+    assertWritableSize(content);
+    if (content.includes('\0')) fail('content contains NUL bytes. For binary data pass encoding: "base64" (or use write_binary) so the file is written byte for byte.');
+  } else {
+    const existing = await stat(absolute).catch(() => null);
+    const existingSize = existing?.isFile() ? existing.size : 0;
+    if (existingSize + bytes > runtimeConfig.maxWriteBytes) {
+      countEvent('writeDenials');
+      recordEvent('write_denied', { reason: 'size_limit' });
+      fail(`Appending ${bytes} bytes would grow ${displayPath(absolute)} to ${existingSize + bytes} bytes, above the ${runtimeConfig.maxWriteBytes}-byte write limit for this device`);
+    }
+  }
   await mkdir(path.dirname(absolute), { recursive: true });
   await writeFile(absolute, content, mode === 'append' ? { encoding: 'utf8', flag: 'a' } : 'utf8');
   countEvent('bytesWritten', bytes);
   return text(`${mode === 'append' ? 'Appended' : 'Wrote'} ${bytes} bytes to ${displayPath(absolute)}.`);
+}
+
+// Binary transfer in both directions, in chunks: the relay carries MCP results, so a
+// large file is read as a sequence of base64 slices and written back the same way.
+export async function readBinaryTool(args) {
+  const absolute = await resolveSafePath(args.path);
+  const info = await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`));
+  if (info.isDirectory()) fail(`${displayPath(absolute)} is a directory, not a file`);
+  const offset = Math.max(0, Number.isFinite(Number(args.offset_bytes)) ? Math.trunc(Number(args.offset_bytes)) : 0);
+  const length = clampInteger(args.length_bytes, MAX_BINARY_CHUNK_BYTES, 1, MAX_BINARY_CHUNK_BYTES);
+  const start = Math.min(offset, info.size);
+  const end = Math.min(info.size, start + length);
+  const handle = await open(absolute, 'r');
+  try {
+    const buffer = Buffer.alloc(end - start);
+    if (buffer.length) await handle.read(buffer, 0, buffer.length, start);
+    const payload = JSON.stringify({
+      path: displayPath(absolute),
+      size: info.size,
+      offsetBytes: start,
+      lengthBytes: buffer.length,
+      nextOffsetBytes: end < info.size ? end : null,
+      complete: end >= info.size,
+      encoding: 'base64',
+      data: buffer.toString('base64'),
+    });
+    return text(payload);
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function writeBinaryTool(args) {
+  const absolute = await resolveSafePath(args.path);
+  const data = typeof args.data === 'string' ? args.data : fail('data must be a base64 string');
+  const mode = String(args.mode || 'rewrite').toLowerCase();
+  if (!['rewrite', 'append'].includes(mode)) fail('mode must be rewrite or append');
+  let buffer;
+  try {
+    buffer = Buffer.from(data.replace(/\s+/g, ''), 'base64');
+  } catch {
+    fail('data must be valid base64');
+  }
+  if (buffer.length > runtimeConfig.maxWriteBytes) {
+    countEvent('writeDenials');
+    recordEvent('write_denied', { reason: 'size_limit' });
+    fail(`Decoded content is ${buffer.length} bytes, above the ${runtimeConfig.maxWriteBytes}-byte write limit for this device`);
+  }
+  await mkdir(path.dirname(absolute), { recursive: true });
+  await writeFile(absolute, buffer, mode === 'append' ? { flag: 'a' } : undefined);
+  countEvent('bytesWritten', buffer.length);
+  return text(`${mode === 'append' ? 'Appended' : 'Wrote'} ${buffer.length} bytes to ${displayPath(absolute)}.`);
 }
 
 function normalizeForFuzzy(value) {
@@ -305,7 +354,9 @@ export async function replaceInFilesTool(args) {
   const replacement = typeof args.replacement === 'string' ? args.replacement : fail('replacement must be a string');
   const filePattern = typeof args.filePattern === 'string' && args.filePattern.trim() ? args.filePattern.trim() : null;
   const isRegex = args.regex === true;
-  const dryRun = args.dry_run !== false; // replacing across files defaults to a preview
+  // Applying is the default: the agent is expected to act, and a dry run is available
+  // when a caller explicitly wants a preview.
+  const dryRun = args.dry_run === true;
   const maxFiles = clampInteger(args.maxFiles, 100, 1, 500);
   let matcher = null;
   if (isRegex) {
@@ -425,7 +476,13 @@ export async function moveFileTool(args) {
   const destination = await resolveSafePath(args.destination, 'destination');
   if (source === destination) fail('source and destination are the same path');
   await stat(source).catch(() => fail(`Source not found: ${displayPath(source)}`));
-  if (await pathExists(destination)) fail(`Destination already exists: ${displayPath(destination)}. Remove it first or pick another name.`);
+  const overwrite = args.overwrite !== false;
+  const existing = await stat(destination).catch(() => null);
+  if (existing && !overwrite) fail(`Destination already exists: ${displayPath(destination)}. Pass overwrite: true to replace it.`);
+  if (existing?.isDirectory()) {
+    const entries = await readdir(destination).catch(() => []);
+    if (entries.length) fail(`Destination is a non-empty directory: ${displayPath(destination)}. Move it aside or pick another name.`);
+  }
   await mkdir(path.dirname(destination), { recursive: true });
   try {
     await rename(source, destination);
@@ -445,21 +502,131 @@ export async function copyFileTool(args) {
   if (source === destination) fail('source and destination are the same path');
   const info = await stat(source).catch(() => fail(`Source not found: ${displayPath(source)}`));
   if (info.isDirectory()) fail('copy_file copies single files only; create the directory and copy its files individually');
-  const overwrite = args.overwrite === true;
+  const overwrite = args.overwrite !== false;
   if (!overwrite && await pathExists(destination)) fail(`Destination already exists: ${displayPath(destination)}. Pass overwrite: true to replace it.`);
   await mkdir(path.dirname(destination), { recursive: true });
   await copyFile(source, destination, overwrite ? 0 : constants.COPYFILE_EXCL);
   return text(`Copied ${displayPath(source)} to ${displayPath(destination)} (${info.size} bytes).`);
 }
 
+// --- archives -------------------------------------------------------------------------
+function archiveTool() {
+  const probe = name => {
+    const result = spawnSync(name, ['--version'], { encoding: 'utf8' });
+    return !result.error && result.status === 0 ? name : null;
+  };
+  return { tar: probe('tar'), zip: probe('zip'), unzip: probe('unzip') };
+}
+
+export async function createArchiveTool(args) {
+  const tools = archiveTool();
+  const sources = Array.isArray(args.paths) ? args.paths : [args.paths].filter(Boolean);
+  if (!sources.length) fail('paths must list at least one file or directory');
+  const resolved = [];
+  for (const entry of sources) resolved.push(await resolveSafePath(entry, 'paths[]'));
+  const destination = await resolveSafePath(args.destination, 'destination');
+  const format = String(args.format || (destination.endsWith('.zip') ? 'zip' : 'tar.gz')).toLowerCase();
+  await mkdir(path.dirname(destination), { recursive: true });
+  const baseDir = path.dirname(resolved[0]);
+  const names = resolved.map(entry => path.relative(baseDir, entry));
+  if (format === 'zip') {
+    if (!tools.zip) fail('zip is not installed on this device; use format "tar.gz"');
+    const result = spawnSync(tools.zip, ['-r', '-q', destination, ...names], { cwd: baseDir, encoding: 'utf8' });
+    if (result.status !== 0) fail(`zip failed: ${(result.stderr || result.stdout || '').trim() || `exit ${result.status}`}`);
+  } else if (format === 'tar' || format === 'tar.gz' || format === 'tgz') {
+    if (!tools.tar) fail('tar is not installed on this device');
+    const flags = format === 'tar' ? '-cf' : '-czf';
+    const result = spawnSync(tools.tar, [flags, destination, ...names], { cwd: baseDir, encoding: 'utf8' });
+    if (result.status !== 0) fail(`tar failed: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+  } else {
+    fail('format must be tar, tar.gz, or zip');
+  }
+  const info = await stat(destination).catch(() => null);
+  return text(`Created ${displayPath(destination)} (${format}, ${info?.size ?? 0} bytes) from ${resolved.length} path(s).`);
+}
+
+export async function extractArchiveTool(args) {
+  const tools = archiveTool();
+  const archive = await resolveSafePath(args.archive, 'archive');
+  const destination = await resolveSafePath(args.destination || path.dirname(archive), 'destination');
+  await mkdir(destination, { recursive: true });
+  if (/\.zip$/i.test(archive)) {
+    if (!tools.unzip) fail('unzip is not installed on this device');
+    const result = spawnSync(tools.unzip, ['-o', '-q', archive, '-d', destination], { encoding: 'utf8' });
+    if (result.status !== 0) fail(`unzip failed: ${(result.stderr || result.stdout || '').trim() || `exit ${result.status}`}`);
+  } else {
+    if (!tools.tar) fail('tar is not installed on this device');
+    const flags = /\.(tar\.gz|tgz)$/i.test(archive) ? '-xzf' : /\.(tar\.bz2|tbz2?)$/i.test(archive) ? '-xjf' : /\.tar\.xz$/i.test(archive) ? '-xJf' : '-xf';
+    const result = spawnSync(tools.tar, [flags, archive, '-C', destination], { encoding: 'utf8' });
+    if (result.status !== 0) fail(`tar failed: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+  }
+  const entries = await readdir(destination).catch(() => []);
+  return text(`Extracted ${displayPath(archive)} into ${displayPath(destination)} (${entries.length} top-level entries).`);
+}
+
+// --- screenshots ----------------------------------------------------------------------
+const SCREENSHOT_COMMANDS = [
+  { command: 'grim', args: file => [file] },
+  { command: 'gnome-screenshot', args: file => ['-f', file] },
+  { command: 'spectacle', args: file => ['-b', '-n', '-o', file] },
+  { command: 'scrot', args: file => ['-o', file] },
+  { command: 'import', args: file => ['-window', 'root', file] },
+  { command: 'screencapture', args: file => ['-x', file] },
+];
+
+function windowsScreenshotScript(file) {
+  return [
+    'Add-Type -AssemblyName System.Windows.Forms,System.Drawing',
+    '$b = [System.Windows.Forms.SystemInformation]::VirtualScreen',
+    '$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height',
+    '$g = [System.Drawing.Graphics]::FromImage($bmp)',
+    '$g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)',
+    `$bmp.Save('${file.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png)`,
+  ].join('; ');
+}
+
+export async function takeScreenshotTool(args) {
+  const directory = await resolveSafePath(args.directory || os.tmpdir(), 'directory');
+  await mkdir(directory, { recursive: true });
+  const file = path.join(directory, `remcp-screenshot-${Date.now()}.png`);
+  const attempts = [];
+  if (process.platform === 'win32') {
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', windowsScreenshotScript(file)], { encoding: 'utf8', timeout: 30000 });
+    attempts.push(`powershell: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+  } else {
+    for (const candidate of SCREENSHOT_COMMANDS) {
+      if (spawnSync('which', [candidate.command], { encoding: 'utf8' }).status !== 0) continue;
+      const result = spawnSync(candidate.command, candidate.args(file), { encoding: 'utf8', timeout: 30000 });
+      if (result.status === 0 && await pathExists(file)) break;
+      attempts.push(`${candidate.command}: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+    }
+  }
+  if (!await pathExists(file)) {
+    fail(`Could not capture the screen. Install one of grim, gnome-screenshot, spectacle, scrot, or ImageMagick import (tried: ${attempts.join('; ') || 'none available'}).`);
+  }
+  const info = await stat(file);
+  if (info.size > MAX_IMAGE_BYTES) {
+    await rm(file, { force: true });
+    fail(`Screenshot is ${info.size} bytes, above the ${MAX_IMAGE_BYTES}-byte inline limit`);
+  }
+  const buffer = await readFile(file);
+  if (args.keep !== true) await rm(file, { force: true });
+  return multi([
+    { type: 'text', text: `Screenshot of ${os.hostname()} (${info.size} bytes)${args.keep === true ? ` saved at ${displayPath(file)}` : ''}` },
+    image(buffer.toString('base64'), 'image/png'),
+  ]);
+}
+
 export const fileToolHandlers = {
   read_file: readFileTool,
   read_multiple_files: readMultipleFilesTool,
   read_image: readImageTool,
+  read_binary: readBinaryTool,
   hash_file: hashFileTool,
   list_directory: listDirectoryTool,
   get_file_info: getFileInfoTool,
   write_file: writeFileTool,
+  write_binary: writeBinaryTool,
   edit_block: editBlockTool,
   replace_lines: replaceLinesTool,
   replace_in_files: replaceInFilesTool,
@@ -468,4 +635,7 @@ export const fileToolHandlers = {
   move_file: moveFileTool,
   copy_file: copyFileTool,
   move_to_trash: moveToTrashTool,
+  create_archive: createArchiveTool,
+  extract_archive: extractArchiveTool,
+  take_screenshot: takeScreenshotTool,
 };

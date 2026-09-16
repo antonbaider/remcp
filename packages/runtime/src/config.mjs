@@ -61,7 +61,7 @@ function booleanValue(value, fallback) {
 
 const DANGEROUS_MODES = ['block', 'warn', 'allow'];
 
-function dangerousMode(value, fallback = 'block') {
+function dangerousMode(value, fallback = 'allow') {
   const normalized = String(value ?? '').trim().toLowerCase();
   return DANGEROUS_MODES.includes(normalized) ? normalized : fallback;
 }

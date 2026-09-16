@@ -191,7 +191,7 @@ export async function startSearchTool(args) {
   // only runs when ripgrep is unavailable.
   if (ripgrep()) runRipgrep(session, options);
   else void runFallback(session, options).catch(error => finishSearchSession(session, 'failed', error instanceof Error ? error.message : String(error)));
-  await waitForSearchResults(session, 1, 1500);
+  await waitForSearchResults(session, 1, 800);
   const initial = session.results.slice(0, 50);
   const status = session.error ? `failed: ${session.error}` : session.status;
   return text([

@@ -28,18 +28,42 @@ Choose the narrowest read:
 
 ## Changes
 
-- Use the narrowest tool that performs the requested change. Prefer `edit_block`, `replace_lines`, `write_file`, `move_file`, or `copy_file` over a shell command when the dedicated tool expresses the action clearly.
-- `write_file` refuses to replace a file that already has content unless `mode: "rewrite"` or `mode: "append"` is given. Pass it deliberately, or use `edit_block` when only part of the file should change.
-- Preview when the change is broad or hard to undo: `edit_block` and `replace_lines` accept `dry_run: true`, and `replace_in_files` previews by default and only writes with `dry_run: false`.
-- Prefer `move_to_trash` over an irreversible delete, and `move_file`/`copy_file` (which never overwrite unless asked) over shell equivalents.
-- Do not broaden a requested path, command, or target without a reason tied to the user's task.
-- Treat file replacement, block or line edits, multi-file replacement, moves, process termination, and generic terminal commands as state-changing actions.
-- Generic terminal commands may also affect external services. Keep commands scoped to the user's stated goal and surface consequential effects before execution when they are not already clear from the request.
-- Commands that would format a disk, write a raw device, repartition, power off the host, or recursively destroy a root path are refused by the device. Do not try to work around that refusal.
+Act. The device is the user's own computer and the account is theirs: do the work in one pass instead
+of asking for confirmation, proposing a plan, or waiting for approval. There is no approval step in
+ReMCP and nothing needs to be requested before a tool call.
+
+- Use the narrowest tool that performs the requested change, and prefer `edit_block`, `replace_lines`,
+  `write_file`, or `move_file` over a shell command when the dedicated tool expresses the action
+  clearly. Everything else — service management, package installs, git, docker, sudo — is a normal
+  `start_process` call.
+- Batch independent work: `read_multiple_files` instead of repeated reads, one `start_process` per
+  session with `read_process_output`/`wait_for_process_output` afterwards, `replace_in_files` instead
+  of editing the same string file by file.
+- Never ask the user to confirm a file write, a command, or a destructive step that they already
+  asked for. If the request is ambiguous about *what* to change, make the smallest reasonable change
+  and say what you did.
+- Do not broaden a requested path, command, or target beyond the user's task, and do not touch a
+  different machine than the one the request names.
+- Preview only when the user asks for a preview: `edit_block`, `replace_lines`, and `replace_in_files`
+  accept `dry_run: true`, and `diff_files` shows what changed after the fact.
+- Commands the account cannot run (missing permissions, missing binaries) fail with the real error;
+  report it instead of retrying the same command unchanged.
 
 ## Verification
 
 After a change, use the cheapest relevant read to verify the result. Examples: `diff_files` or a re-read of the edited range, `hash_file` after a copy, listing the destination directory after a move, or reading process output after starting a command.
+
+## Moving files and data
+
+- Off the computer: `read_file` for text, `read_image` for pictures and screenshots, and `read_binary`
+  for anything else — it returns base64 in 512 KiB chunks; follow `nextOffsetBytes` until `complete`.
+- Onto the computer: `write_file` for text and `write_binary` for bytes, `mode: "append"` to send a
+  large file as consecutive chunks.
+- Whole trees: `create_archive` packs a directory into tar/tar.gz/zip before a transfer, and
+  `extract_archive` unpacks one on the other side.
+- `take_screenshot` captures the screen when the task involves a GUI, a rendered page, or anything the
+  user would otherwise have to describe.
+- `hash_file` proves a transfer arrived intact, and `diff_files` shows what changed between two files.
 
 ## Long-running processes
 

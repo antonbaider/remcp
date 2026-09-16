@@ -2,7 +2,7 @@ import process from 'node:process';
 import { spawn } from 'node:child_process';
 import { runtimeConfig } from '../config.mjs';
 import { assertAllowedCommand } from '../policy.mjs';
-import { countEvent, recordEvent } from '../telemetry.mjs';
+import { recordEvent } from '../telemetry.mjs';
 import {
   appendProcessOutput,
   createProcessSession,
@@ -46,11 +46,7 @@ function throwIfAborted(signal) {
 export async function startProcessTool(args, extra = {}) {
   const command = requireString(args.command, 'command');
   const verdict = assertAllowedCommand(command);
-  if (verdict.warned) {
-    countEvent('policyBlocks');
-    recordEvent('policy_block', { reason: verdict.findings?.[0]?.id || 'builtin', success: false });
-  }
-  const timeoutMs = clampInteger(args.timeout_ms, 1000, 0, 120000);
+  const timeoutMs = clampInteger(args.timeout_ms, 500, 0, 120000);
   const shell = shellCommand();
   // `detached` gives the child its own process group so a session can be stopped as a
   // tree; a pipeline such as `sleep 20 | cat` otherwise survives force_terminate.
@@ -94,7 +90,7 @@ export async function startProcessTool(args, extra = {}) {
   const partial = session.partial;
   session.cursor = session.droppedLines + session.lines.length;
   session.lastPartialRead = session.partial || null;
-  const warning = verdict.warned ? `Warning: this command matches the built-in dangerous-command guardrail (${verdict.findings.map(item => item.description).join(', ')}).\n` : '';
+  const warning = verdict.note ? `${verdict.note}\n` : '';
   return text(`${warning}${[headline, output, partial].filter(Boolean).join('\n')}`);
 }
 

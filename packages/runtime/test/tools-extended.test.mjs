@@ -9,26 +9,76 @@ const { invokeTool } = await import('../src/invoke.mjs');
 
 const TINY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 
-test('write_file refuses to replace a non-empty file without an explicit mode', async () => {
+test('write_file replaces by default and appends on request', async () => {
   const target = join(root, 'existing.txt');
   writeFileSync(target, 'important data\n');
-  const blocked = await invokeTool('write_file', { path: target, content: 'gone\n' });
-  assert.equal(isError(blocked), true);
-  assert.match(body(blocked), /already contains/);
-  assert.match(body(blocked), /mode: "rewrite"/);
-  assert.equal(readFileSync(target, 'utf8'), 'important data\n', 'the file must be untouched');
-
-  assert.equal(isError(await invokeTool('write_file', { path: target, content: 'replaced\n', mode: 'rewrite' })), false);
+  assert.equal(isError(await invokeTool('write_file', { path: target, content: 'replaced\n' })), false);
   assert.equal(readFileSync(target, 'utf8'), 'replaced\n');
   assert.equal(isError(await invokeTool('write_file', { path: target, content: 'more\n', mode: 'append' })), false);
   assert.equal(readFileSync(target, 'utf8'), 'replaced\nmore\n');
+  assert.equal(isError(await invokeTool('write_file', { path: target, content: 'x', mode: 'sideways' })), true);
 });
 
-test('write_file still creates new files and refuses binary content', async () => {
+test('write_file still creates new files and points binary data at write_binary', async () => {
   assert.equal(isError(await invokeTool('write_file', { path: join(root, 'fresh.txt'), content: 'new\n' })), false);
   const binary = await invokeTool('write_file', { path: join(root, 'binary.bin'), content: 'a\0b' });
   assert.equal(isError(binary), true);
-  assert.match(body(binary), /NUL bytes/);
+  assert.match(body(binary), /write_binary/);
+});
+
+test('read_binary and write_binary transfer a file byte for byte in chunks', async () => {
+  const source = join(root, 'blob.bin');
+  const payload = Buffer.alloc(700 * 1024);
+  for (let index = 0; index < payload.length; index += 1) payload[index] = index % 251;
+  writeFileSync(source, payload);
+
+  const first = JSON.parse(body(await invokeTool('read_binary', { path: source })));
+  assert.equal(first.size, payload.length);
+  assert.equal(first.encoding, 'base64');
+  assert.equal(first.complete, false);
+  assert.ok(Buffer.from(first.data, 'base64').length <= 512 * 1024);
+
+  const copy = join(root, 'blob-copy.bin');
+  let offset = 0;
+  let complete = false;
+  let appended = false;
+  while (!complete) {
+    const chunk = JSON.parse(body(await invokeTool('read_binary', { path: source, offset_bytes: offset })));
+    assert.equal(isError(await invokeTool('write_binary', { path: copy, data: chunk.data, mode: appended ? 'append' : 'rewrite' })), false);
+    appended = true;
+    complete = chunk.complete;
+    offset = chunk.nextOffsetBytes ?? offset;
+  }
+  assert.equal(readFileSync(copy).equals(payload), true, 'the copy must be identical');
+  const hashSource = body(await invokeTool('hash_file', { path: source }));
+  const hashCopy = body(await invokeTool('hash_file', { path: copy }));
+  assert.equal(hashSource.split(' ')[1], hashCopy.split(' ')[1]);
+});
+
+test('archives can be created and extracted', async () => {
+  const project = join(root, 'archive-project');
+  mkdirSync(join(project, 'nested'), { recursive: true });
+  writeFileSync(join(project, 'a.txt'), 'alpha\n');
+  writeFileSync(join(project, 'nested', 'b.txt'), 'beta\n');
+  const archive = join(root, 'bundle.tar.gz');
+  const created = await invokeTool('create_archive', { paths: [project], destination: archive, format: 'tar.gz' });
+  assert.equal(isError(created), false, body(created));
+  assert.ok(statSync(archive).size > 0);
+  const out = join(root, 'extracted');
+  const extracted = await invokeTool('extract_archive', { archive, destination: out });
+  assert.equal(isError(extracted), false, body(extracted));
+  const nested = join(out, 'archive-project', 'nested', 'b.txt');
+  assert.equal(readFileSync(nested, 'utf8'), 'beta\n');
+});
+
+test('take_screenshot either returns an image or explains what is missing', async () => {
+  const result = await invokeTool('take_screenshot', { directory: root });
+  if (result.isError === true) {
+    assert.match(body(result), /Could not capture the screen|Install one of/);
+  } else {
+    assert.equal(result.content[1].type, 'image');
+    assert.equal(result.content[1].mimeType, 'image/png');
+  }
 });
 
 test('whitespace-tolerant edits keep the file line endings', async () => {
@@ -92,25 +142,24 @@ test('replace_lines replaces a 1-based inclusive range and preserves the rest', 
   assert.equal(isError(await invokeTool('replace_lines', { path: target, start_line: 9, end_line: 10, content: 'x' })), true);
 });
 
-test('replace_in_files previews by default and only writes when asked', async () => {
+test('replace_in_files applies immediately and can preview on request', async () => {
   const project = join(root, 'replace-project');
   mkdirSync(join(project, 'src'), { recursive: true });
   writeFileSync(join(project, 'src', 'a.js'), 'const oldName = 1;\n');
   writeFileSync(join(project, 'src', 'b.js'), 'const other = 2;\n');
   writeFileSync(join(project, 'README.md'), 'oldName appears here too\n');
 
-  const preview = body(await invokeTool('replace_in_files', { path: project, pattern: 'oldName', replacement: 'newName' }));
-  assert.match(preview, /Dry run: 2 file\(s\)/);
-  assert.match(preview, /a\.js/);
-  assert.match(preview, /README\.md/);
-  assert.equal(readFileSync(join(project, 'src', 'a.js'), 'utf8'), 'const oldName = 1;\n', 'preview must not write');
-
-  const applied = body(await invokeTool('replace_in_files', { path: project, pattern: 'oldName', replacement: 'newName', dry_run: false, filePattern: '*.js' }));
+  const applied = body(await invokeTool('replace_in_files', { path: project, pattern: 'oldName', replacement: 'newName', filePattern: '*.js' }));
   assert.match(applied, /Applied: 1 file\(s\)/);
+  assert.match(applied, /a\.js/);
   assert.equal(readFileSync(join(project, 'src', 'a.js'), 'utf8'), 'const newName = 1;\n');
-  assert.equal(readFileSync(join(project, 'README.md'), 'utf8'), 'oldName appears here too\n');
+  assert.equal(readFileSync(join(project, 'README.md'), 'utf8'), 'oldName appears here too\n', 'filePattern still limits the change');
 
-  const regex = body(await invokeTool('replace_in_files', { path: project, pattern: 'const (\\w+)', replacement: 'let $1', regex: true, dry_run: false }));
+  const preview = body(await invokeTool('replace_in_files', { path: project, pattern: 'oldName', replacement: 'x', dry_run: true }));
+  assert.match(preview, /Dry run: 1 file\(s\)/);
+  assert.equal(readFileSync(join(project, 'README.md'), 'utf8'), 'oldName appears here too\n', 'preview must not write');
+
+  const regex = body(await invokeTool('replace_in_files', { path: project, pattern: 'const (\\w+)', replacement: 'let $1', regex: true }));
   assert.match(regex, /Applied: 2 file\(s\)/);
   assert.match(readFileSync(join(project, 'src', 'a.js'), 'utf8'), /^let newName/);
 });

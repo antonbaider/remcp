@@ -27,37 +27,48 @@ npx @remcp/runtime              # MCP server over stdio
 
 ## Tools
 
-30 tools, all implemented in this repository.
+35 tools, all implemented in this repository. Nothing is gated behind an approval step: a tool call
+executes.
 
 | Area | Tools |
 | --- | --- |
-| Reading | `read_file`, `read_multiple_files`, `read_image`, `list_directory` (glob filter), `get_file_info`, `hash_file`, `diff_files` |
-| Writing | `write_file` (explicit `rewrite`/`append`), `edit_block` (exact, whitespace-tolerant fallback, `dry_run`), `replace_lines` (`dry_run`), `replace_in_files` (previews by default) |
-| Organising | `create_directory`, `move_file`, `copy_file`, `move_to_trash` |
+| Read | `read_file`, `read_multiple_files`, `read_image`, `read_binary`, `list_directory` (glob filter), `get_file_info`, `hash_file`, `diff_files` |
+| Write | `write_file`, `write_binary`, `edit_block` (whitespace-tolerant fallback, optional `dry_run`), `replace_lines`, `replace_in_files` |
+| Organise | `create_directory`, `move_file`, `copy_file`, `move_to_trash`, `create_archive`, `extract_archive` |
+| Transfer | `read_binary` / `write_binary` stream any file as base64 chunks in both directions; `create_archive` / `extract_archive` move whole trees |
+| Screen | `take_screenshot` returns the desktop as an image on Linux, macOS, and Windows |
 | Search | `start_search`, `get_more_search_results`, `stop_search`, `list_searches` |
 | Processes | `start_process`, `read_process_output`, `wait_for_process_output`, `interact_with_process`, `force_terminate`, `list_sessions`, `list_processes`, `kill_process` |
 | Introspection | `get_system_info`, `get_runtime_info`, `get_runtime_stats` |
 
-Every one of these is a real capability of the runtime; the hosted ReMCP endpoint adds `list_devices`
-so a model can pick a machine. There is deliberately no `set_config_value`, no `write_pdf`, and no
-URL fetch: a model must not be able to rewrite its own device limits, and document rendering or
-remote fetching would drag Puppeteer-class dependencies and an SSRF surface onto your computer.
+The hosted ReMCP endpoint adds `list_devices` so a model can pick a machine. Everything else the
+agent may need — service management, package installs, git, docker, `sudo` — runs through
+`start_process`, which is an unrestricted shell for the account running the agent.
+
+There is deliberately no `set_config_value` (a model must not rewrite its own device limits; use the
+file) and no `write_pdf`/spreadsheet/DOCX tooling (that is what drags Puppeteer, `sharp`, and
+`exceljs` onto your computer — use `start_process` with whatever tool you already have).
 
 `--print-tools` prints the exact JSON contract (schemas and annotations) the runtime advertises, and
 `src/catalog.mjs` is the single source of truth for it.
 
-## What the tools guarantee
+## Nothing is blocked, nothing is confirmed
 
-- **Nothing is destroyed silently.** `write_file` refuses to replace a file that already has content
-  unless you pass `mode: "rewrite"` or `"append"`; `move_file` and `copy_file` never overwrite an
-  existing path; `move_to_trash` gives deletion an undo; `edit_block` fails unless the number of
-  matched blocks equals `expected_replacements`.
-- **Changes can be previewed.** `edit_block`, `replace_lines`, and `replace_in_files` return a unified
-  diff without writing when asked (and `replace_in_files` previews by default).
-- **Your line endings survive.** A whitespace-tolerant edit rebuilds the file with the ending it
-  already used, so a CRLF file is not rewritten to LF.
-- **Reads are honest.** `read_file`, `hash_file`, and `get_system_info` say what they found; a
-  directory that cannot be read shows up as `[DENIED]` instead of aborting the listing.
+ReMCP is a remote control for computers you own, with the same trust model as SSH: the tool call runs.
+There is no approval prompt, no "are you sure", and no dry-run detour unless you ask for one.
+
+- file writes replace by default (`mode: "append"` to add), moves and copies replace the destination
+  (`overwrite: false` refuses instead), `replace_in_files` applies immediately (`dry_run: true`
+  previews), and `move_to_trash` is there when you want an undo;
+- the catastrophic-command guardrail is **off by default** (`dangerousCommands: "allow"`). Set it to
+  `warn` for a note in the output or `block` to refuse, and put your own strings in
+  `blockedCommands` if you want a device-level deny list;
+- `allowedRoots` is empty, so the device reaches everything the agent's account can reach.
+
+The guarantees that remain are about correctness rather than permission: a bad shell, a closed stdin,
+or a 40 MB line cannot take the runtime down; a crashed runtime is restarted by the agent; terminal
+sessions run in their own process group so `force_terminate` stops the whole pipeline; and a
+misconfigured `runtime.json` stops the device loudly instead of silently dropping your settings.
 
 ## Usage metrics
 
@@ -85,19 +96,19 @@ export REMCP_RUNTIME_DISABLE_TELEMETRY=1  # environment
 
 in `~/.config/remcp/runtime.json`. `--describe` always reports the current state.
 
-## Safety model
+## Runtime properties
 
-- **No network calls.** The runtime opens no sockets. Every byte it emits goes to the paired agent.
-- **Symlink-aware confinement.** `allowedRoots` is enforced against the resolved real path of the
-  deepest existing ancestor, not against the lexical string, so `<allowed>/link -> /etc` cannot be
-  used to read or write outside the allowed directories. `allowedRoots: ["/"]` means the whole
-  filesystem and works as written.
-- **Catastrophic-command guardrail.** Commands whose *command word* formats filesystems, writes raw
-  block devices, repartitions disks, powers off the host, fork-bombs, or recursively destroys a root
-  path are refused before they run (`dangerousCommands: block`, the default). `warn` runs them and
-  reports the match; `allow` disables the built-in list. Read-only commands that merely mention a
-  dangerous word (`grep -n format README.md`) are not affected. User `blockedCommands` entries are
-  always enforced.
+- **No network calls of its own.** The runtime opens no sockets: every byte it emits goes to the
+  paired agent. Shell commands it runs can of course reach the network, exactly as they would from
+  your own terminal.
+- **Optional confinement.** `allowedRoots` is empty by default. When you set it, it is enforced
+  against the resolved real path of the deepest existing ancestor rather than the lexical string, so
+  `<allowed>/link -> /etc` cannot be used to read or write outside the allowed directories.
+  `allowedRoots: ["/"]` means the whole filesystem and works as written.
+- **Optional command guardrail.** `dangerousCommands` defaults to `allow`. `warn` runs a catastrophic
+  command and adds a note to the output; `block` refuses it before it runs. Rules match the *command
+  word* of each shell segment, so `grep -n format README.md` is never affected. User `blockedCommands`
+  entries are always enforced.
 - **A bad configuration is loud.** If `runtime.json` cannot be parsed, the device refuses to start and
   says why, instead of quietly dropping your `allowedRoots` and re-enabling usage metrics.
 - **Secret masking.** `list_processes` masks command arguments that look like tokens, passwords, or
@@ -105,11 +116,13 @@ in `~/.config/remcp/runtime.json`. `--describe` always reports the current state
 - **Bounded everything.** Tool results are capped (`maxOutputBytes`, also clamped below the MCP
   transport limit), writes are capped (`maxWriteBytes`), buffered session output is capped by both
   line count and total characters - a stream with no newlines cannot grow without limit - and reads
-  are paged.
-- **Processes are cleaned up.** Sessions run in their own process group, so `force_terminate` stops a
-  whole pipeline; a runtime crash or a dead agent never leaves orphaned children behind.
+  are paged or chunked.
+- **Crash-resistant sessions.** A bogus shell, a closed stdin, or a dead parent cannot take the
+  runtime down; sessions run in their own process group so `force_terminate` stops a whole pipeline;
+  the agent restarts the runtime if it ever exits, so a device recovers instead of going silently
+  offline.
 - **Protected processes.** `kill_process` refuses pid 1, the runtime itself, and the ReMCP agent that
-  hosts it.
+  hosts it - the three ways a model could otherwise cut its own connection.
 
 These are guardrails, not an operating-system sandbox. A user who can run a shell can reach anything
 their account can reach; use a container, a VM, or a dedicated user account when that matters.
@@ -127,7 +140,7 @@ Optional settings live in `~/.config/remcp/runtime.json` (override the directory
   "name": "workstation",
   "allowedRoots": ["~/projects", "/srv/data"],
   "blockedCommands": ["rm -rf /", "shutdown"],
-  "dangerousCommands": "block",
+  "dangerousCommands": "allow",
   "telemetryEnabled": true,
   "maxOutputBytes": 1048576,
   "maxReadLines": 2000,
@@ -173,14 +186,14 @@ MCP server.
 
 | | Desktop Commander 0.2.50 | ReMCP runtime 0.2.0 |
 | --- | --- | --- |
-| Tools | 26 (including `get_config`, `set_config_value`, `get_usage_stats`, `get_recent_tool_calls`, `write_pdf`, feedback, prompts) | 30, none of which let a model rewrite device limits |
+| Tools | 26, including config mutators and document tooling | 35, including binary transfer, archives, screenshots, and diffs |
 | Runtime dependencies | 34 (Supabase, Puppeteer/md-to-pdf, `sharp`, `exceljs`, Tiptap, ripgrep download) | 1 (`@modelcontextprotocol/sdk`) |
 | Install scripts | `postinstall` posts an install payload that ignores the telemetry setting | none |
 | Telemetry | opt-out, 51 event names, remote feature flags, A/B assignment, third-party processor | opt-out, whitelisted event schema, no endpoint, no flags |
-| Install size | 3.78 MB unpacked, 249 files | ~100 kB unpacked, 18 files |
-| `read_file` | also fetches arbitrary URLs (SSRF surface) | local files only |
-| Command guardrails | 32 substring-blocked commands, advisory; also refuses read-only mentions | command-word matching, so `grep -n format README.md` still works |
-| Confinement | allowlist checked against the lexical path | resolved real path, symlink escape closed |
+| Install size | 3.78 MB unpacked, 249 files | ~110 kB unpacked, 20 files |
+| `read_file` | also fetches arbitrary URLs (SSRF surface) | local files only; `read_binary` transfers any file as base64 |
+| Command guardrails | always on, 32 substring-blocked commands, advisory; also refuses read-only mentions | off by default, opt-in `warn`/`block` with command-word matching |
+| Confinement | always on, checked against the lexical path | opt-in, checked against the resolved real path |
 | Local history | writes tool arguments to disk unredacted | none |
 | Images | file preview UI in a specific client | `read_image` returns the image to any MCP client |
 | Termination | session kill only | whole process group, plus runtime supervision and restart |

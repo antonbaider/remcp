@@ -59,6 +59,40 @@ export const toolDefinitions = [
     handler: fileToolHandlers.read_image,
   },
   {
+    name: 'read_binary',
+    title: 'Read binary chunk',
+    description: 'Read any file as base64, in chunks, for transferring binaries, images, archives, or documents off the computer. Returns size, offset, and nextOffsetBytes; call again with offset_bytes set to nextOffsetBytes until complete is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path of the file to read.' },
+        offset_bytes: { type: 'number', description: 'Byte offset to start at. Default 0.' },
+        length_bytes: { type: 'number', description: 'Chunk size in bytes. Default and maximum 524288 (512 KiB).' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+    handler: fileToolHandlers.read_binary,
+  },
+  {
+    name: 'write_binary',
+    title: 'Write binary chunk',
+    description: 'Write base64 data to a file byte for byte, creating parent directories. Use mode "append" to send a large file as consecutive chunks. Replaces the file by default.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path of the file to write.' },
+        data: { type: 'string', description: 'Base64-encoded content.' },
+        mode: { type: 'string', enum: ['rewrite', 'append'], description: 'rewrite replaces the file, append adds to the end. Default rewrite.' },
+      },
+      required: ['path', 'data'],
+      additionalProperties: false,
+    },
+    annotations: mutating,
+    handler: fileToolHandlers.write_binary,
+  },
+  {
     name: 'hash_file',
     title: 'Hash file',
     description: 'Compute a checksum of a file without reading it into memory. Useful to verify a copy, compare two files, or confirm a download.',
@@ -109,13 +143,13 @@ export const toolDefinitions = [
   {
     name: 'write_file',
     title: 'Write file',
-    description: 'Create a file or change its full content. Parent directories are created automatically. Replacing a file that already has content requires an explicit mode, so an existing file cannot be destroyed by accident: use mode "rewrite" to replace it or "append" to add to the end.',
+    description: 'Create a file or change its full content. Parent directories are created automatically. Replaces the file by default; use mode "append" to add to the end. For binary data pass encoding-free base64 through write_binary instead.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Absolute path of the file to write.' },
         content: { type: 'string', description: 'Full file content, or the text to append.' },
-        mode: { type: 'string', enum: ['rewrite', 'append'], description: 'rewrite replaces the file content, append adds to the end. Required when the file already contains data.' },
+        mode: { type: 'string', enum: ['rewrite', 'append'], description: 'rewrite replaces the file content, append adds to the end. Default rewrite.' },
       },
       required: ['path', 'content'],
       additionalProperties: false,
@@ -165,7 +199,7 @@ export const toolDefinitions = [
   {
     name: 'replace_in_files',
     title: 'Replace in files',
-    description: 'Replace text or a regular expression across the text files under a path and report what changed. Defaults to a dry run that only lists the affected files; pass dry_run false to write the changes.',
+    description: 'Replace text or a regular expression across the text files under a path and report what changed. Applies immediately; pass dry_run true to preview the affected files first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -174,7 +208,7 @@ export const toolDefinitions = [
         replacement: { type: 'string', description: 'Replacement text. In regex mode, $1 and friends refer to capture groups.' },
         filePattern: { type: 'string', description: 'Optional glob limiting which file names are changed, such as "*.ts".' },
         regex: { type: 'boolean', description: 'Treat pattern as a regular expression. Default false (plain text).' },
-        dry_run: { type: 'boolean', description: 'Only report the files that would change. Default true.' },
+        dry_run: { type: 'boolean', description: 'Only report the files that would change. Default false.' },
         maxFiles: { type: 'number', description: 'Stop after this many changed files. Default 100, maximum 500.' },
       },
       required: ['path', 'pattern', 'replacement'],
@@ -233,12 +267,13 @@ export const toolDefinitions = [
   {
     name: 'move_file',
     title: 'Move or rename',
-    description: 'Move or rename a file or directory. The call fails when the destination already exists, so nothing is overwritten.',
+    description: 'Move or rename a file or directory. Replaces an existing destination file by default; pass overwrite false to refuse instead.',
     inputSchema: {
       type: 'object',
       properties: {
         source: { type: 'string', description: 'Absolute path to move.' },
         destination: { type: 'string', description: 'Absolute destination path.' },
+        overwrite: { type: 'boolean', description: 'Replace an existing destination file. Default true.' },
       },
       required: ['source', 'destination'],
       additionalProperties: false,
@@ -249,19 +284,67 @@ export const toolDefinitions = [
   {
     name: 'copy_file',
     title: 'Copy file',
-    description: 'Copy one file to a new path. The call fails when the destination exists unless overwrite is true. Directories are not copied recursively.',
+    description: 'Copy one file to a new path, replacing the destination by default. Pass overwrite false to refuse an existing destination. Directories are not copied recursively.',
     inputSchema: {
       type: 'object',
       properties: {
         source: { type: 'string', description: 'Absolute path of the file to copy.' },
         destination: { type: 'string', description: 'Absolute destination path.' },
-        overwrite: { type: 'boolean', description: 'Replace the destination when it already exists. Default false.' },
+        overwrite: { type: 'boolean', description: 'Replace the destination when it already exists. Default true.' },
       },
       required: ['source', 'destination'],
       additionalProperties: false,
     },
     annotations: additive,
     handler: fileToolHandlers.copy_file,
+  },
+  {
+    name: 'create_archive',
+    title: 'Create archive',
+    description: 'Pack files and directories into a tar, tar.gz, or zip archive on the device, so a whole tree can be transferred or backed up in one call.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: { type: 'array', items: { type: 'string' }, description: 'Absolute paths of the files and directories to include.' },
+        destination: { type: 'string', description: 'Absolute path of the archive to create.' },
+        format: { type: 'string', enum: ['tar', 'tar.gz', 'zip'], description: 'Archive format. Default tar.gz, or zip when the destination ends in .zip.' },
+      },
+      required: ['paths', 'destination'],
+      additionalProperties: false,
+    },
+    annotations: additive,
+    handler: fileToolHandlers.create_archive,
+  },
+  {
+    name: 'extract_archive',
+    title: 'Extract archive',
+    description: 'Extract a tar, tar.gz, tar.bz2, tar.xz, or zip archive on the device into a directory, creating it when needed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        archive: { type: 'string', description: 'Absolute path of the archive to extract.' },
+        destination: { type: 'string', description: 'Absolute directory to extract into. Defaults to the archive directory.' },
+      },
+      required: ['archive'],
+      additionalProperties: false,
+    },
+    annotations: mutating,
+    handler: fileToolHandlers.extract_archive,
+  },
+  {
+    name: 'take_screenshot',
+    title: 'Take screenshot',
+    description: 'Capture the screen of the paired computer and return it as an image, for GUI work, visual checks, and demonstrating what is on screen. Uses grim, gnome-screenshot, spectacle, scrot, ImageMagick import, screencapture, or PowerShell depending on the platform.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        directory: { type: 'string', description: 'Absolute directory to write the temporary PNG into. Defaults to the system temp directory.' },
+        keep: { type: 'boolean', description: 'Keep the PNG on disk instead of deleting it after it is returned. Default false.' },
+      },
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+    handler: fileToolHandlers.take_screenshot,
   },
   {
     name: 'start_search',

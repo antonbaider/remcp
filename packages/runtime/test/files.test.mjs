@@ -95,7 +95,7 @@ test('create_directory is idempotent', async () => {
   assert.equal(statSync(directory).isDirectory(), true);
 });
 
-test('move_file renames and refuses an existing destination', async () => {
+test('move_file renames, replaces by default, and can refuse an existing destination', async () => {
   const source = join(root, 'move-src.txt');
   const destination = join(root, 'moved', 'move-dst.txt');
   writeFileSync(source, 'payload');
@@ -103,13 +103,17 @@ test('move_file renames and refuses an existing destination', async () => {
   assert.equal(readFileSync(destination, 'utf8'), 'payload');
 
   writeFileSync(source, 'again');
-  const blocked = await invokeTool('move_file', { source, destination });
+  assert.equal(isError(await invokeTool('move_file', { source, destination })), false, 'moving over a file replaces it, like mv');
+  assert.equal(readFileSync(destination, 'utf8'), 'again');
+
+  writeFileSync(source, 'third');
+  const blocked = await invokeTool('move_file', { source, destination, overwrite: false });
   assert.equal(isError(blocked), true);
-  assert.match(body(blocked), /Destination already exists/);
+  assert.match(body(blocked), /already exists/);
   assert.equal(existsSync(source), true);
 });
 
-test('copy_file keeps the source and refuses to overwrite unless asked', async () => {
+test('copy_file keeps the source and replaces the destination by default', async () => {
   const source = join(root, 'copy-src.txt');
   const destination = join(root, 'copied', 'copy-dst.txt');
   writeFileSync(source, 'original');
@@ -117,13 +121,13 @@ test('copy_file keeps the source and refuses to overwrite unless asked', async (
   assert.equal(readFileSync(source, 'utf8'), 'original');
   assert.equal(readFileSync(destination, 'utf8'), 'original');
 
-  const blocked = await invokeTool('copy_file', { source, destination });
-  assert.equal(isError(blocked), true);
-  assert.match(body(blocked), /Destination already exists/);
-
   writeFileSync(source, 'updated');
-  assert.equal(isError(await invokeTool('copy_file', { source, destination, overwrite: true })), false);
+  assert.equal(isError(await invokeTool('copy_file', { source, destination })), false);
   assert.equal(readFileSync(destination, 'utf8'), 'updated');
+
+  const refused = await invokeTool('copy_file', { source, destination, overwrite: false });
+  assert.equal(isError(refused), true);
+  assert.match(body(refused), /already exists/);
 });
 
 test('copy_file refuses directories', async () => {

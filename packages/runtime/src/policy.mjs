@@ -1,10 +1,11 @@
 import { runtimeConfig } from './config.mjs';
+import { recordEvent } from './telemetry.mjs';
 import { fail } from './util.mjs';
 
-// Catastrophic host-level commands that a remote model should never run by accident.
-// This is a guardrail, not a sandbox: it protects against obvious mistakes and
-// prompt-injected one-liners, not against a determined adversary who already has shell
-// access through the paired account.
+// Optional hardening rules for catastrophic host-level commands. The default is `allow`:
+// ReMCP is a remote-control tool for computers you own, and the agent needs to be able to
+// do anything you could do at a shell. Deployments that want a safety net can set
+// `dangerousCommands` to `warn` (run and report) or `block` (refuse before running).
 //
 // Rules are matched against the *command word* of each shell segment, so a read-only
 // command that merely mentions a dangerous word (`grep -n format README.md`,
@@ -93,6 +94,11 @@ export function assertAllowedCommand(command) {
   if (verdict.blocked) {
     const detail = verdict.findings.map(item => item.description).join(', ');
     fail(`Command blocked by ReMCP device policy (${detail}). Set REMCP_RUNTIME_BLOCKED_COMMANDS to adjust the device list, or REMCP_RUNTIME_DANGEROUS_COMMANDS=allow to disable the built-in catastrophic-command guardrail.`);
+  }
+  if (verdict.warned) {
+    const detail = verdict.findings.map(item => item.description).join(', ');
+    recordEvent('policy_warning', { reason: verdict.findings[0]?.id || 'builtin', success: true });
+    return { ...verdict, note: `Note: this command matches the optional destructive-command guardrail (${detail}). It was executed.` };
   }
   return verdict;
 }

@@ -32,7 +32,7 @@ runtime.
 | Package | What it is |
 | --- | --- |
 | [`@remcp/remcp`](packages/client) | The device client: pairing, the outbound agent, the background service, and the usage-metrics switch. |
-| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **30 MCP tools** for files, images, search, terminal sessions, and processes, with **one dependency**. |
+| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **35 MCP tools** for files, images, binary transfer, archives, screenshots, search, terminal sessions, and processes, with **one dependency**. |
 
 ## Install
 
@@ -69,13 +69,15 @@ runtime and registers the background service.
 with, [DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) or any other MCP
 server.
 
-**30 tools, six areas:**
+**35 tools, seven areas:**
 
 | Area | Tools |
 | --- | --- |
-| Read | `read_file`, `read_multiple_files`, `read_image`, `list_directory`, `get_file_info`, `hash_file`, `diff_files` |
-| Write | `write_file`, `edit_block`, `replace_lines`, `replace_in_files` |
-| Organise | `create_directory`, `move_file`, `copy_file`, `move_to_trash` |
+| Read | `read_file`, `read_multiple_files`, `read_image`, `read_binary`, `list_directory`, `get_file_info`, `hash_file`, `diff_files` |
+| Write | `write_file`, `write_binary`, `edit_block`, `replace_lines`, `replace_in_files` |
+| Organise | `create_directory`, `move_file`, `copy_file`, `move_to_trash`, `create_archive`, `extract_archive` |
+| Transfer | `read_binary` and `write_binary` move any file in base64 chunks both ways; `create_archive` and `extract_archive` move whole trees |
+| Screen | `take_screenshot` returns the desktop as an image |
 | Search | `start_search`, `get_more_search_results`, `stop_search`, `list_searches` |
 | Processes | `start_process`, `read_process_output`, `wait_for_process_output`, `interact_with_process`, `force_terminate`, `list_sessions`, `list_processes`, `kill_process` |
 | Introspect | `get_system_info`, `get_runtime_info`, `get_runtime_stats` |
@@ -90,22 +92,30 @@ than one:
 | `get_config` / `set_config_value` | A model must not be able to rewrite its own device limits. Configuration is yours, on disk. `get_runtime_info` shows the effective policy read-only. |
 | URL fetching in `read_file` | It is a server-side request forgery surface. The runtime reads your computer, not the internet. |
 
-**What ReMCP adds beyond the usual set:** image reads that any MCP client can display,
-`wait_for_process_output` instead of polling, line-range replacement, project-wide replace that
-previews before it writes, unified diffs, checksums, trash instead of deletion, host resource
-reporting — plus guardrails that the alternatives do not have.
+**What ReMCP adds beyond the usual set:** image reads and screenshots that any MCP client can
+display, binary transfer in both directions, archive create/extract, `wait_for_process_output` instead
+of polling, line-range replacement, project-wide replace, unified diffs, checksums, trash instead of
+deletion, and host resource reporting.
 
-## Safety, by design
+**Nothing is gated.** There is no approval prompt, no "are you sure", and no mandatory dry run: a tool
+call executes with the full rights of the account running the agent — the same trust model as SSH.
+Writes replace by default, moves and copies replace the destination, and the catastrophic-command
+guardrail is off unless an operator opts into `warn` or `block`. Files are never written to a local
+history log, so nothing about your work is recorded on the machine.
 
-- **Nothing is destroyed silently.** Replacing a non-empty file needs an explicit `mode`; moves and
-  copies never overwrite; deletion goes to the trash; every broad edit can be previewed as a diff.
-- **Confinement is real.** `allowedRoots` is checked against the resolved real path, so a symlink
-  cannot walk out of an allowed directory.
-- **The obvious catastrophes are refused.** Formatting a disk, writing a raw device, repartitioning,
-  powering off the host, or recursively destroying a root path is blocked *before* it runs — while
-  `grep -n format README.md` still works, because the guardrail reads the command word, not the text.
-- **A bad configuration is loud.** An unparseable `runtime.json` stops the device with an explanation
-  instead of quietly dropping your limits.
+## Unrestricted by design
+
+- **No approval contour.** Nothing in the client, the runtime, or the relay asks for confirmation, and
+  no policy stands between the agent and the machine. What the account can do, the agent can do:
+  services, packages, databases, containers, `sudo`, git — all through `start_process`.
+- **Full transfer in both directions.** `read_binary`/`write_binary` move any file, `create_archive`
+  and `extract_archive` move whole trees, and `take_screenshot` shows the desktop.
+- **Optional hardening, not defaults.** `allowedRoots` confines the device when an operator sets it,
+  `dangerousCommands` can warn or refuse catastrophic commands, and `blockedCommands` adds a deny
+  list. All three are off unless configured, and the runtime refuses to start — loudly — if its
+  `runtime.json` cannot be parsed, so a limit can never be dropped silently.
+- **Crash-resistant.** A bad shell, a closed stdin, or a 40 MB line cannot take the runtime down; the
+  agent restarts it if it exits, so a device recovers instead of going quietly offline.
 - **Outbound-only.** Per-device revocable credential, hashed server-side, stored locally with
   restrictive permissions. Runtime metadata from a custom server requires an explicit
   `--trust-runtime` decision.
