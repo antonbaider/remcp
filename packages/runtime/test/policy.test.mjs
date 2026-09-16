@@ -42,3 +42,19 @@ test('ordinary commands are not blocked by the guardrail', async () => {
   assert.equal(isError(result), false);
   assert.match(body(result), /safe-guardrail-check/);
 });
+
+test('read-only commands that merely mention a dangerous word are allowed', async () => {
+  // The guardrail judges the command word of each shell segment, not every word in the line.
+  for (const command of ['grep -n format /etc/hostname', 'grep -rn poweroff /etc/hostname']) {
+    const result = await invokeTool('start_process', { command, timeout_ms: 2000 });
+    assert.equal(isError(result), false, `expected ${command} to be allowed: ${body(result)}`);
+  }
+});
+
+test('the guardrail still catches dangerous commands behind wrappers and separators', async () => {
+  for (const command of ['sudo shutdown -h now', 'echo ok && mkfs.ext4 /dev/sda1', 'true; reboot', 'timeout 5 mkfs /dev/sdb']) {
+    const result = await invokeTool('start_process', { command, timeout_ms: 50 });
+    assert.equal(isError(result), true, `expected ${command} to be blocked`);
+    assert.match(body(result), /blocked by ReMCP device policy/);
+  }
+});

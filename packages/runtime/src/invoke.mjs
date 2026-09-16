@@ -12,15 +12,18 @@ function errorKind(error) {
   return typeof code === 'string' && code ? code.slice(0, 32) : 'runtime_error';
 }
 
-export async function invokeTool(name, args = {}) {
+export async function invokeTool(name, args = {}, extra = {}) {
   const started = performance.now();
   const definition = toolHandlers.get(name);
   if (!definition) {
     recordEvent('tool_call', { tool: 'unknown_tool', success: false, errorKind: 'unknown_tool', durationMs: 0 });
     return text(`Unknown tool: ${name}`, true);
   }
+  if (extra?.signal?.aborted) {
+    return text(`Tool ${name} was cancelled by the client before it started.`, true);
+  }
   try {
-    const result = await definition.handler(args || {});
+    const result = await definition.handler(args || {}, extra || {});
     recordEvent('tool_call', { tool: definition.name, durationMs: performance.now() - started, success: result?.isError !== true });
     return result;
   } catch (error) {

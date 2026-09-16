@@ -44,14 +44,46 @@ export const toolDefinitions = [
     handler: fileToolHandlers.read_multiple_files,
   },
   {
+    name: 'read_image',
+    title: 'Read image',
+    description: 'Return an image file (PNG, JPEG, GIF, WebP, BMP, AVIF, or SVG) as a viewable image, so screenshots and diagrams can be inspected. Fails above the inline size limit.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path of the image file.' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+    handler: fileToolHandlers.read_image,
+  },
+  {
+    name: 'hash_file',
+    title: 'Hash file',
+    description: 'Compute a checksum of a file without reading it into memory. Useful to verify a copy, compare two files, or confirm a download.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path of the file to hash.' },
+        algorithm: { type: 'string', enum: ['sha256', 'sha1', 'md5'], description: 'Hash algorithm. Default sha256.' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+    handler: fileToolHandlers.hash_file,
+  },
+  {
     name: 'list_directory',
     title: 'List directory',
-    description: 'List the files and directories at a path. Entries are prefixed with [DIR], [FILE], or [LINK]; depth controls how many directory levels are included.',
+    description: 'List the files and directories at a path. Entries are prefixed with [DIR], [FILE], [LINK], or [DENIED] when a subdirectory cannot be read. depth controls how many directory levels are included and pattern filters file names by glob.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Absolute path of the directory to list.' },
         depth: { type: 'number', description: 'Directory levels to list, from 1 to 5. Default 1.' },
+        pattern: { type: 'string', description: 'Optional glob that filters file names, such as "*.log". Directories are always listed.' },
       },
       required: ['path'],
       additionalProperties: false,
@@ -77,13 +109,13 @@ export const toolDefinitions = [
   {
     name: 'write_file',
     title: 'Write file',
-    description: 'Create a file or replace its full content. Parent directories are created automatically. Use mode "append" to add to the end instead of replacing the file.',
+    description: 'Create a file or change its full content. Parent directories are created automatically. Replacing a file that already has content requires an explicit mode, so an existing file cannot be destroyed by accident: use mode "rewrite" to replace it or "append" to add to the end.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Absolute path of the file to write.' },
         content: { type: 'string', description: 'Full file content, or the text to append.' },
-        mode: { type: 'string', enum: ['rewrite', 'append'], description: 'rewrite replaces the file content, append adds to the end. Default rewrite.' },
+        mode: { type: 'string', enum: ['rewrite', 'append'], description: 'rewrite replaces the file content, append adds to the end. Required when the file already contains data.' },
       },
       required: ['path', 'content'],
       additionalProperties: false,
@@ -94,7 +126,7 @@ export const toolDefinitions = [
   {
     name: 'edit_block',
     title: 'Edit file',
-    description: 'Replace an exact block of text in a file. Provide enough surrounding context to make old_string unique; the call fails unless the number of matches equals expected_replacements. When the exact text is not found, a whitespace-tolerant match is attempted and reported.',
+    description: 'Replace an exact block of text in a file. Provide enough surrounding context to make old_string unique; the call fails unless the number of matches equals expected_replacements. When the exact text is not found, a whitespace-tolerant match is attempted and reported. Pass dry_run to preview the change as a diff without writing.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -103,12 +135,85 @@ export const toolDefinitions = [
         new_string: { type: 'string', description: 'Replacement text.' },
         expected_replacements: { type: 'number', description: 'Number of matches required for the edit to apply. Default 1.' },
         allow_fuzzy: { type: 'boolean', description: 'Allow a whitespace-tolerant fallback when the exact text is not found. Default true.' },
+        dry_run: { type: 'boolean', description: 'Return the diff without changing the file. Default false.' },
       },
       required: ['file_path', 'old_string', 'new_string'],
       additionalProperties: false,
     },
     annotations: mutating,
     handler: fileToolHandlers.edit_block,
+  },
+  {
+    name: 'replace_lines',
+    title: 'Replace lines',
+    description: 'Replace an inclusive 1-based line range with new text. The rest of the file, including its line endings, is preserved. Pass dry_run to preview the change as a diff without writing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path of the file to edit.' },
+        start_line: { type: 'number', description: 'First line to replace, 1-based and inclusive.' },
+        end_line: { type: 'number', description: 'Last line to replace, 1-based and inclusive.' },
+        content: { type: 'string', description: 'Replacement text; an empty string deletes the range.' },
+        dry_run: { type: 'boolean', description: 'Return the diff without changing the file. Default false.' },
+      },
+      required: ['path', 'start_line', 'end_line', 'content'],
+      additionalProperties: false,
+    },
+    annotations: mutating,
+    handler: fileToolHandlers.replace_lines,
+  },
+  {
+    name: 'replace_in_files',
+    title: 'Replace in files',
+    description: 'Replace text or a regular expression across the text files under a path and report what changed. Defaults to a dry run that only lists the affected files; pass dry_run false to write the changes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path of a file or directory to search.' },
+        pattern: { type: 'string', description: 'Text or regular expression to find.' },
+        replacement: { type: 'string', description: 'Replacement text. In regex mode, $1 and friends refer to capture groups.' },
+        filePattern: { type: 'string', description: 'Optional glob limiting which file names are changed, such as "*.ts".' },
+        regex: { type: 'boolean', description: 'Treat pattern as a regular expression. Default false (plain text).' },
+        dry_run: { type: 'boolean', description: 'Only report the files that would change. Default true.' },
+        maxFiles: { type: 'number', description: 'Stop after this many changed files. Default 100, maximum 500.' },
+      },
+      required: ['path', 'pattern', 'replacement'],
+      additionalProperties: false,
+    },
+    annotations: mutating,
+    handler: fileToolHandlers.replace_in_files,
+  },
+  {
+    name: 'diff_files',
+    title: 'Diff files',
+    description: 'Show a unified diff between two local text files, with line counts. Useful to check what changed before reporting or reverting it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        left: { type: 'string', description: 'Absolute path of the original file.' },
+        right: { type: 'string', description: 'Absolute path of the file to compare against it.' },
+        context_lines: { type: 'number', description: 'Lines of context around each change. Default 3, maximum 20.' },
+      },
+      required: ['left', 'right'],
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+    handler: fileToolHandlers.diff_files,
+  },
+  {
+    name: 'move_to_trash',
+    title: 'Move to trash',
+    description: 'Move a file or directory to the system trash instead of deleting it, so the change can be undone. When the trash is outside the device allowed roots, a .remcp-trash folder beside the file is used instead.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: 'Absolute path to move to the trash.' },
+      },
+      required: ['source'],
+      additionalProperties: false,
+    },
+    annotations: additive,
+    handler: fileToolHandlers.move_to_trash,
   },
   {
     name: 'create_directory',
@@ -312,6 +417,14 @@ export const toolDefinitions = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: readOnly,
     handler: terminalToolHandlers.list_sessions,
+  },
+  {
+    name: 'get_system_info',
+    title: 'Get system info',
+    description: 'Report host details for the paired computer: operating system and kernel, CPU model and load, memory pressure, free disk space on the working volume, uptime, and the default shell.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: readOnly,
+    handler: systemToolHandlers.get_system_info,
   },
   {
     name: 'list_processes',

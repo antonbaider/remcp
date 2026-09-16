@@ -1,6 +1,8 @@
+import os from 'node:os';
 import process from 'node:process';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { runtimeConfig } from '../config.mjs';
 import { clampInteger, fail, requireInteger, text } from '../util.mjs';
 
 const run = promisify(execFile);
@@ -12,7 +14,61 @@ export function redactSecrets(command) {
   return String(command).replace(SECRET_FLAG, '$1$2***');
 }
 
-export async function listProcessesTool(args = {}) {
+async function diskUsage() {
+  if (process.platform === 'win32') return null;
+  try {
+    const { stdout } = await run('df', ['-kP', process.cwd()], { maxBuffer: 1024 * 1024 });
+    const line = stdout.trim().split('\n')[1];
+    if (!line) return null;
+    const parts = line.split(/\s+/);
+    const sizeKb = Number(parts[1]);
+    const usedKb = Number(parts[2]);
+    const availableKb = Number(parts[3]);
+    if (![sizeKb, usedKb, availableKb].every(Number.isFinite)) return null;
+    return {
+      mount: parts[5] || null,
+      totalBytes: sizeKb * 1024,
+      usedBytes: usedKb * 1024,
+      availableBytes: availableKb * 1024,
+      usedRatio: sizeKb ? Number((usedKb / sizeKb).toFixed(3)) : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function getSystemInfoTool() {
+  const cpus = os.cpus();
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const load = os.loadavg();
+  return text(JSON.stringify({
+    hostname: os.hostname(),
+    platform: process.platform,
+    release: os.release(),
+    arch: process.arch,
+    uptimeSeconds: Math.round(os.uptime()),
+    node: process.versions.node,
+    shell: runtimeConfig.defaultShell || (process.platform === 'win32' ? process.env.ComSpec : process.env.SHELL) || null,
+    cpu: {
+      model: cpus[0]?.model?.trim() || 'unknown',
+      count: cpus.length,
+      loadAverage: process.platform === 'win32' ? null : load.map(value => Number(value.toFixed(2))),
+      loadPerCore: process.platform === 'win32' || !cpus.length ? null : Number((load[0] / cpus.length).toFixed(2)),
+    },
+    memory: {
+      totalBytes: totalMem,
+      freeBytes: freeMem,
+      usedRatio: totalMem ? Number(((totalMem - freeMem) / totalMem).toFixed(3)) : 0,
+    },
+    disk: await diskUsage(),
+    home: os.homedir(),
+    tempDir: os.tmpdir(),
+    runtimeName: runtimeConfig.name,
+  }, null, 2));
+}
+
+export async function listProcessesTool(args) {
   const limit = clampInteger(args.limit, 100, 1, 1000);
   const rows = [];
   const parsed = [];
@@ -59,6 +115,7 @@ export async function killProcessTool(args) {
 }
 
 export const systemToolHandlers = {
+  get_system_info: getSystemInfoTool,
   list_processes: listProcessesTool,
   kill_process: killProcessTool,
 };

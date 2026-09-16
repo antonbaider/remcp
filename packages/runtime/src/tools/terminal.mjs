@@ -7,6 +7,8 @@ import {
   appendProcessOutput,
   createProcessSession,
   getProcessSession,
+  hasNewOutput,
+  killSessionTree,
   listProcessSessions,
   markProcessExited,
   readNewOutput,
@@ -33,7 +35,15 @@ function describeSession(session) {
   return { pid: session.pid, status, runtimeMs: (session.finishedAt || Date.now()) - session.startedAt, lines: totalLines(session) };
 }
 
-export async function startProcessTool(args) {
+function abortError() {
+  return new Error('Tool call was cancelled by the client');
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortError();
+}
+
+export async function startProcessTool(args, extra = {}) {
   const command = requireString(args.command, 'command');
   const verdict = assertAllowedCommand(command);
   if (verdict.warned) {
@@ -42,22 +52,43 @@ export async function startProcessTool(args) {
   }
   const timeoutMs = clampInteger(args.timeout_ms, 1000, 0, 120000);
   const shell = shellCommand();
+  // `detached` gives the child its own process group so a session can be stopped as a
+  // tree; a pipeline such as `sleep 20 | cat` otherwise survives force_terminate.
   const child = spawn(shell, shellArgs(command), {
     cwd: process.cwd(),
     env: process.env,
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
+    detached: process.platform !== 'win32',
   });
-  if (!child.pid) fail('Could not start the command');
+  // The error listener has to exist before anything can throw: a bogus REMCP_RUNTIME_SHELL
+  // used to surface as an unhandled ENOENT that took the whole runtime down.
+  child.on('error', error => {
+    const session = child.remcpSession;
+    if (session) {
+      appendProcessOutput(session, `${error.message}\n`);
+      markProcessExited(session, null, null);
+    }
+  });
+  if (!child.pid) fail(`Could not start the command with ${shell}`);
   const session = createProcessSession({ pid: child.pid, child, command, shell });
+  child.remcpSession = session;
   recordEvent('session_started', { sessionKind: 'process', success: true });
+
+  if (child.stdin) {
+    child.stdin.on('error', () => {});
+    child.stdin.on('close', () => { session.stdinClosed = true; });
+  }
   child.stdout?.on('data', chunk => appendProcessOutput(session, chunk.toString('utf8')));
   child.stderr?.on('data', chunk => appendProcessOutput(session, chunk.toString('utf8')));
-  child.on('error', error => { appendProcessOutput(session, `${error.message}\n`); markProcessExited(session, null, null); });
+  // `exit` carries the real status; `close` only follows once every stdio stream is done,
+  // which for a backgrounded child can be seconds later.
+  child.on('exit', (code, signal) => markProcessExited(session, code, signal));
   child.on('close', (code, signal) => markProcessExited(session, code, signal));
+
   await waitForProcessExit(session, timeoutMs);
   const headline = session.exited
-    ? `Process ${session.pid} finished${session.exitCode === null ? '' : ` with code ${session.exitCode}`}.`
+    ? `Process ${session.pid} finished${session.exitCode === null ? '' : ` with code ${session.exitCode}`}${session.signal ? ` (${session.signal})` : ''}.`
     : `Process ${session.pid} is running.`;
   const output = session.lines.slice(-200).join('\n');
   const partial = session.partial;
@@ -67,7 +98,7 @@ export async function startProcessTool(args) {
   return text(`${warning}${[headline, output, partial].filter(Boolean).join('\n')}`);
 }
 
-export async function readProcessOutputTool(args) {
+export async function readProcessOutputTool(args, extra = {}) {
   const pid = requireInteger(args.pid, 'pid');
   const session = getProcessSession(pid);
   if (!session) fail(`No ReMCP session with pid ${pid}`);
@@ -76,16 +107,21 @@ export async function readProcessOutputTool(args) {
   let slice;
   let range;
   if (hasOffset) {
-    // An explicit offset always means a line range: zero-based from the first line the
-    // session produced, or a negative value for the last N lines. Omit the argument to get
-    // only the output produced since the previous read. Lines evicted by the buffer cap are
-    // gone, so the earliest readable line is droppedLines.
-    const requested = Number(args.offset);
-    const page = readOutputRange(session, requested, clampInteger(args.length, 200, 1, 5000));
+    // An explicit offset is a peek at a line range: it does not consume the new-output
+    // cursor, so a caller can look at the tail and still read everything afterwards.
+    // Zero-based from the first line the session produced; negative reads the last N.
+    const page = readOutputRange(session, Number(args.offset), clampInteger(args.length, 200, 1, 5000));
     slice = page.slice;
     range = `${page.start}-${page.end} of ${page.total}`;
   } else {
-    if (timeoutMs) await waitForProcessActivity(session, timeoutMs);
+    // Never sleep over output that is already buffered.
+    if (timeoutMs && !hasNewOutput(session)) {
+      const deadline = Date.now() + timeoutMs;
+      while (!hasNewOutput(session) && !session.exited && Date.now() < deadline) {
+        throwIfAborted(extra.signal);
+        await waitForProcessActivity(session, Math.min(200, Math.max(20, deadline - Date.now())));
+      }
+    }
     slice = readNewOutput(session);
     const first = Math.max(1, session.cursor - slice.length + 1);
     range = slice.length ? `${first}-${session.cursor} of ${totalLines(session)}` : `no new output (${totalLines(session)} lines total)`;
@@ -105,31 +141,37 @@ function waiterMatches(lines, matcher) {
   return lines.some(line => matcher.regex.test(line));
 }
 
-export async function waitForProcessOutputTool(args) {
+export async function waitForProcessOutputTool(args, extra = {}) {
   const pid = requireInteger(args.pid, 'pid');
   const session = getProcessSession(pid);
   if (!session) fail(`No ReMCP session with pid ${pid}`);
   const pattern = requireString(args.pattern, 'pattern');
   const matcher = compileWaiter(pattern);
   const timeoutMs = clampInteger(args.timeout_ms, 10000, 0, 120000);
-  const startLine = Math.max(0, session.cursor - session.droppedLines);
+  const cursorStart = Math.max(0, session.cursor - session.droppedLines);
+  // Output that was already buffered before the call still counts: a pattern printed
+  // earlier should answer immediately instead of spinning for the whole timeout.
+  let slice = session.lines.slice(cursorStart);
+  const bufferedMatch = waiterMatches(slice, matcher);
   const deadline = Date.now() + timeoutMs;
-  let slice = session.lines.slice(startLine);
-  while (!waiterMatches(slice, matcher) && Date.now() < deadline && !session.exited) {
-    await waitForProcessActivity(session, Math.min(250, Math.max(20, deadline - Date.now())));
-    slice = session.lines.slice(startLine);
+  if (!bufferedMatch) {
+    while (!waiterMatches(session.lines.slice(cursorStart), matcher) && Date.now() < deadline && !session.exited) {
+      throwIfAborted(extra.signal);
+      await waitForProcessActivity(session, Math.min(250, Math.max(20, deadline - Date.now())));
+    }
+    slice = session.lines.slice(cursorStart);
   }
   const matched = waiterMatches(slice, matcher);
   session.cursor = session.droppedLines + session.lines.length;
   session.lastPartialRead = session.partial || null;
   const status = describeSession(session);
   const headline = matched
-    ? `pid ${pid} ${status.status} · pattern matched`
+    ? `pid ${pid} ${status.status} · pattern matched${bufferedMatch ? ' (already buffered)' : ''}`
     : `pid ${pid} ${status.status} · pattern not matched within ${timeoutMs}ms`;
   return text([headline, slice.join('\n')].filter(Boolean).join('\n'));
 }
 
-export async function interactWithProcessTool(args) {
+export async function interactWithProcessTool(args, extra = {}) {
   const pid = requireInteger(args.pid, 'pid');
   const session = getProcessSession(pid);
   if (!session) fail(`No ReMCP session with pid ${pid}`);
@@ -138,8 +180,23 @@ export async function interactWithProcessTool(args) {
   const timeoutMs = clampInteger(args.timeout_ms, 1000, 0, 120000);
   session.cursor = session.droppedLines + session.lines.length;
   session.lastPartialRead = null;
-  session.child.stdin?.write(`${input}\n`);
-  await waitForProcessActivity(session, timeoutMs);
+  throwIfAborted(extra.signal);
+  const stdin = session.child?.stdin;
+  if (!stdin || stdin.destroyed || session.stdinClosed) {
+    fail(`Process ${pid} no longer accepts input`);
+  }
+  try {
+    stdin.write(`${input}\n`);
+  } catch (error) {
+    // A closed read end used to raise an async EPIPE that killed the runtime.
+    session.stdinClosed = true;
+    fail(`Could not write to process ${pid}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (!hasNewOutput(session) && !session.exited && Date.now() < deadline) {
+    throwIfAborted(extra.signal);
+    await waitForProcessActivity(session, Math.min(200, Math.max(20, deadline - Date.now())));
+  }
   const slice = readNewOutput(session);
   const status = describeSession(session);
   return text([`pid ${pid} ${status.status}`, slice.join('\n')].filter(Boolean).join('\n'));
@@ -150,15 +207,15 @@ export async function forceTerminateTool(args) {
   const session = getProcessSession(pid);
   if (!session) fail(`No ReMCP session with pid ${pid}`);
   if (session.exited) return text(`Process ${pid} already exited.`);
-  try { session.child.kill('SIGTERM'); } catch {}
+  killSessionTree(session, 'SIGTERM');
   const deadline = Date.now() + 2000;
   while (!session.exited && Date.now() < deadline) await waitForProcessActivity(session, 100);
   if (!session.exited) {
-    try { session.child.kill('SIGKILL'); } catch {}
+    killSessionTree(session, 'SIGKILL');
     await waitForProcessActivity(session, 1000);
   }
   const status = describeSession(session);
-  return text(`Terminated session ${pid}. Status: ${status.status}.`);
+  return text(`Terminated session ${pid}${status.status.startsWith('exited') ? '' : ' (still running)'}. Status: ${status.status}.`);
 }
 
 export async function listSessionsTool() {

@@ -92,7 +92,9 @@ function runRipgrep(session, { path: target, pattern, searchType, filePattern, i
   for (const glob of splitGlobs(filePattern)) args.push('-g', glob);
   if (searchType === 'files') {
     args.push('--files');
-    args.push('-g', fileNameGlob(pattern));
+    // Globs are case-sensitive even under --ignore-case, so a case-insensitive file
+    // search needs --iglob.
+    args.push(ignoreCase ? '--iglob' : '-g', fileNameGlob(pattern));
     args.push('--', target);
   } else {
     args.push('--line-number', '--with-filename');

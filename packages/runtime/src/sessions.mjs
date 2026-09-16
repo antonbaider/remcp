@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { runtimeConfig } from './config.mjs';
 
 const processSessions = new Map();
@@ -5,12 +6,28 @@ const searchSessions = new Map();
 let searchCounter = 0;
 
 const EXITED_SESSION_TTL_MS = 30 * 60 * 1000;
+// A stream with no newlines (a minified bundle, `yes`, a binary accidentally catted)
+// used to grow `partial` without bound: 40 MB measured, then a RangeError inside the
+// data handler killed the runtime. Split long partials and cap the retained characters.
+const MAX_PARTIAL_BYTES = 64 * 1024;
+const MAX_BUFFERED_CHARS = 8 * 1024 * 1024;
 
 function trimBuffer(session) {
   const overflow = session.lines.length - runtimeConfig.maxBufferedLines;
-  if (overflow <= 0) return;
-  session.lines.splice(0, overflow);
-  session.droppedLines += overflow;
+  if (overflow > 0) {
+    const removed = session.lines.splice(0, overflow);
+    for (const line of removed) session.bufferedChars -= line.length;
+    session.droppedLines += overflow;
+  }
+  while (session.bufferedChars > MAX_BUFFERED_CHARS && session.lines.length > 0) {
+    session.bufferedChars -= session.lines.shift().length;
+    session.droppedLines += 1;
+  }
+}
+
+function pushLine(session, line) {
+  session.lines.push(line);
+  session.bufferedChars += line.length;
 }
 
 function notify(session) {
@@ -49,6 +66,7 @@ export function createProcessSession({ pid, child, command, shell }) {
     partial: '',
     lastPartialRead: null,
     droppedLines: 0,
+    bufferedChars: 0,
     cursor: 0,
     exitCode: null,
     signal: null,
@@ -60,25 +78,35 @@ export function createProcessSession({ pid, child, command, shell }) {
   return session;
 }
 
+function drainPartial(session) {  while (session.partial.length > MAX_PARTIAL_BYTES) {
+    pushLine(session, session.partial.slice(0, MAX_PARTIAL_BYTES));
+    session.partial = session.partial.slice(MAX_PARTIAL_BYTES);
+    session.partialSplit = true;
+  }
+}
+
 export function appendProcessOutput(session, chunk) {
   const combined = session.partial + chunk;
   const parts = combined.split('\n');
   session.partial = parts.pop() ?? '';
-  for (const line of parts) session.lines.push(line);
+  for (const line of parts) pushLine(session, line);
+  drainPartial(session);
   trimBuffer(session);
   session.lastActivityAt = Date.now();
   notify(session);
 }
 
 export function markProcessExited(session, code, signal) {
+  if (session.exited) return;
   if (session.partial) {
-    session.lines.push(session.partial);
+    pushLine(session, session.partial);
     session.partial = '';
   }
   session.exited = true;
   session.exitCode = code;
   session.signal = signal;
   session.finishedAt = Date.now();
+  trimBuffer(session);
   notify(session);
 }
 
@@ -100,7 +128,8 @@ export function totalLines(session) {
 }
 
 export function readNewOutput(session) {
-  const complete = session.lines.slice(Math.max(0, session.cursor - session.droppedLines));
+  const from = Math.max(0, session.cursor - session.droppedLines);
+  const complete = session.lines.slice(from);
   session.cursor = session.droppedLines + session.lines.length;
   const parts = [...complete];
   if (session.partial && session.partial !== session.lastPartialRead) parts.push(session.partial);
@@ -108,6 +137,13 @@ export function readNewOutput(session) {
   return parts;
 }
 
+export function hasNewOutput(session) {
+  if (session.cursor < session.droppedLines + session.lines.length) return true;
+  return Boolean(session.partial && session.partial !== session.lastPartialRead);
+}
+
+// A ranged read is a peek: it must not consume the new-output cursor, or reading a tail
+// makes the lines before it undeliverable.
 export function readOutputRange(session, offset, length) {
   const snapshot = session.lines.concat(session.partial ? [session.partial] : []);
   const total = session.droppedLines + snapshot.length;
@@ -121,7 +157,6 @@ export function readOutputRange(session, offset, length) {
     start = Math.max(0, Math.min(requested - session.droppedLines, snapshot.length));
     end = Math.min(snapshot.length, start + Math.max(1, Math.trunc(length || 200)));
   }
-  session.cursor = session.droppedLines + session.lines.length;
   return { slice: snapshot.slice(start, end), start: session.droppedLines + start + 1, end: session.droppedLines + end, total };
 }
 
@@ -204,12 +239,25 @@ export function startSessionSweeper(intervalMs = 5 * 60 * 1000) {
   sweepTimer.unref?.();
 }
 
+// The child is spawned detached on POSIX so it owns a process group; killing the group
+// takes the whole tree with it (`sleep 20 | cat` used to survive `force_terminate`).
+export function killSessionTree(session, signal = 'SIGKILL') {
+  const child = session.child;
+  if (!child || session.exited) return false;
+  try {
+    if (process.platform === 'win32') return child.kill(signal);
+    if (child.pid) process.kill(-child.pid, signal);
+    else return child.kill(signal);
+    return true;
+  } catch {
+    try { return child.kill(signal); } catch { return false; }
+  }
+}
+
 export function shutdownSessions() {
   if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; }
   for (const session of processSessions.values()) {
-    if (!session.exited) {
-      try { session.child.kill('SIGKILL'); } catch {}
-    }
+    if (!session.exited) killSessionTree(session, 'SIGKILL');
   }
   for (const session of searchSessions.values()) {
     if (session.status === 'running' && session.cancel) {

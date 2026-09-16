@@ -3,7 +3,7 @@ import process from 'node:process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { toolDefinitions } from './catalog.mjs';
-import { describeConfig, runtimeConfigDir } from './config.mjs';
+import { describeConfig, configurationError, runtimeConfigDir } from './config.mjs';
 import { invokeTool } from './invoke.mjs';
 import { shutdownSessions, startSessionSweeper } from './sessions.mjs';
 import { flush, setTelemetrySink, shutdownTelemetry, telemetryEnabled } from './telemetry.mjs';
@@ -49,6 +49,15 @@ if (args.includes('--describe')) {
   process.exit(0);
 }
 
+// A configuration file the user cannot read must not be ignored: that is how allowedRoots
+// and an opt-out quietly disappear. Metadata commands above still work, so an operator can
+// inspect the device; the server itself refuses to start.
+const configProblem = configurationError();
+if (configProblem) {
+  console.error(`ReMCP runtime refuses to start: ${configProblem}`);
+  process.exit(2);
+}
+
 function announceTelemetryOnce() {
   if (!telemetryEnabled()) return;
   const marker = path.join(runtimeConfigDir, '.telemetry-notice');
@@ -81,8 +90,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: toolDefinitions.map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations })),
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async request => {
-  return invokeTool(request.params.name, request.params.arguments);
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+  return invokeTool(request.params.name, request.params.arguments, extra);
 });
 
 // Telemetry leaves this process only as an MCP notification to the agent that started
@@ -91,17 +100,41 @@ setTelemetrySink(async payload => {
   await server.notification({ method: 'notifications/remcp/telemetry', params: payload });
 });
 
+const SHUTDOWN_BUDGET_MS = 1500;
+let shutdownStarted = false;
+
 async function shutdown(code = 0) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  const deadline = Date.now() + SHUTDOWN_BUDGET_MS;
   shutdownSessions();
-  try { await flush(); } catch {}
-  shutdownTelemetry();
+  // The SDK gives a closing server about two seconds before it kills the process, so the
+  // telemetry flush is bounded and awaited instead of fire-and-forget: an unawaited
+  // notification() after close is an unhandled rejection.
+  try {
+    await Promise.race([flush(), new Promise(resolve => setTimeout(resolve, Math.max(0, deadline - Date.now())))]);
+  } catch {}
+  await shutdownTelemetry();
   try { await server.close(); } catch {}
   process.exit(code);
 }
 
+// A dead agent leaves a broken stdout pipe. Without this the process died on an
+// uncaught EPIPE with a stack trace and left its terminal children behind.
+process.stdout.on('error', error => {
+  if (error?.code === 'EPIPE' || error?.code === 'ERR_STREAM_DESTROYED') void shutdown(0);
+  else console.error(`ReMCP runtime stdout error: ${error instanceof Error ? error.message : String(error)}`);
+});
+process.on('uncaughtException', error => {
+  console.error(`ReMCP runtime uncaught exception: ${error instanceof Error ? error.stack || error.message : String(error)}`);
+  void shutdown(1);
+});
+process.on('unhandledRejection', reason => {
+  console.error(`ReMCP runtime unhandled rejection: ${reason instanceof Error ? reason.stack || reason.message : String(reason)}`);
+});
 process.on('SIGINT', () => void shutdown(0));
 process.on('SIGTERM', () => void shutdown(0));
-process.on('exit', () => { shutdownSessions(); shutdownTelemetry(); });
+process.on('exit', () => { shutdownSessions(); });
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

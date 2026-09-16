@@ -44,7 +44,11 @@ export function resolveInputPath(value, field = 'path') {
 }
 
 export function isInsideRoot(candidate, root) {
-  return candidate === root || candidate.startsWith(root + path.sep);
+  if (candidate === root) return true;
+  // `allowedRoots: ["/"]` is a legitimate way to say "the whole filesystem"; a naive
+  // `root + sep` check turns it into "//" and rejects every path.
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+  return candidate.startsWith(prefix);
 }
 
 function isInsideAnyRoot(candidate) {
@@ -113,6 +117,14 @@ export function text(value, isError = false) {
   return { content: [{ type: 'text', text: truncate(body) }], ...(isError ? { isError: true } : {}) };
 }
 
+export function image(data, mimeType) {
+  return { type: 'image', data, mimeType };
+}
+
+export function multi(parts) {
+  return { content: parts };
+}
+
 export function splitLines(value) {
   const normalized = String(value).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   if (normalized === '') return [];
@@ -123,6 +135,23 @@ export function splitLines(value) {
 
 export function looksBinary(buffer) {
   return buffer.subarray(0, 8000).includes(0);
+}
+
+// Text decoding that keeps Windows-authored files readable: UTF-16LE/BE with a BOM, and
+// UTF-8 with a BOM, are decoded rather than reported as binary.
+export function decodeText(buffer) {
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    return { text: buffer.subarray(2).toString('utf16le'), encoding: 'utf16le' };
+  }
+  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
+    const swapped = Buffer.from(buffer.subarray(2));
+    swapped.swap16();
+    return { text: swapped.toString('utf16le'), encoding: 'utf16be' };
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
+    return { text: buffer.subarray(3).toString('utf8'), encoding: 'utf8bom' };
+  }
+  return { text: buffer.toString('utf8'), encoding: 'utf8' };
 }
 
 export function pageLines(lines, offset, length) {

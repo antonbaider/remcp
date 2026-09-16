@@ -135,12 +135,26 @@ export async function flush() {
   }
 }
 
-export function shutdownTelemetry() {
+export async function shutdownTelemetry() {
   if (state.timer) {
     clearInterval(state.timer);
     state.timer = null;
   }
-  try { state.sink?.({ runtimeVersion: VERSION, platform: process.platform, arch: process.arch, name: runtimeConfig.name, events: state.buffer.splice(0, state.buffer.length) }); } catch {}
+  const sink = state.sink;
+  state.sink = null;
+  const events = state.buffer.splice(0, state.buffer.length);
+  if (!sink || !events.length) return;
+  try {
+    // Bounded: the SDK closes the transport about two seconds after shutdown starts, and a
+    // notification sent after that is a rejected promise nobody awaits.
+    await Promise.race([
+      sink({ runtimeVersion: VERSION, platform: process.platform, arch: process.arch, name: runtimeConfig.name, events }),
+      new Promise(resolve => setTimeout(resolve, 500)),
+    ]);
+    state.sent += events.length;
+  } catch {
+    state.dropped += events.length;
+  }
 }
 
 export function resetTelemetryForTests() {

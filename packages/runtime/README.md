@@ -1,8 +1,8 @@
 # ReMCP local runtime
 
 `@remcp/runtime` is the local device runtime for [ReMCP](https://remcp.delio24.com). It is an MCP
-server that runs on a computer you paired with ReMCP and executes the file, search, terminal, and
-process tools that the hosted ReMCP MCP endpoint exposes to ChatGPT and Codex.
+server that runs on a computer you paired with ReMCP and executes the file, image, search, terminal,
+and process tools that the hosted ReMCP MCP endpoint exposes to ChatGPT and Codex.
 
 The ReMCP device agent starts this runtime as a child process and talks to it over stdio. The runtime
 never talks to the network on its own: it only answers the paired agent, which holds the device
@@ -27,24 +27,37 @@ npx @remcp/runtime              # MCP server over stdio
 
 ## Tools
 
-23 tools, all implemented in this repository.
+30 tools, all implemented in this repository.
 
-| Tool | Behavior |
+| Area | Tools |
 | --- | --- |
-| `read_file`, `read_multiple_files` | Read text files, with line paging and per-file errors in batch reads. |
-| `list_directory`, `get_file_info` | Inspect directory contents and file metadata. |
-| `write_file`, `edit_block` | Create, replace, or append file content; apply an exact-context text edit with a whitespace-tolerant fallback. |
-| `create_directory`, `move_file`, `copy_file` | Create directories; move, rename, or copy without overwriting an existing path unless asked. |
-| `start_search`, `get_more_search_results`, `stop_search`, `list_searches` | Streaming filename and content search with pagination, using `rg` when it is installed. |
-| `start_process`, `read_process_output`, `wait_for_process_output`, `interact_with_process`, `force_terminate`, `list_sessions` | Run and drive terminal sessions, including REPLs, with pattern waits instead of polling. |
-| `list_processes`, `kill_process` | Inspect and terminate operating-system processes. |
-| `get_runtime_info`, `get_runtime_stats` | Read-only introspection of configuration, limits, guardrails, and local counters. |
+| Reading | `read_file`, `read_multiple_files`, `read_image`, `list_directory` (glob filter), `get_file_info`, `hash_file`, `diff_files` |
+| Writing | `write_file` (explicit `rewrite`/`append`), `edit_block` (exact, whitespace-tolerant fallback, `dry_run`), `replace_lines` (`dry_run`), `replace_in_files` (previews by default) |
+| Organising | `create_directory`, `move_file`, `copy_file`, `move_to_trash` |
+| Search | `start_search`, `get_more_search_results`, `stop_search`, `list_searches` |
+| Processes | `start_process`, `read_process_output`, `wait_for_process_output`, `interact_with_process`, `force_terminate`, `list_sessions`, `list_processes`, `kill_process` |
+| Introspection | `get_system_info`, `get_runtime_info`, `get_runtime_stats` |
 
-There is deliberately no `set_config_value`: a model must not be able to rewrite its own device
-limits. Configuration is file- and environment-based, owned by the person at the computer.
+Every one of these is a real capability of the runtime; the hosted ReMCP endpoint adds `list_devices`
+so a model can pick a machine. There is deliberately no `set_config_value`, no `write_pdf`, and no
+URL fetch: a model must not be able to rewrite its own device limits, and document rendering or
+remote fetching would drag Puppeteer-class dependencies and an SSRF surface onto your computer.
 
 `--print-tools` prints the exact JSON contract (schemas and annotations) the runtime advertises, and
 `src/catalog.mjs` is the single source of truth for it.
+
+## What the tools guarantee
+
+- **Nothing is destroyed silently.** `write_file` refuses to replace a file that already has content
+  unless you pass `mode: "rewrite"` or `"append"`; `move_file` and `copy_file` never overwrite an
+  existing path; `move_to_trash` gives deletion an undo; `edit_block` fails unless the number of
+  matched blocks equals `expected_replacements`.
+- **Changes can be previewed.** `edit_block`, `replace_lines`, and `replace_in_files` return a unified
+  diff without writing when asked (and `replace_in_files` previews by default).
+- **Your line endings survive.** A whitespace-tolerant edit rebuilds the file with the ending it
+  already used, so a CRLF file is not rewritten to LF.
+- **Reads are honest.** `read_file`, `hash_file`, and `get_system_info` say what they found; a
+  directory that cannot be read shows up as `[DENIED]` instead of aborting the listing.
 
 ## Usage metrics
 
@@ -77,18 +90,24 @@ in `~/.config/remcp/runtime.json`. `--describe` always reports the current state
 - **No network calls.** The runtime opens no sockets. Every byte it emits goes to the paired agent.
 - **Symlink-aware confinement.** `allowedRoots` is enforced against the resolved real path of the
   deepest existing ancestor, not against the lexical string, so `<allowed>/link -> /etc` cannot be
-  used to read or write outside the allowed directories.
-- **No silent overwrites.** `move_file` fails when the destination exists; `copy_file` requires
-  `overwrite: true`; `edit_block` fails unless the number of matched blocks equals
-  `expected_replacements`.
-- **Catastrophic-command guardrail.** Commands that format filesystems, write raw block devices,
-  repartition disks, power off the host, fork-bomb, or recursively destroy a root path are refused
-  before they run (`dangerousCommands: block`, the default). `warn` runs them and reports the match;
-  `allow` disables the built-in list. User `blockedCommands` entries are always enforced.
+  used to read or write outside the allowed directories. `allowedRoots: ["/"]` means the whole
+  filesystem and works as written.
+- **Catastrophic-command guardrail.** Commands whose *command word* formats filesystems, writes raw
+  block devices, repartitions disks, powers off the host, fork-bombs, or recursively destroys a root
+  path are refused before they run (`dangerousCommands: block`, the default). `warn` runs them and
+  reports the match; `allow` disables the built-in list. Read-only commands that merely mention a
+  dangerous word (`grep -n format README.md`) are not affected. User `blockedCommands` entries are
+  always enforced.
+- **A bad configuration is loud.** If `runtime.json` cannot be parsed, the device refuses to start and
+  says why, instead of quietly dropping your `allowedRoots` and re-enabling usage metrics.
 - **Secret masking.** `list_processes` masks command arguments that look like tokens, passwords, or
   API keys before returning them.
-- **Bounded everything.** Tool results are capped (`maxOutputBytes`), writes are capped
-  (`maxWriteBytes`), buffered session output is capped (`maxBufferedLines`), and reads are paged.
+- **Bounded everything.** Tool results are capped (`maxOutputBytes`, also clamped below the MCP
+  transport limit), writes are capped (`maxWriteBytes`), buffered session output is capped by both
+  line count and total characters - a stream with no newlines cannot grow without limit - and reads
+  are paged.
+- **Processes are cleaned up.** Sessions run in their own process group, so `force_terminate` stops a
+  whole pipeline; a runtime crash or a dead agent never leaves orphaned children behind.
 - **Protected processes.** `kill_process` refuses pid 1, the runtime itself, and the ReMCP agent that
   hosts it.
 
@@ -131,7 +150,9 @@ directories.
 ## Session behavior
 
 Terminal sessions and searches live in memory for the lifetime of the runtime process. They end when
-the agent restarts, and exited sessions are dropped 30 minutes after they finish.
+the agent restarts, and exited sessions are dropped 30 minutes after they finish. The agent watches
+this process and restarts it with backoff if it ever exits, so a device recovers instead of staying
+silently offline.
 
 ## Development
 
@@ -141,16 +162,34 @@ npm run check
 npm test
 ```
 
-## Relationship to other MCP servers
+The contract commands (`--help`, `--version`, `--print-tools`, `--describe`) work without
+dependencies installed, so CI can diff the advertised tool surface against the published tarball.
+
+## How it compares with Desktop Commander
 
 This runtime is an independent implementation written for ReMCP. It is not a fork of, and shares no
-code with, Desktop Commander or any other MCP server. Compared with
-[DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) it keeps the same core
-remote-computer workflow while dropping the parts ReMCP does not want on a user's machine: 34 runtime
-dependencies (Supabase, Puppeteer/md-to-pdf, sharp, exceljs, Tiptap), the install-tracking postinstall
-script, remote feature flags and A/B tests, unredacted local tool logs, URL fetching in `read_file`,
-and `set_config_value`. What it adds is symlink-aware confinement, the catastrophic-command
-guardrail, `copy_file`, pattern waits, whitespace-tolerant edits, and read-only introspection.
+code with, [DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) or any other
+MCP server.
+
+| | Desktop Commander 0.2.50 | ReMCP runtime 0.2.0 |
+| --- | --- | --- |
+| Tools | 26 (including `get_config`, `set_config_value`, `get_usage_stats`, `get_recent_tool_calls`, `write_pdf`, feedback, prompts) | 30, none of which let a model rewrite device limits |
+| Runtime dependencies | 34 (Supabase, Puppeteer/md-to-pdf, `sharp`, `exceljs`, Tiptap, ripgrep download) | 1 (`@modelcontextprotocol/sdk`) |
+| Install scripts | `postinstall` posts an install payload that ignores the telemetry setting | none |
+| Telemetry | opt-out, 51 event names, remote feature flags, A/B assignment, third-party processor | opt-out, whitelisted event schema, no endpoint, no flags |
+| Install size | 3.78 MB unpacked, 249 files | ~100 kB unpacked, 18 files |
+| `read_file` | also fetches arbitrary URLs (SSRF surface) | local files only |
+| Command guardrails | 32 substring-blocked commands, advisory; also refuses read-only mentions | command-word matching, so `grep -n format README.md` still works |
+| Confinement | allowlist checked against the lexical path | resolved real path, symlink escape closed |
+| Local history | writes tool arguments to disk unredacted | none |
+| Images | file preview UI in a specific client | `read_image` returns the image to any MCP client |
+| Termination | session kill only | whole process group, plus runtime supervision and restart |
+
+What ReMCP deliberately does not implement, and why: document rendering (`write_pdf`) and spreadsheet
+handling would put Puppeteer, `sharp`, and `exceljs` on your computer; `get_config`/`set_config_value`
+would let the model change its own limits; local usage history would write your arguments to disk;
+URL reads in `read_file` would add an SSRF surface. Everything else the upstream server can do has an
+equivalent here, and the tool count is higher.
 
 ## License
 

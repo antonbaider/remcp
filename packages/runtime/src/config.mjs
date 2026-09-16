@@ -7,8 +7,35 @@ const configDir = process.env.REMCP_RUNTIME_CONFIG_DIR || path.join(os.homedir()
 export const runtimeConfigPath = path.join(configDir, 'runtime.json');
 export const runtimeConfigDir = configDir;
 
+// The MCP SDK's stdio client closes the connection on a message above 10 MB, which kills
+// this process. Keep the runtime's own output cap well below that so raising an env var
+// cannot turn a large tool result into a dead device.
+export const HARD_OUTPUT_CEILING_BYTES = 8 * 1024 * 1024;
+
+let configError = null;
+
 function readConfigFile() {
-  try { return JSON.parse(readFileSync(runtimeConfigPath, 'utf8')); } catch { return {}; }
+  let raw;
+  try {
+    raw = readFileSync(runtimeConfigPath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return {};
+    configError = `Could not read ${runtimeConfigPath}: ${error instanceof Error ? error.message : String(error)}`;
+    return {};
+  }
+  if (!raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      configError = `${runtimeConfigPath} must contain a JSON object`;
+      return {};
+    }
+    return parsed;
+  } catch (error) {
+    // A trailing comma used to silently drop allowedRoots and re-enable usage metrics.
+    configError = `${runtimeConfigPath} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`;
+    return {};
+  }
 }
 
 const file = readConfigFile();
@@ -50,11 +77,13 @@ const telemetryEnabled = telemetryDisabled
   ? false
   : booleanValue(process.env.REMCP_RUNTIME_TELEMETRY ?? file.telemetryEnabled, true);
 
+const configuredOutputBytes = positiveNumber(process.env.REMCP_RUNTIME_MAX_OUTPUT_BYTES ?? file.maxOutputBytes, 1024 * 1024);
+
 export const runtimeConfig = Object.freeze({
   allowedRoots: Object.freeze(allowedRoots),
   blockedCommands: Object.freeze(stringList(process.env.REMCP_RUNTIME_BLOCKED_COMMANDS ?? file.blockedCommands)),
   dangerousCommands: dangerousMode(process.env.REMCP_RUNTIME_DANGEROUS_COMMANDS ?? file.dangerousCommands),
-  maxOutputBytes: positiveNumber(process.env.REMCP_RUNTIME_MAX_OUTPUT_BYTES ?? file.maxOutputBytes, 1024 * 1024),
+  maxOutputBytes: Math.min(configuredOutputBytes, HARD_OUTPUT_CEILING_BYTES),
   maxReadLines: positiveNumber(process.env.REMCP_RUNTIME_MAX_READ_LINES ?? file.maxReadLines, 2000),
   maxBufferedLines: positiveNumber(process.env.REMCP_RUNTIME_MAX_BUFFERED_LINES ?? file.maxBufferedLines, 50000),
   maxWriteBytes: positiveNumber(process.env.REMCP_RUNTIME_MAX_WRITE_BYTES ?? file.maxWriteBytes, 8 * 1024 * 1024),
@@ -63,6 +92,12 @@ export const runtimeConfig = Object.freeze({
   telemetryEnabled,
 });
 
+// A configuration the user cannot read is not a configuration we should quietly ignore:
+// it is how allowedRoots and an opt-out silently disappear.
+export function configurationError() {
+  return configError;
+}
+
 export function describeConfig() {
   return {
     name: runtimeConfig.name,
@@ -70,10 +105,12 @@ export function describeConfig() {
     arch: process.arch,
     node: process.versions.node,
     configFile: runtimeConfigPath,
+    configError,
     allowedRoots: [...runtimeConfig.allowedRoots],
     blockedCommands: [...runtimeConfig.blockedCommands],
     dangerousCommands: runtimeConfig.dangerousCommands,
     maxOutputBytes: runtimeConfig.maxOutputBytes,
+    maxOutputBytesCeiling: HARD_OUTPUT_CEILING_BYTES,
     maxReadLines: runtimeConfig.maxReadLines,
     maxBufferedLines: runtimeConfig.maxBufferedLines,
     maxWriteBytes: runtimeConfig.maxWriteBytes,
