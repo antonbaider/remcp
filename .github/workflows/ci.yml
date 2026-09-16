@@ -69,14 +69,15 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci --no-audit --no-fund
       - run: npm test
+      # Trusted publishing: npm exchanges the GitHub OIDC token for a short-lived
+      # credential, so no NPM_TOKEN secret and no one-time password are involved.
+      # Configure it once per package on npmjs.com:
+      #   Package settings -> Trusted Publisher -> GitHub Actions
+      #   organization/user: antonbaider, repository: remcp, workflow: ci.yml
       - name: Publish @remcp/runtime
         run: npm publish --workspace packages/runtime --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish @remcp/remcp
         run: npm publish --workspace packages/client --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Verify the published versions resolve
         shell: bash
         run: |
