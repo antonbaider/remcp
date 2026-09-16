@@ -1,0 +1,24 @@
+{
+  "name": "@remcp/remcp",
+  "version": "0.1.4",
+  "description": "Secure ReMCP device client for connecting your computer to MCP over an outbound-only agent.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://remcp.delio24.com",
+  "bin": { "remcp": "bin/remcp.mjs" },
+  "engines": { "node": ">=22.5.0" },
+  "files": ["bin", "src", "LICENSE", "README.md"],
+  "scripts": {
+    "check": "node --check bin/remcp.mjs && node --check src/cli.mjs && node --check src/agent.mjs && node --check src/runtime.mjs && node --check src/version.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ws": "^8.21.3"
+  },
+  "overrides": { "sharp": "0.35.4", "uuid": "11.1.1" },
+  "repository": { "type": "git", "url": "git+https://github.com/antonbaider/remcp.git" },
+  "bugs": { "url": "https://github.com/antonbaider/remcp/issues" },
+  "publishConfig": { "access": "public" },
+  "keywords": ["mcp", "model-context-protocol", "remote", "computer", "cli", "agent", "chatgpt", "codex"]
+}
