@@ -4,7 +4,6 @@ import { runtimeConfig } from '../config.mjs';
 import { assertAllowedCommand } from '../policy.mjs';
 import { countEvent, recordEvent } from '../telemetry.mjs';
 import {
-  absoluteLine,
   appendProcessOutput,
   createProcessSession,
   getProcessSession,
@@ -76,8 +75,12 @@ export async function readProcessOutputTool(args) {
   const hasOffset = args.offset !== undefined && args.offset !== null;
   let slice;
   let range;
-  if (hasOffset && Number(args.offset) !== 0) {
-    const requested = Number(args.offset) < 0 ? Number(args.offset) : absoluteLine(session, 0) - 1 + Number(args.offset);
+  if (hasOffset) {
+    // An explicit offset always means a line range: zero-based from the first line the
+    // session produced, or a negative value for the last N lines. Omit the argument to get
+    // only the output produced since the previous read. Lines evicted by the buffer cap are
+    // gone, so the earliest readable line is droppedLines.
+    const requested = Number(args.offset);
     const page = readOutputRange(session, requested, clampInteger(args.length, 200, 1, 5000));
     slice = page.slice;
     range = `${page.start}-${page.end} of ${page.total}`;

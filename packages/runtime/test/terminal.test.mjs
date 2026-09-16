@@ -43,6 +43,18 @@ test('unknown pids are rejected instead of starting new work', async () => {
   assert.equal(isError(await invokeTool('wait_for_process_output', { pid: 999999, pattern: 'x' })), true);
 });
 
+test('read_process_output positive offsets are zero-based line numbers', async () => {
+  const started = await invokeTool('start_process', { command: 'printf "l1\\nl2\\nl3\\nl4\\n"', timeout_ms: 3000 });
+  const pid = pidOf(started);
+  const page = body(await invokeTool('read_process_output', { pid, offset: 1, length: 2 }));
+  assert.match(page, /l2/);
+  assert.match(page, /l3/);
+  assert.doesNotMatch(page, /l1/);
+  assert.match(page, /of 4/);
+  const first = body(await invokeTool('read_process_output', { pid, offset: 0, length: 1 }));
+  assert.match(first, /l1/);
+});
+
 test('wait_for_process_output returns as soon as the pattern appears', async () => {
   const started = await invokeTool('start_process', { command: 'sleep 0.6; echo READY-MARKER; sleep 5', timeout_ms: 100 });
   const pid = pidOf(started);

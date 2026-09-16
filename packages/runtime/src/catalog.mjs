@@ -246,7 +246,7 @@ export const toolDefinitions = [
       type: 'object',
       properties: {
         pid: { type: 'number', description: 'Session pid returned by start_process.' },
-        offset: { type: 'number', description: 'Absolute first line to return, or a negative value for the last N lines. Omit for new output.' },
+        offset: { type: 'number', description: 'Zero-based line number to start from, counted across everything the session has produced; a negative value reads the last N lines. Omit for new output. Lines evicted by the buffer cap are no longer available.' },
         length: { type: 'number', description: 'Maximum number of lines to return.' },
         timeout_ms: { type: 'number', description: 'How long to wait for new output when no offset is given, in milliseconds.' },
       },

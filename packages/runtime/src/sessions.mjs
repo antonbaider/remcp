@@ -18,6 +18,25 @@ function notify(session) {
   for (const resolve of waiters) resolve();
 }
 
+// A waiter whose timer fires first must remove itself, otherwise finished sessions keep
+// holding closures until the next append (which may never come).
+function waiter(session, timeoutMs) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const index = session.waiters.indexOf(finish);
+      if (index !== -1) session.waiters.splice(index, 1);
+      resolve();
+    };
+    const timer = setTimeout(finish, Math.max(0, timeoutMs));
+    timer.unref?.();
+    session.waiters.push(finish);
+  });
+}
+
 export function createProcessSession({ pid, child, command, shell }) {
   const session = {
     pid,
@@ -108,13 +127,7 @@ export function readOutputRange(session, offset, length) {
 
 export async function waitForProcessActivity(session, timeoutMs) {
   if (session.exited) return;
-  await new Promise(resolve => {
-    let settled = false;
-    const finish = () => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } };
-    const timer = setTimeout(finish, Math.max(0, timeoutMs));
-    timer.unref?.();
-    session.waiters.push(finish);
-  });
+  await waiter(session, timeoutMs);
 }
 
 export async function waitForProcessExit(session, timeoutMs) {
@@ -170,13 +183,7 @@ export function listSearchSessions() {
 
 export async function waitForSearchResults(session, count, timeoutMs) {
   if (session.results.length >= count || session.status !== 'running') return;
-  await new Promise(resolve => {
-    let settled = false;
-    const finish = () => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } };
-    const timer = setTimeout(finish, Math.max(0, timeoutMs));
-    timer.unref?.();
-    session.waiters.push(finish);
-  });
+  await waiter(session, timeoutMs);
 }
 
 export function sweep(now = Date.now()) {
@@ -188,7 +195,17 @@ export function sweep(now = Date.now()) {
   }
 }
 
+// Eviction used to run only inside list_sessions/list_searches, so an agent that never
+// listed them kept abandoned sessions (and their result arrays) in memory forever.
+let sweepTimer = null;
+export function startSessionSweeper(intervalMs = 5 * 60 * 1000) {
+  if (sweepTimer) return;
+  sweepTimer = setInterval(() => sweep(), intervalMs);
+  sweepTimer.unref?.();
+}
+
 export function shutdownSessions() {
+  if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; }
   for (const session of processSessions.values()) {
     if (!session.exited) {
       try { session.child.kill('SIGKILL'); } catch {}

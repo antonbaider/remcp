@@ -8,7 +8,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { toolDefinitions, toolHandlers } from './catalog.mjs';
 import { describeConfig, runtimeConfigDir } from './config.mjs';
 import { invokeTool } from './invoke.mjs';
-import { shutdownSessions } from './sessions.mjs';
+import { shutdownSessions, startSessionSweeper } from './sessions.mjs';
 import { flush, setTelemetrySink, shutdownTelemetry, telemetryEnabled } from './telemetry.mjs';
 import { VERSION } from './version.mjs';
 
@@ -100,5 +100,6 @@ process.on('exit', () => { shutdownSessions(); shutdownTelemetry(); });
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+startSessionSweeper();
 announceTelemetryOnce();
 console.error(`ReMCP runtime ${VERSION} ready with ${toolDefinitions.length} tools`);

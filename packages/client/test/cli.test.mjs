@@ -5,9 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 
 // The CLI resolves its config directory at import time, so point it at a scratch
-// directory before loading the module. Never touch the developer's real ~/.config/remcp.
+// directory before loading the module. Never touch the developer's real ~/.config/remcp,
+// and never restart a real user service from a test run.
 const configDir = mkdtempSync(path.join(os.tmpdir(), 'remcp-cli-test-'));
 process.env.REMCP_CONFIG_DIR = configDir;
+process.env.NODE_ENV = 'test';
+process.env.REMCP_TEST_PLATFORM = 'aix';
 
 const { main } = await import('../src/cli.mjs');
 const { PACKAGE_NAME, VERSION } = await import('../src/version.mjs');

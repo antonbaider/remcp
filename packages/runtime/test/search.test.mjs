@@ -23,7 +23,13 @@ function sessionIdOf(result) {
 test('content search finds matches and skips node_modules', async () => {
   const result = await invokeTool('start_search', { path: join(root, 'project'), pattern: 'needle', searchType: 'content' });
   assert.equal(isError(result), false);
-  const output = body(result);
+  const sessionId = sessionIdOf(result);
+  // start_search streams: the first response can arrive before every file was scanned.
+  await waitFor(async () => {
+    const page = body(await invokeTool('get_more_search_results', { sessionId, offset: 0, length: 100 }));
+    return /status: (completed|capped|failed)/.test(page);
+  });
+  const output = body(await invokeTool('get_more_search_results', { sessionId, offset: 0, length: 100 }));
   assert.match(output, /alpha\.js:1:/);
   assert.match(output, /README\.md:1:/);
   assert.doesNotMatch(output, /skip-me/);
@@ -69,4 +75,49 @@ test('searches can be listed, stopped, and are validated', async () => {
   assert.match(body(await invokeTool('list_searches', {})), new RegExp(sessionId));
   assert.match(body(await invokeTool('stop_search', { sessionId })), /Stopped search|already/);
   assert.equal(isError(await invokeTool('get_more_search_results', { sessionId: 'search-missing' })), true);
+});
+
+test('includeHidden actually searches hidden files', async () => {
+  writeFileSync(join(root, 'project', '.hidden-notes.txt'), 'hidden-needle\n');
+  const without = body(await invokeTool('start_search', { path: join(root, 'project'), pattern: 'hidden-needle', searchType: 'content' }));
+  assert.doesNotMatch(without, /hidden-notes/);
+  const withHidden = body(await invokeTool('start_search', { path: join(root, 'project'), pattern: 'hidden-needle', searchType: 'content', includeHidden: true }));
+  assert.match(withHidden, /hidden-notes\.txt/);
+});
+
+test('literalSearch reaches ripgrep instead of silently changing strategy', async () => {
+  writeFileSync(join(root, 'project', 'src', 'literal.txt'), 'value = a.b\nvalue = axb\n');
+  const literal = body(await invokeTool('start_search', { path: join(root, 'project'), pattern: 'a.b', searchType: 'content', literalSearch: true, filePattern: 'literal.txt' }));
+  assert.match(literal, /value = a\.b/);
+  assert.doesNotMatch(literal, /axb/);
+});
+
+test('an invalid regular expression is reported instead of silently downgraded', async () => {
+  const result = await invokeTool('start_search', { path: join(root, 'project'), pattern: '([unclosed', searchType: 'content' });
+  assert.equal(isError(result), true);
+  assert.match(body(result), /not a valid regular expression/);
+  assert.match(body(result), /literalSearch: true/);
+});
+
+test('a plain file-name pattern matches names that contain it', async () => {
+  const result = body(await invokeTool('start_search', { path: join(root, 'project'), pattern: 'alph', searchType: 'files' }));
+  assert.match(result, /alpha\.js/);
+  assert.doesNotMatch(result, /beta\.js/);
+});
+
+test('filePattern supports the documented alternation form and reports capped searches', async () => {
+  const result = body(await invokeTool('start_search', { path: join(root, 'project'), pattern: 'needle', searchType: 'content', filePattern: '*.js|*.md', maxResults: 1 }));
+  assert.match(result, /(alpha\.js|README\.md)/);
+  const sessionId = sessionIdOf(await invokeTool('start_search', { path: join(root, 'project'), pattern: 'needle', searchType: 'content', maxResults: 1 }));
+  await waitFor(async () => {
+    const page = body(await invokeTool('get_more_search_results', { sessionId, offset: 0, length: 5 }));
+    return /status: (capped|completed)/.test(page);
+  });
+  const final = body(await invokeTool('get_more_search_results', { sessionId, offset: 0, length: 5 }));
+  assert.match(final, /status: capped/);
+});
+
+test('an unreadable search path fails instead of reporting success', async () => {
+  const result = await invokeTool('start_search', { path: join(root, 'project', 'does-not-exist'), pattern: 'x', searchType: 'content' });
+  assert.equal(isError(result), true);
 });

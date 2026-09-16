@@ -288,12 +288,14 @@ export async function main(argv = process.argv.slice(2)) {
     }
     if (action === 'on' || action === 'enable') {
       console.log(JSON.stringify(setTelemetry(true), null, 2));
-      console.log('Usage metrics enabled. Restart the agent to apply: remcp install');
+      restartPersistentServiceIfInstalled();
+      console.log('Usage metrics enabled and the agent restarted to apply it.');
       return;
     }
     if (action === 'off' || action === 'disable') {
       console.log(JSON.stringify(setTelemetry(false), null, 2));
-      console.log('Usage metrics disabled. Restart the agent to apply: remcp install');
+      restartPersistentServiceIfInstalled();
+      console.log('Usage metrics disabled and the agent restarted to apply it.');
       return;
     }
     throw new Error('Usage: remcp telemetry [status|on|off]');

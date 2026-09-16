@@ -32,8 +32,23 @@ function ripgrep() {
 function normalizePattern(value, literal) {
   const pattern = requireString(value, 'pattern');
   if (pattern.length > MAX_PATTERN_LENGTH) fail(`pattern must be at most ${MAX_PATTERN_LENGTH} characters`);
-  if (literal) return { regex: null, literal: pattern };
-  try { return { regex: new RegExp(pattern, 'g'), literal: null }; } catch { return { regex: null, literal: pattern }; }
+  if (literal) return { regex: null, literal: pattern, patternIsLiteral: true };
+  try { return { regex: new RegExp(pattern, 'g'), literal: null, patternIsLiteral: false }; } catch (error) {
+    // Silently downgrading an invalid regular expression to a substring search changes the
+    // meaning of the call without telling anyone.
+    fail(`pattern is not a valid regular expression (${error instanceof Error ? error.message : String(error)}). Pass literalSearch: true to search for this text literally.`);
+  }
+}
+
+// "*.js|*.ts" is the documented alternation form; ripgrep needs one -g per glob.
+function splitGlobs(value) {
+  return String(value || '').split('|').map(part => part.trim()).filter(Boolean);
+}
+
+// A file search pattern without any glob metacharacter means "files whose name contains
+// this text", which is how callers read `pattern: "auth"`.
+function fileNameGlob(pattern) {
+  return /[*?[\]{}]/.test(pattern) ? pattern : `*${pattern}*`;
 }
 
 function matchLine(line, matcher, ignoreCase) {
@@ -68,26 +83,29 @@ async function walk(target, options, onFile) {
 }
 
 function runRipgrep(session, { path: target, pattern, searchType, filePattern, ignoreCase, includeHidden, includeIgnored, contextLines, maxResults, patternIsLiteral }) {
+  // Flags must come before the `--` separator: anything after it is treated as a path,
+  // which silently turned `--hidden` into a search target.
   const args = ['--no-heading', '--color', 'never'];
+  if (ignoreCase) args.push('--ignore-case');
+  if (includeHidden) args.push('--hidden');
   if (!includeIgnored) for (const glob of SKIP_GLOBS) args.push('-g', glob);
+  for (const glob of splitGlobs(filePattern)) args.push('-g', glob);
   if (searchType === 'files') {
     args.push('--files');
-    args.push('-g', pattern);
-    if (filePattern) args.push('-g', filePattern);
+    args.push('-g', fileNameGlob(pattern));
     args.push('--', target);
   } else {
     args.push('--line-number', '--with-filename');
-    if (ignoreCase) args.push('--ignore-case');
     if (patternIsLiteral) args.push('--fixed-strings');
     if (contextLines) args.push('-C', String(contextLines));
-    if (filePattern) args.push('-g', filePattern);
     args.push('--', pattern, target);
   }
-  if (includeHidden) args.push('--hidden');
   const child = spawn(ripgrep(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
   session.cancel = () => child.kill('SIGTERM');
   let buffer = '';
+  let stderr = '';
   let collected = 0;
+  let capped = false;
   child.stdout.on('data', chunk => {
     buffer += chunk.toString('utf8');
     const lines = buffer.split('\n');
@@ -97,26 +115,31 @@ function runRipgrep(session, { path: target, pattern, searchType, filePattern, i
       if (!line.trim()) continue;
       batch.push(line);
       collected += 1;
-      if (collected >= maxResults) { child.kill('SIGTERM'); break; }
+      if (collected >= maxResults) { capped = true; child.kill('SIGTERM'); break; }
     }
     appendSearchResults(session, batch);
   });
-  child.stderr.on('data', () => {});
+  child.stderr.on('data', chunk => { stderr = `${stderr}${chunk.toString('utf8')}`.slice(-2000); });
   child.on('error', error => finishSearchSession(session, 'failed', error.message));
-  child.on('close', () => finishSearchSession(session, session.status === 'running' ? 'completed' : session.status));
+  child.on('close', code => {
+    if (session.status !== 'running') { finishSearchSession(session, session.status); return; }
+    // ripgrep exits 2 for a real error (bad pattern, unreadable path) and 0/1 otherwise.
+    if (code === 2 && stderr.trim()) { finishSearchSession(session, 'failed', stderr.trim().split('\n')[0]); return; }
+    finishSearchSession(session, capped ? 'capped' : 'completed');
+  });
 }
 
 async function runFallback(session, { path: target, matcher, searchType, filePattern, ignoreCase, contextLines, maxResults, includeHidden, includeIgnored }) {
-  const fileGlob = filePattern ? globToRegExp(filePattern) : null;
-  const nameGlob = searchType === 'files' ? globToRegExp(session.pattern) : null;
-  const nameLiteral = searchType === 'files' && session.pattern.includes('*') === false ? session.pattern : null;
+  const fileGlobs = splitGlobs(filePattern).map(globToRegExp);
+  const nameGlob = searchType === 'files' ? globToRegExp(fileNameGlob(session.pattern)) : null;
+  const nameLiteral = searchType === 'files' && !/[*?[\]{}]/.test(session.pattern) ? session.pattern : null;
   let collected = 0;
   await walk(target, { includeHidden, skipDirectories: includeIgnored ? new Set() : SKIP_DIRECTORIES, stopped: () => session.status !== 'running' || collected >= maxResults }, async file => {
     if (session.status !== 'running' || collected >= maxResults) return;
-    if (fileGlob && !fileGlob.test(path.basename(file))) return;
+    if (fileGlobs.length && !fileGlobs.some(glob => glob.test(path.basename(file)))) return;
     if (searchType === 'files') {
       const base = path.basename(file);
-      const matches = nameGlob.test(base) || (nameLiteral && (ignoreCase ? base.toLowerCase().includes(nameLiteral.toLowerCase()) : base.includes(nameLiteral)));
+      const matches = (nameGlob && nameGlob.test(base)) || (nameLiteral && (ignoreCase ? base.toLowerCase().includes(nameLiteral.toLowerCase()) : base.includes(nameLiteral)));
       if (!matches) return;
       collected += 1;
       appendSearchResults(session, [displayPath(file)]);
@@ -141,11 +164,12 @@ async function runFallback(session, { path: target, matcher, searchType, filePat
       appendSearchResults(session, [formatContentResult(file, index + 1, lines[index], context)]);
     }
   });
-  finishSearchSession(session, session.status === 'running' ? 'completed' : session.status);
+  finishSearchSession(session, session.status === 'running' ? (collected >= maxResults ? 'capped' : 'completed') : session.status);
 }
 
 export async function startSearchTool(args) {
   const target = await resolveSafePath(args.path);
+  await stat(target).catch(() => fail(`Search path not found: ${displayPath(target)}`));
   const pattern = requireString(args.pattern, 'pattern');
   const searchType = String(args.searchType || 'content').toLowerCase();
   if (!['content', 'files'].includes(searchType)) fail('searchType must be content or files');
@@ -156,13 +180,14 @@ export async function startSearchTool(args) {
   const includeIgnored = args.includeIgnored === true;
   const contextLines = clampInteger(args.contextLines, 0, 0, 10);
   const maxResults = clampInteger(args.maxResults, 200, 1, 5000);
-  const matcher = searchType === 'content' ? normalizePattern(pattern, args.literalSearch === true) : { regex: null, literal: pattern };
+  const matcher = searchType === 'content' ? normalizePattern(pattern, args.literalSearch === true) : { regex: null, literal: pattern, patternIsLiteral: false };
   const session = createSearchSession({ type: searchType, pattern, path: target, filePattern });
   countEvent('searchesStarted');
   recordEvent('session_started', { sessionKind: 'search', success: true });
-  const options = { path: target, pattern, searchType, filePattern, ignoreCase, includeHidden, includeIgnored, contextLines, maxResults, matcher, patternIsLiteral: Boolean(matcher.literal) };
-  if (searchType === 'content' && ripgrep() && matcher.regex) runRipgrep(session, { ...options, pattern });
-  else if (searchType === 'files' && ripgrep()) runRipgrep(session, options);
+  const options = { path: target, pattern, searchType, filePattern, ignoreCase, includeHidden, includeIgnored, contextLines, maxResults, matcher, patternIsLiteral: matcher.patternIsLiteral === true };
+  // Literal searches also go to ripgrep through --fixed-strings; the JavaScript fallback
+  // only runs when ripgrep is unavailable.
+  if (ripgrep()) runRipgrep(session, options);
   else void runFallback(session, options).catch(error => finishSearchSession(session, 'failed', error instanceof Error ? error.message : String(error)));
   await waitForSearchResults(session, 1, 1500);
   const initial = session.results.slice(0, 50);
