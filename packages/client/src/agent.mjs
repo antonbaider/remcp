@@ -6,10 +6,13 @@ import { spawn, spawnSync } from 'node:child_process';
 import WebSocket from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { resolveNpm } from './npm.mjs';
 import { isRuntimeSpecFor, normalizeRuntime } from './runtime.mjs';
 import { VERSION } from './version.mjs';
 
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+// See src/npm.mjs: a service started by launchd or systemd has a minimal PATH, so npm is resolved
+// from the running node instead of being looked up on PATH.
+const npm = resolveNpm();
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_CHECK_TIMEOUT_MS = 5000;
 // A version that failed to install is retried after this cooldown instead of on every reconnect.
@@ -30,7 +33,7 @@ const RUNTIME_RESTART_MAX_MS = 30_000;
 const CALL_TIMEOUT_MARGIN_MS = 10_000;
 
 function globalNodeModules() {
-  const result = spawnSync(npmCommand, ['root', '--global'], { encoding: 'utf8' });
+  const result = spawnSync(npm.command, [...npm.args, 'root', '--global'], { encoding: 'utf8' });
   if (result.error || result.status !== 0) throw new Error('Could not locate the global npm modules directory');
   return String(result.stdout || '').trim();
 }
@@ -116,7 +119,15 @@ async function restartToApplyUpdate(cli, stopAgent, markStopping, onRuntimeRepai
       await onRuntimeRepaired?.();
       return;
     }
-    console.log(`ReMCP ${installed || 'a newer version'} installed; restarting to apply it.`);
+    // Handing over to a version that cannot start would take the machine offline with nobody left to
+    // retry. The new CLI has to answer `--version` before this process steps aside.
+    const probe = spawnSync(process.execPath, [cli, '--version'], { encoding: 'utf8', timeout: 30000 });
+    const reported = String(probe.stdout || '').trim();
+    if (probe.error || probe.status !== 0 || !/^\d+\.\d+\.\d+/.test(reported)) {
+      console.error(`The installed ReMCP ${installed || 'update'} did not run (${probe.error?.message || `exit ${probe.status}`}${reported ? `: ${reported}` : ''}). Keeping ${VERSION} running; retry with: remcp update`);
+      return;
+    }
+    console.log(`ReMCP ${installed || 'a newer version'} installed and verified (${reported}); restarting to apply it.`);
     if (!supervisorRestart()) {
       spawn(process.execPath, [cli, 'start'], { detached: true, stdio: 'ignore', env: { ...process.env } }).unref();
     }
@@ -154,7 +165,7 @@ function supervisorRestart() {
 }
 
 function globalCliEntry() {
-  const prefix = spawnSync(npmCommand, ['prefix', '--global'], { encoding: 'utf8' });
+  const prefix = spawnSync(npm.command, [...npm.args, 'prefix', '--global'], { encoding: 'utf8' });
   if (prefix.error || prefix.status !== 0) return null;
   const base = String(prefix.stdout || '').trim();
   return process.platform === 'win32'
