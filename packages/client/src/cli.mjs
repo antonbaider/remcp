@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { localRuntimeEntry, runAgent, supervisorRestart } from './agent.mjs';
 import { npmVersion, resolveNpm } from './npm.mjs';
@@ -217,6 +217,63 @@ function ensureServiceIfRecorded(config) {
   }
 }
 
+// Opens the approval page in the person's browser. A machine that nobody is looking at only gets the
+// printed URL, so every failure here is silent and non-fatal.
+function openInBrowser(url) {
+  try {
+    const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
+    const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+    const child = spawn(command, args, { stdio: 'ignore', detached: true });
+    child.on('error', () => {});
+    child.unref();
+  } catch {}
+}
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Device authorization (RFC 8628): the computer asks for a code, the person approves it in the
+// browser while signed in, and this process collects the credential by polling. The device never
+// sees a browser session or an account password.
+async function pairWithDeviceCode(server, flags) {
+  const authorization = await fetch(`${server}/oauth/device_authorization`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      name: String(flags.name || os.hostname()),
+      hostname: os.hostname(),
+      platform: process.platform,
+      arch: process.arch,
+      machineId: ensureMachineId(),
+    }),
+  });
+  if (!authorization.ok) throw new Error(`Pairing failed (${authorization.status}): ${await authorization.text()}`);
+  const grant = await authorization.json();
+  const approvalUrl = grant.verification_uri_complete || grant.verification_uri;
+  console.log(`Approve this computer in your browser: ${approvalUrl}`);
+  console.log(`Pairing code: ${grant.user_code}  (expires in ${Math.max(1, Math.round(Number(grant.expires_in || 600) / 60))} minutes)`);
+  openInBrowser(approvalUrl);
+  const deadline = Date.now() + (Number(grant.expires_in) || 600) * 1000;
+  const intervalMs = Math.max(1, Number(grant.interval) || 5) * 1000;
+  while (Date.now() < deadline) {
+    await sleep(intervalMs);
+    const response = await fetch(`${server}/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+        device_code: String(grant.device_code || ''),
+      }).toString(),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.device_token) return data;
+    if (data.error === 'authorization_pending' || data.error === 'slow_down') continue;
+    if (data.error === 'access_denied') throw new Error('That pairing request was denied in the browser. Run the command again if it was not you.');
+    if (data.error === 'expired_token') break;
+    throw new Error(`Pairing failed (${response.status}): ${JSON.stringify(data)}`);
+  }
+  throw new Error('The pairing code expired before it was approved. Run the command again.');
+}
+
 function restartPersistentServiceIfInstalled() {
   const platform = servicePlatform();
   if (platform === 'linux' && fs.existsSync(linuxServiceFile)) {
@@ -345,21 +402,30 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (command === 'connect') {
-    const server = String(flags.server || '').replace(/\/$/, '');
+    // Like the desktop-app flow this mirrors: with no flags the command talks to the official
+    // server, prints a code, opens the browser to approve it, and pairs. `--code` keeps working for
+    // the workspace-generated command and for CI, and `--server` for self-hosted deployments.
+    const server = String(flags.server || officialOrigin).replace(/\/$/, '');
     const code = String(flags.code || '').replace(/\s+/g, '').toUpperCase();
-    if (!server || !code) throw new Error('--server and --code are required');
     assertRuntimeTrust(server, flags);
-    const response = await fetch(`${server}/api/pair/claim`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ code, machineId: ensureMachineId(), name: String(flags.name || os.hostname()), hostname: os.hostname(), platform: process.platform, arch: process.arch }),
-    });
-    if (!response.ok) throw new Error(`Pairing failed (${response.status}): ${await response.text()}`);
-    const paired = await response.json();
+    let paired;
+    let deviceInitiated = false;
+    if (code) {
+      const response = await fetch(`${server}/api/pair/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code, machineId: ensureMachineId(), name: String(flags.name || os.hostname()), hostname: os.hostname(), platform: process.platform, arch: process.arch }),
+      });
+      if (!response.ok) throw new Error(`Pairing failed (${response.status}): ${await response.text()}`);
+      paired = await response.json();
+    } else {
+      deviceInitiated = true;
+      paired = await pairWithDeviceCode(server, flags);
+    }
     const config = {
       serverUrl: server,
-      deviceId: paired.deviceId,
-      deviceToken: paired.deviceToken,
+      deviceId: paired.deviceId || paired.device_id,
+      deviceToken: paired.deviceToken || paired.device_token,
       deviceName: String(flags.name || os.hostname()),
       runtime: normalizeRuntime(paired.runtime),
       machineId: ensureMachineId(),
@@ -369,7 +435,27 @@ export async function main(argv = process.argv.slice(2)) {
     };
     saveConfig(config);
     console.log(`Paired ${os.hostname()} with ${server}`);
-    if (flags.install) installPersistentAgent(config);
+    if (flags.install) {
+      installPersistentAgent(config);
+      return;
+    }
+    // Only the command that asked for its own code keeps running: someone who ran `remcp connect` on
+    // a fresh machine expects the connection to be live when the command finishes. A workspace code
+    // keeps its old meaning (pair, then `remcp start` or `--install`).
+    if (!deviceInitiated) return;
+    // Nobody supervises this machine yet, so the agent runs in this window: Ctrl+C disconnects it,
+    // which is the behaviour people expect from a command they just ran themselves.
+    console.log('ReMCP is connected. Keep this window open, or run `remcp install` for a background service. Press Ctrl+C to stop.');
+    const telemetry = telemetryState();
+    await runAgent({
+      ...config,
+      autoUpdate: config.autoUpdate !== false,
+      trustRuntime: config.trustRuntime === true,
+      telemetryEnabled: telemetry.enabled,
+      installReported: telemetry.installReported,
+      installSpec: `${PACKAGE_NAME}@${VERSION}`,
+      persistState: patch => saveConfig({ ...config, ...patch }),
+    });
     return;
   }
 

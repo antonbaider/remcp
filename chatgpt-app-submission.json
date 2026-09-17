@@ -564,10 +564,10 @@
   "test_cases": [
     {
       "description": "List the computers available to the signed-in ReMCP account.",
-      "user_prompt": "List my ReMCP devices and tell me which ones are online. Include the ReMCP Review Sandbox if it is available.",
+      "user_prompt": "List my ReMCP devices and tell me which ones are online.",
       "file_attachment_urls": null,
       "tools_triggered": "list_devices",
-      "expected_output": "Returns devices available to the authenticated account and includes the isolated ReMCP Review Sandbox with device id review-sandbox.",
+      "expected_output": "Returns the computers paired to the authenticated account with their online state. The hosted ReMCP Review Sandbox is not one of the account’s computers and is therefore not listed; it stays addressable by device id review-sandbox for the tool-practice cases below.",
       "expected_output_url": null
     },
     {

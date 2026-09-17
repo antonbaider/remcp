@@ -1,6 +1,6 @@
 {
   "name": "@remcp/runtime",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "description": "First-party ReMCP local device runtime: file, search, terminal and process tools over MCP for computers paired with ReMCP.",
   "type": "module",
   "license": "MIT",
