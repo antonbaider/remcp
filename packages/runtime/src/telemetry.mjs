@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { runtimeConfig } from './config.mjs';
+import { liveConfig, runtimeConfig } from './config.mjs';
 import { VERSION } from './version.mjs';
 
 // Event fields are whitelisted: an event can never carry a file path, a command
@@ -20,7 +20,7 @@ const FLUSH_INTERVAL_MS = 15_000;
 const FLUSH_THRESHOLD = 20;
 
 const state = {
-  enabled: runtimeConfig.telemetryEnabled,
+  enabled: liveConfig('telemetryEnabled'),
   buffer: [],
   sink: null,
   timer: null,
@@ -39,8 +39,10 @@ const state = {
   toolCounts: new Map(),
 };
 
+// Live: a runtime setting changed through set_config_value applies to the next call, not the next
+// restart.
 export function telemetryEnabled() {
-  return state.enabled;
+  return liveConfig('telemetryEnabled');
 }
 
 export function telemetryStatus() {
@@ -97,7 +99,7 @@ export function recordEvent(event, detail = {}) {
   if (name === 'policy_block') state.counters.policyBlocks += 1;
   if (name === 'session_started') state.counters.sessionsStarted += 1;
   if (name === 'write_denied') state.counters.writeDenials += 1;
-  if (!state.enabled) return;
+  if (!telemetryEnabled()) return;
   if (state.buffer.length >= BUFFER_LIMIT) {
     state.dropped += 1;
     return;

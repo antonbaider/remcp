@@ -44,6 +44,66 @@
         "destructive_justification": "Not destructive: returns account facts; nothing is created, changed or removed."
       }
     },
+    "create_pairing_command": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Not read only: it writes one short-lived pairing code for the signed-in account and returns the command that uses it, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Not open world: no device is contacted; the code is stored in the ReMCP database and expires.",
+        "destructive_justification": "Not destructive: creates a single-use pairing code; it changes no user data and the same code is returned while it is valid."
+      }
+    },
+    "get_recent_tool_calls": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Read only: it reads the signed-in account’s own recent tool-call metadata (tool, device name, outcome, duration) and returns the result without writing anything.",
+        "open_world_justification": "Not open world: reads the ReMCP database only; no machine is contacted.",
+        "destructive_justification": "Not destructive: returns metadata; nothing is created, changed or removed."
+      }
+    },
+    "get_usage_statistics": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Read only: it reads the signed-in account’s own aggregated usage for the requested window and returns the result without writing anything.",
+        "open_world_justification": "Not open world: reads the ReMCP database only; no machine is contacted.",
+        "destructive_justification": "Not destructive: returns counts and durations; nothing is created, changed or removed."
+      }
+    },
+    "get_configuration": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Read only: it reads this deployment’s version, endpoints, runtime package, retention and limits, plus the paired machines’ versions and returns the result without writing anything.",
+        "open_world_justification": "Not open world: reads the ReMCP server configuration; no machine is contacted.",
+        "destructive_justification": "Not destructive: returns configuration; nothing is created, changed or removed."
+      }
+    },
+    "rename_device": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Not read only: it renames one computer paired to the signed-in account, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Not open world: writes the account’s own device record; no machine is contacted.",
+        "destructive_justification": "Not destructive: changes a display name only: accepted keys are limited to device_name, and access roots, command guardrails and resource limits cannot be set through any tool."
+      }
+    },
     "read_file": {
       "annotations": {
         "readOnlyHint": true,

@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
-import { runtimeConfig } from './config.mjs';
+import { liveConfig, runtimeConfig } from './config.mjs';
 
 export class ToolError extends Error {}
 
@@ -111,7 +111,7 @@ function frameBytes(text) {
 }
 
 export function truncate(text, maxBytes) {
-  const limit = maxBytes || runtimeConfig.maxOutputBytes;
+  const limit = maxBytes || liveConfig('maxOutputBytes');
   const value = String(text);
   if (Buffer.byteLength(value, 'utf8') <= limit && frameBytes(value) <= limit) return value;
   // Shrink until the escaped frame fits, so the escaped size is what the caller gets is bounded.
@@ -191,7 +191,7 @@ export function pageLines(lines, offset, length) {
     return { start: total - count, end: total, slice: lines.slice(total - count) };
   }
   const start = Math.min(requested, total);
-  const end = Math.min(start + Math.max(1, Math.trunc(length || runtimeConfig.maxReadLines)), total);
+  const end = Math.min(start + Math.max(1, Math.trunc(length || liveConfig('maxReadLines'))), total);
   return { start, end, slice: lines.slice(start, end) };
 }
 

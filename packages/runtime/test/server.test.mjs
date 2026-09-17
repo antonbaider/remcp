@@ -42,9 +42,14 @@ test('runtime advertises a fully annotated tool surface', async () => {
       }
       assert.equal(tool.inputSchema.type, 'object');
       assert.ok(tool.description.length > 20, `${tool.name} needs a real description`);
-      assert.doesNotMatch(tool.description, /execute_command|analysis tool|Desktop Commander|telemetry/i, `${tool.name} leaks upstream wording`);
+      assert.doesNotMatch(tool.description, /execute_command|analysis tool|Desktop Commander/i, `${tool.name} leaks upstream wording`);
     }
-    assert.equal(hasTool('set_config_value'), false, 'the runtime must not let a model rewrite its own limits');
+    // The one configuration tool, and it is narrow by construction: a model may change a preference
+    // and the context limits, never the settings that decide what this computer exposes.
+    const setter = tools.find(tool => tool.name === 'set_config_value');
+    assert.ok(setter, 'a runtime preference can be changed');
+    assert.match(setter.inputSchema.properties.key.description, /telemetryEnabled/);
+    assert.doesNotMatch(JSON.stringify(setter), /allowedRoots|blockedCommands|defaultShell|maxWriteBytes/);
     assert.equal(hasTool('write_pdf'), false, 'heavy document tooling stays out of the device runtime');
   } finally {
     await client.close();

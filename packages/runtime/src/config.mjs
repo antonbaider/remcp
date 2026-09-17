@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { expandHome } from './util.mjs';
 
 const configDir = process.env.REMCP_RUNTIME_CONFIG_DIR || path.join(os.homedir(), '.config', 'remcp');
@@ -96,6 +96,61 @@ export const runtimeConfig = Object.freeze({
   name: String(process.env.REMCP_RUNTIME_NAME || file.name || os.hostname()).trim(),
   telemetryEnabled,
 });
+
+// --- settings a model may change, and nothing else ------------------------------------------------
+//
+// Desktop Commander lets a model rewrite any of its own configuration, including the directories it
+// may touch and the commands it must refuse. On ReMCP those two decide what the computer exposes, so
+// they stay with the person at the computer: `allowedRoots`, `blockedCommands`, `dangerousCommands`
+// (the command guardrail), `defaultShell`, `maxWriteBytes` and `name` are not settable from a tool.
+//
+// What is settable is a preference and two context limits — telemetry opt-out, the read and buffer
+// line limits, and the result size — all of which the person can also change in runtime.json. The
+// values apply immediately (the tool handlers read them through liveConfig) and are written back to
+// runtime.json so they survive a restart.
+const SETTABLE = Object.freeze({
+  telemetryEnabled: { type: 'boolean' },
+  maxReadLines: { type: 'integer', min: 1, max: 100_000 },
+  maxBufferedLines: { type: 'integer', min: 1, max: 1_000_000 },
+  maxOutputBytes: { type: 'integer', min: 1024, max: HARD_OUTPUT_CEILING_BYTES },
+});
+export const settableKeys = Object.freeze(Object.keys(SETTABLE));
+
+const live = new Map();
+
+// Every read of a settable value goes through here, so a change applies to the next call.
+export function liveConfig(key) {
+  return live.has(key) ? live.get(key) : runtimeConfig[key];
+}
+
+export function validateConfigValue(key, raw) {
+  const rule = SETTABLE[key];
+  if (!rule) {
+    throw new Error(`Unsupported setting: ${key || '(empty)'}. Settable here: ${settableKeys.join(', ')}. Access roots, blocked commands, the command guardrail, the shell and write limits are changed by the person at this computer.`);
+  }
+  if (rule.type === 'boolean') {
+    if (typeof raw === 'boolean') return raw;
+    if (typeof raw === 'string') return booleanValue(raw, null) ?? (() => { throw new Error(`${key} must be true or false`); })();
+    throw new Error(`${key} must be true or false`);
+  }
+  const value = Math.trunc(Number(raw));
+  if (!Number.isFinite(value)) throw new Error(`${key} must be a number`);
+  if (value < rule.min || value > rule.max) throw new Error(`${key} must be between ${rule.min} and ${rule.max}`);
+  return value;
+}
+
+export function applyLiveConfig(key, value) {
+  live.set(key, value);
+}
+
+// Writes only the changed key back, with the file mode the rest of the runtime expects.
+export function persistConfigValue(key, value) {
+  const file = readConfigFile();
+  const next = { ...file, [key]: value };
+  mkdirSync(runtimeConfigDir, { recursive: true, mode: 0o700 });
+  writeFileSync(runtimeConfigPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  return runtimeConfigPath;
+}
 
 // A configuration the user cannot read is not a configuration we should quietly ignore:
 // it is how allowedRoots and an opt-out silently disappear.

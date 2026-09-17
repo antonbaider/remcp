@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
 import { access, chmod, chown, copyFile, cp, lstat, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
-import { runtimeConfig } from '../config.mjs';
+import { liveConfig, runtimeConfig } from '../config.mjs';
 import { diffStats, unifiedDiff } from '../diff.mjs';
 import { applyHunks, parseUnifiedDiff } from '../patch.mjs';
 import { countEvent, recordEvent } from '../telemetry.mjs';
@@ -97,7 +97,7 @@ export async function readFileTool(args) {
   const { content, encoding, eol } = await readTextFile(absolute);
   const lines = splitLines(content);
   const offset = Number.isFinite(Number(args.offset)) ? Math.trunc(Number(args.offset)) : 0;
-  const length = clampInteger(args.length, runtimeConfig.maxReadLines, 1, 10000);
+  const length = clampInteger(args.length, liveConfig('maxReadLines'), 1, 10000);
   const { start, end, slice } = pageLines(lines, offset, length);
   const notes = `${encoding === 'utf8' ? '' : ` ${encoding}`}${eol === '\r\n' ? ' CRLF' : ''}`;
   const header = lines.length
@@ -121,7 +121,7 @@ export async function readMultipleFilesTool(args) {
     try {
       const { content } = await readTextFile(absolute);
       const lines = splitLines(content);
-      const limit = runtimeConfig.maxReadLines;
+      const limit = liveConfig('maxReadLines');
       const slice = lines.slice(0, limit);
       const suffix = lines.length > limit ? `\n… ${lines.length - limit} more lines truncated` : '';
       sections.push(`${displayPath(absolute)}:\n${slice.join('\n')}${suffix}`);
@@ -506,7 +506,7 @@ export async function readFilesTool(args) {
   const root = await resolveSafePath(args.path || '.');
   const pattern = typeof args.pattern === 'string' && args.pattern.trim() ? args.pattern.trim() : '**/*';
   const maxFiles = clampInteger(args.max_files, 100, 1, 500);
-  const maxLinesPerFile = clampInteger(args.max_lines_per_file, runtimeConfig.maxReadLines, 1, 20000);
+  const maxLinesPerFile = clampInteger(args.max_lines_per_file, liveConfig('maxReadLines'), 1, 20000);
   const includeIgnored = args.include_ignored === true;
   const matcher = globToRegExp(pattern);
   const rootInfo = await stat(root).catch(() => null);

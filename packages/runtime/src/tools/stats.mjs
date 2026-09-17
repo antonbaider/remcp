@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { describeConfig, runtimeConfig } from '../config.mjs';
+import { describeConfig, liveConfig, runtimeConfig } from '../config.mjs';
 import { dangerousPatternIds } from '../policy.mjs';
 import { listProcessSessions, listSearchSessions } from '../sessions.mjs';
 import { telemetryStatus } from '../telemetry.mjs';
@@ -29,9 +29,9 @@ export async function getRuntimeInfoTool() {
       remoteFeatureFlags: telemetry.remoteFeatureFlags,
     },
     limits: {
-      maxOutputBytes: runtimeConfig.maxOutputBytes,
-      maxReadLines: runtimeConfig.maxReadLines,
-      maxBufferedLines: runtimeConfig.maxBufferedLines,
+      maxOutputBytes: liveConfig('maxOutputBytes'),
+      maxReadLines: liveConfig('maxReadLines'),
+      maxBufferedLines: liveConfig('maxBufferedLines'),
       maxWriteBytes: runtimeConfig.maxWriteBytes,
       maxConcurrentConnections: 1,
     },

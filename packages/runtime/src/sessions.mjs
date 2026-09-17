@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { runtimeConfig } from './config.mjs';
+import { liveConfig, runtimeConfig } from './config.mjs';
 
 const processSessions = new Map();
 const searchSessions = new Map();
@@ -13,7 +13,7 @@ const MAX_PARTIAL_BYTES = 64 * 1024;
 const MAX_BUFFERED_CHARS = 8 * 1024 * 1024;
 
 function trimBuffer(session) {
-  const overflow = session.lines.length - runtimeConfig.maxBufferedLines;
+  const overflow = session.lines.length - liveConfig('maxBufferedLines');
   if (overflow > 0) {
     const removed = session.lines.splice(0, overflow);
     for (const line of removed) session.bufferedChars -= line.length;

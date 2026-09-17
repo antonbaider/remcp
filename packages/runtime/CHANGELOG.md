@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.20
+
+- `set_config_value`: a model may change this runtime’s own preferences (telemetry opt-out, read
+  and buffer line limits, result size) while it is running; the change applies immediately and is
+  saved to runtime.json. Access roots, blocked commands, the command guardrail, the shell and the
+  write limit stay with the person at this computer and are refused by the tool.
+
 ## 0.2.16
 
 - Mark cursor-consuming `read_process_output` as non-idempotent so clients do not assume retries

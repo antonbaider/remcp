@@ -3,6 +3,7 @@ import { searchToolHandlers } from './tools/search.mjs';
 import { terminalToolHandlers } from './tools/terminal.mjs';
 import { systemToolHandlers } from './tools/system.mjs';
 import { statsToolHandlers } from './tools/stats.mjs';
+import { configToolHandlers } from './tools/config.mjs';
 
 // Every tool answers with a text result (image tools add an image part as well), so the
 // declared output schema is the same shape everywhere and clients can rely on it.
@@ -736,6 +737,23 @@ export const toolDefinitions = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: readOnly,
     handler: statsToolHandlers.get_runtime_stats,
+  },
+  {
+    name: 'set_config_value',
+    title: 'Change runtime setting',
+    description: 'Change one of this runtime’s own preferences on this computer: telemetryEnabled, maxReadLines, maxBufferedLines or maxOutputBytes. The change applies immediately and is saved to runtime.json. Access roots, blocked commands, the command guardrail, the shell and the write limit cannot be set through MCP — they stay with the person at this computer.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'telemetryEnabled (true/false), maxReadLines, maxBufferedLines or maxOutputBytes.' },
+        value: { description: 'New value: a boolean for telemetryEnabled, a number for the limits.' },
+      },
+      required: ['key', 'value'],
+      additionalProperties: false,
+    },
+    // Preference only, and the same call twice leaves the same state.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: configToolHandlers.set_config_value,
   },
 ];
 
