@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.2.30
+
+- **Unrestricted mode.** `REMCP_RUNTIME_UNRESTRICTED=1` (or `"unrestricted": true` in `runtime.json`,
+  or `remcp godmode on`) lifts the access roots, the configured command blocklist and the
+  catastrophic-command guardrail for this computer. It is not settable through MCP: `set_config_value`
+  still accepts only the four preferences it lists, so a model cannot widen its own reach.
+  `get_runtime_info` reports `policy.unrestricted` and says how to turn it off. Size limits
+  (`maxWriteBytes`, `maxOutputBytes`, line limits) are unchanged, and commands still run as the user
+  the agent runs as.
+
+## 0.2.29
+
+- Screenshot failures on GNOME Wayland name the tool that works (`gnome-screenshot`); previously the
+  message suggested `grim`, which cannot read a GNOME session at all.
+
+## 0.2.26
+
+- Screenshot failures explain the platform's own gate: Screen Recording on macOS, an interactive
+  session on Windows, `grim`/`gnome-screenshot` on Wayland, and "no graphical session" on a server.
+- A PNG above the inline limit is saved on the computer and the result says how to fetch it in
+  chunks, instead of failing the call.
+
+## 0.2.25
+
+- `EACCES`/`EPERM`/`EROFS`/`ENOSPC`/`EBUSY` from the file system are explained instead of printed
+  raw: macOS privacy folders (Full Disk Access for the exact `node` binary), Windows Controlled
+  folder access, Linux ownership, read-only mounts and full disks. Every filesystem failure in the
+  runtime goes through it.
+
 ## 0.2.20
 
 - `set_config_value`: a model may change this runtime’s own preferences (telemetry opt-out, read

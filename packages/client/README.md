@@ -27,6 +27,7 @@ remcp install                Install or repair the user service
 remcp uninstall              Remove the user service
 remcp uninstall --purge      Remove the service and the global packages
 remcp telemetry [status|on|off]
+remcp godmode [status|on|off]
 remcp --version
 ```
 
@@ -47,7 +48,8 @@ Two things it deliberately does not do:
   or `unrestricted: true` in `~/.config/remcp/runtime.json`) can turn it on. That is what keeps a
   prompt injection from becoming root.
 - **It does not make the agent root.** Commands run as the user the agent runs as. `sudo` is no longer
-  blocked, but it still needs your sudoers rules; to run everything as root, run the agent as root.
+  blocked, but the operating system still asks for a password unless your sudoers rules say otherwise;
+  a non-interactive command cannot type one. Nothing in this mode grants root by itself.
 
 While it is on, `get_runtime_info` reports `policy.unrestricted: true`, so the model can see it and
 say so instead of assuming the guardrails are still there.
@@ -61,6 +63,32 @@ not an access-root problem. The tools cannot prompt for it either, because the a
 background service: open **System Settings → Privacy & Security → Full Disk Access**, add the `node`
 binary that `remcp doctor` prints, and run `remcp start`. Folders outside those four need no new
 permission, and `remcp doctor` reports the state of each one.
+
+## Updates
+
+The agent asks the server which versions it should run when it connects and every six hours, installs
+a newer client and runtime in the background, and restarts the service so they take effect. A failed
+install is retried no more often than every thirty minutes, so a broken release cannot turn into an
+install loop. `remcp update` does the same immediately; `remcp auto-update off` turns the automatic
+check off for a machine that must not change on its own.
+
+## Screenshots
+
+`take_screenshot` returns the screen of this computer as an image, and each desktop keeps its own
+gate — ReMCP names the one that refused instead of printing a generic error:
+
+- **macOS** wants Screen Recording for the binary that runs the tools (`remcp doctor` prints its
+  path), then `remcp start`.
+- **Windows** needs an unlocked interactive session; a locked or signed-out machine cannot be
+  captured.
+- **Linux on Wayland** needs a capture backend: `grim` on wlroots desktops (sway, hyprland), and
+  `gnome-screenshot` on GNOME — GNOME refuses the shell's own screenshot API to background processes
+  and `grim` cannot read a GNOME session. On X11, `scrot`, ImageMagick `import` or `gnome-screenshot`
+  all work.
+- A machine with no graphical session (a server, a container) says so: there is nothing to capture.
+
+A screenshot larger than the inline limit is saved on the computer, and the result says where it is
+and how to fetch it in chunks.
 
 ## What runs on your computer
 

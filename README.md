@@ -126,7 +126,9 @@ history log, so nothing about your work is recorded on the machine.
   services, packages, databases, containers, `sudo`, git — all through `start_process`.
 - **Full transfer in both directions.** `read_binary`/`write_binary` move any file, `create_archive`
   and `extract_archive` move whole trees, and `take_screenshot` shows the desktop.
-- **Optional hardening, not defaults.** `allowedRoots` confines the device when an operator sets it,
+- **Optional hardening, not defaults.** `remcp godmode on` lifts the roots, the blocklist and the
+  guardrail for one computer — and only a person at that computer can turn it on; no MCP tool
+  accepts it. `allowedRoots` confines the device when an operator sets it,
   `dangerousCommands` can warn or refuse catastrophic commands, and `blockedCommands` adds a deny
   list. All three are off unless configured, and the runtime refuses to start — loudly — if its
   `runtime.json` cannot be parsed, so a limit can never be dropped silently.
