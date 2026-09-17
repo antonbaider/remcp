@@ -14,9 +14,10 @@ import { countEvent, recordEvent } from '../telemetry.mjs';
 import { clampInteger, decodeText, displayPath, fail, globToRegExp, image, looksBinary, multi, pageLines, resolveSafePath, splitLines, text } from '../util.mjs';
 
 const MAX_INLINE_FILE_BYTES = 20 * 1024 * 1024;
-// An image travels base64-encoded, which costs a third more bytes, and the MCP stdio client drops
-// the connection above 10 MB. 4 MiB of image is ~5.4 MiB on the wire, which leaves room for the
-// summary text and the frame overhead; anything larger goes through read_binary in chunks instead.
+// An image travels base64-encoded, which costs a third more bytes. The agent's stdio transport holds
+// 24 MiB and the relay's WebSocket frames hold 32 MiB, so 8 MiB of image is ~11 MiB on the wire with
+// room to spare; anything larger goes through read_binary in chunks instead. Binary chunks are 4 MiB
+// for the same reason: four times fewer round trips for the same file.
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_BINARY_CHUNK_BYTES = 1024 * 1024;
 const IMAGE_TYPES = new Map([
@@ -921,6 +922,26 @@ const SCREENSHOT_COMMANDS = [
   { command: 'screencapture', args: file => ['-x', file] },
 ];
 
+// What to tell the person when no capture worked. The general "install a screenshot tool" line was
+// wrong on a Mac, where `screencapture` ships with the system and fails only because TCC has not
+// granted Screen Recording — the exact failure behind "the screenshot returned an error" reports.
+function screenshotAdvice(attempts, { platform = process.platform, env = process.env, execPath = process.execPath } = {}) {
+  if (platform === 'darwin') {
+    return `macOS refused the screen capture (${attempts.join('; ') || 'no capture command ran'}). Grant Screen Recording to the binary that runs the tools — System Settings → Privacy & Security → Screen Recording → + → ${execPath} — then restart the agent with \`remcp start\`. macOS requires it for screencapture even when the file itself is writable.`;
+  }
+  if (platform === 'win32') {
+    return `Windows refused the screen capture (${attempts.join('; ') || 'no capture command ran'}). Screen capture needs an interactive desktop session: a machine where nobody is signed in, or a locked session, cannot be captured. Sign in on that computer and try again.`;
+  }
+  const wayland = /wayland/i.test(String(env.XDG_SESSION_TYPE || '')) || Boolean(env.WAYLAND_DISPLAY);
+  if (!env.DISPLAY && !wayland) {
+    return `This computer has no graphical session (no DISPLAY and no Wayland display), so there is nothing to capture — servers and containers usually have none.`;
+  }
+  if (wayland) {
+    return `Could not capture the screen on Wayland (${attempts.join('; ') || 'no capture command ran'}). Install \`grim\` (Wayland's capture tool) — X11 tools such as scrot or ImageMagick import cannot read a Wayland session.`;
+  }
+  return `Could not capture the screen. Install one of grim, gnome-screenshot, spectacle, scrot, or ImageMagick import (tried: ${attempts.join('; ') || 'none available'}).`;
+}
+
 function windowsScreenshotScript(file) {
   return [
     'Add-Type -AssemblyName System.Windows.Forms,System.Drawing',
@@ -949,19 +970,21 @@ export async function takeScreenshotTool(args) {
     }
   }
   if (!await pathExists(file)) {
-    fail(`Could not capture the screen. Install one of grim, gnome-screenshot, spectacle, scrot, or ImageMagick import (tried: ${attempts.join('; ') || 'none available'}).`);
+    fail(screenshotAdvice(attempts));
   }
   const info = await stat(file);
-  if (info.size > MAX_IMAGE_BYTES) {
-    await rm(file, { force: true });
-    fail(`Screenshot is ${info.size} bytes, above the ${MAX_IMAGE_BYTES}-byte inline limit`);
+  if (info.size <= MAX_IMAGE_BYTES) {
+    const buffer = await readFile(file);
+    if (args.keep !== true) await rm(file, { force: true });
+    return multi([
+      { type: 'text', text: `Screenshot of ${os.hostname()} (${info.size} bytes)${args.keep === true ? ` saved at ${displayPath(file)}` : ''}` },
+      image(buffer.toString('base64'), 'image/png'),
+    ]);
   }
-  const buffer = await readFile(file);
-  if (args.keep !== true) await rm(file, { force: true });
-  return multi([
-    { type: 'text', text: `Screenshot of ${os.hostname()} (${info.size} bytes)${args.keep === true ? ` saved at ${displayPath(file)}` : ''}` },
-    image(buffer.toString('base64'), 'image/png'),
-  ]);
+  // A big screen is not an error: the PNG stays on the computer and the model is told how to fetch it
+  // in chunks, which is the same path every other large file takes. Failing here used to lose the
+  // screenshot entirely.
+  return text(`Screenshot of ${os.hostname()} captured: ${info.size} bytes, above the ${MAX_IMAGE_BYTES}-byte inline limit, so it is saved at ${displayPath(file)} instead of being returned as an image. Fetch it with read_binary using chunks of up to ${MAX_BINARY_CHUNK_BYTES} bytes (offset_bytes and length_bytes), or ask for a smaller region.`);
 }
 
 export const fileToolHandlers = {
