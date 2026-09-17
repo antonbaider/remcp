@@ -170,7 +170,10 @@ function macLaunchDomain() {
 function installMacService(cliPath = globalCliPath()) {
   const domain = macLaunchDomain();
   const target = `${domain}/${macServiceLabel}`;
-  const cliScript = fs.realpathSync(cliPath);
+  // launchd wants an absolute path; a symlinked prefix that npm has not materialised yet (or a path
+  // that is about to be replaced by the next install) must not abort the repair — a stale plist is
+  // exactly the loop this function exists to break.
+  const cliScript = fs.existsSync(cliPath) ? fs.realpathSync(cliPath) : path.resolve(cliPath);
   fs.mkdirSync(path.dirname(macServiceFile), { recursive: true });
   fs.mkdirSync(path.dirname(macLogFile), { recursive: true });
   const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${macServiceLabel}</string>\n<key>ProgramArguments</key><array><string>${xmlEscape(process.execPath)}</string><string>${xmlEscape(cliScript)}</string><string>start</string></array>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n<key>ProcessType</key><string>Background</string>\n<key>StandardOutPath</key><string>${xmlEscape(macLogFile)}</string>\n<key>StandardErrorPath</key><string>${xmlEscape(macLogFile)}</string>\n</dict></plist>\n`;
@@ -265,14 +268,24 @@ function ensureServiceIfRecorded(config) {
         const unit = fs.readFileSync(linuxServiceFile, 'utf8');
         const expected = `ExecStart=${quoteSystemd(cliPath)} start`;
         if (!unit.includes(expected)) {
-          const repaired = unit.replace(/^ExecStart=.*$/m, expected);
-          if (repaired === unit) throw new Error('remcp-agent.service has no ExecStart line to repair');
-          fs.writeFileSync(linuxServiceFile, repaired);
-          run('systemctl', ['--user', 'daemon-reload']);
+          const repaired = /^ExecStart=/m.test(unit) ? unit.replace(/^ExecStart=.*$/m, expected) : '';
+          if (!repaired) {
+            // A unit that lost its ExecStart line (edited by hand, or written as `ExecStart = …`) cannot
+            // be patched by substitution. Rewriting the whole unit is what keeps the machine out of the
+            // "old CLI forever" loop, so fall back to a fresh install instead of giving up.
+            installLinuxService(cliPath);
+          } else {
+            fs.writeFileSync(linuxServiceFile, repaired);
+            run('systemctl', ['--user', 'daemon-reload']);
+          }
         }
       }
     } else if (platform === 'darwin') {
-      if (!fs.existsSync(macServiceFile)) installMacService(cliPath);
+      // launchd bakes the interpreter and the CLI path into the plist, so a Node manager that moves
+      // its global prefix leaves the agent launching a file that no longer exists — the same loop the
+      // Linux unit above is repaired for. Reinstalling is idempotent (bootout, bootstrap, enable,
+      // kickstart) and is what the Windows task already does on every update.
+      installMacService(cliPath);
     } else if (platform === 'win32') installWindowsService(cliPath);
     return true;
   } catch (error) {
