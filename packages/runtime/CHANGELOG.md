@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.34 — 2026-09-18
+
+- Lockstep security release with the ReMCP client. Runtime behavior is unchanged from 0.2.33.
+
 ## 0.2.33
 
 - Linux Wayland screenshots now use the standard XDG Desktop Portal before compositor-specific

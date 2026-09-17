@@ -32,7 +32,7 @@ runtime.
 | Package | What it is |
 | --- | --- |
 | [`@remcp/remcp`](packages/client) | The device client: pairing, the outbound agent, the background service, and the usage-metrics switch. |
-| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **43 MCP tools** for files, images, binary transfer, archives, screenshots, search, terminal sessions, and processes, with **two direct dependencies**. |
+| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **43 MCP tools** for files, images, binary transfer, archives, screenshots, search, terminal sessions, and processes, with **one dependency**. |
 
 ## Install
 
@@ -104,7 +104,7 @@ than one:
 
 | Not included | Why |
 | --- | --- |
-| `write_pdf`, spreadsheet and DOCX editing | These are the reason other servers ship Puppeteer, `sharp`, and `exceljs` — hundreds of megabytes and three install scripts on your computer. ReMCP keeps two small direct runtime dependencies instead. |
+| `write_pdf`, spreadsheet and DOCX editing | These are the reason other servers ship Puppeteer, `sharp`, and `exceljs` — hundreds of megabytes and three install scripts on your computer. ReMCP keeps one dependency instead. |
 | `get_config` / `set_config_value` | A model must not be able to rewrite its own device limits. Configuration is yours, on disk. `get_runtime_info` shows the effective policy read-only. |
 | URL fetching in `read_file` | It is a server-side request forgery surface. The runtime reads your computer, not the internet. |
 
