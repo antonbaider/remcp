@@ -72,6 +72,13 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci --no-audit --no-fund
       - run: npm test
+      # Trusted publishing needs npm 11.5.1 or newer; the npm bundled with Node 22 is
+      # 10.9.x, which signs provenance but cannot exchange the OIDC token, so the registry
+      # answers an unauthenticated PUT with 404.
+      - name: Use an npm that supports trusted publishing
+        run: |
+          npm install --global npm@latest
+          npm --version
       # Trusted publishing: npm exchanges the workflow's GitHub OIDC token for a
       # short-lived credential, so no NPM_TOKEN secret and no one-time password are
       # involved. Configure it once per package on npmjs.com:
