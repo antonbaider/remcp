@@ -1,0 +1,89 @@
+// What remcp doctor answers: whether this machine can really run a tool, and where the runtime is
+// allowed to write. The checks install nothing and report the exact failing step.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import process from 'node:process';
+import { spawnSync } from 'node:child_process';
+import { localRuntimeEntry } from '../agent.mjs';
+import { npmVersion, resolveNpm } from '../npm.mjs';
+import { PACKAGE_NAME, VERSION } from '../version.mjs';
+
+import { npm, runtimeConfigFile } from './env.mjs';
+
+// when it really owns this process: a terminal gets an explicit instruction instead of a silent exit
+// that would take the device offline.
+// One real handshake with the local runtime, plus everything needed to explain a failure: where the
+// entry resolved, whether the package is installed, the node that would run it, and the exact error.
+export async function diagnoseLocalRuntime(cfg) {
+  const packageName = cfg.runtime?.packageName || '';
+  const diagnosis = {
+    platform: `${process.platform} ${process.arch}`,
+    node: process.execPath,
+    nodeVersion: process.versions.node,
+    packageName,
+    packageSpec: cfg.runtime?.packageSpec || '',
+    installedRuntime: installedVersion(packageName),
+    installedClient: installedVersion(PACKAGE_NAME),
+  };
+  const resolved = resolveNpm();
+  const npmInfo = npmVersion(resolved);
+  diagnosis.npm = npmInfo ? { version: npmInfo.version, source: npmInfo.source } : { error: `npm could not be executed (tried ${resolved.source})` };
+  let entry = '';
+  try {
+    entry = localRuntimeEntry(cfg.runtime);
+    diagnosis.entry = entry;
+    diagnosis.entryExists = fs.existsSync(entry);
+  } catch (error) {
+    diagnosis.entry = null;
+    diagnosis.entryExists = false;
+    diagnosis.verdict = 'runtime-not-installed';
+    diagnosis.error = error instanceof Error ? error.message : String(error);
+    diagnosis.hint = `Reinstall with: npx --yes ${PACKAGE_NAME}@latest update`;
+    return diagnosis;
+  }
+  if (!diagnosis.entryExists) {
+    diagnosis.verdict = 'runtime-entry-missing';
+    diagnosis.hint = `Reinstall with: npx --yes ${PACKAGE_NAME}@latest update`;
+    return diagnosis;
+  }
+  try {
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+    const client = new Client({ name: 'remcp-doctor', version: VERSION });
+    const stdio = new StdioClientTransport({ command: process.execPath, args: [entry], env: { ...process.env }, maxBufferSize: 4 * 1024 * 1024 });
+    const stderr = [];
+    stdio.onerror = error => stderr.push(String(error?.message || error));
+    await client.connect(stdio);
+    diagnosis.runtimeVersion = client.getServerVersion()?.version || 'unknown';
+    const tools = await client.listTools(undefined, { timeout: 20000 });
+    diagnosis.tools = tools.tools.length;
+    diagnosis.verdict = 'ok';
+    await client.close();
+    return diagnosis;
+  } catch (error) {
+    diagnosis.verdict = 'runtime-handshake-failed';
+    diagnosis.error = error instanceof Error ? error.message : String(error);
+    diagnosis.hint = 'Run the entry above by hand to see its output, then reinstall with: npx --yes @remcp/remcp@latest update';
+    return diagnosis;
+  }
+}
+
+// Reads the version a freshly installed global package reports, so an update that installed
+// nothing (wrong prefix, npm cache, permissions) is reported instead of assumed successful.
+// The roots the runtime is allowed to work in, as the person configured them. An empty list means
+// "the whole file system", so the doctor probes the home directory instead of guessing a root.
+export function runtimeAllowedRoots() {
+  try {
+    const configured = JSON.parse(fs.readFileSync(runtimeConfigFile, 'utf8')).allowedRoots;
+    if (Array.isArray(configured) && configured.length) return configured.map(root => String(root).replace(/^~/, os.homedir()));
+  } catch {}
+  return [os.homedir()];
+}
+
+export function installedVersion(packageName) {
+  const prefix = spawnSync(npm.command, [...npm.args, 'prefix', '--global'], { encoding: 'utf8' });
+  if (prefix.error || prefix.status !== 0) return null;
+  const manifest = path.join(String(prefix.stdout || '').trim(), 'lib', 'node_modules', ...packageName.split('/'), 'package.json');
+  try { return JSON.parse(fs.readFileSync(manifest, 'utf8')).version || null; } catch { return null; }
+}

@@ -18,7 +18,7 @@
     "README.md"
   ],
   "scripts": {
-    "check": "node --check bin/remcp.mjs && node --check src/cli.mjs && node --check src/agent.mjs && node --check src/runtime.mjs && node --check src/version.mjs && node --check src/npm.mjs && node --check src/fs-access.mjs",
+    "check": "node --check bin/remcp.mjs && node --check src/agent.mjs && node --check src/cli.mjs && node --check src/cli/config.mjs && node --check src/cli/connect.mjs && node --check src/cli/doctor.mjs && node --check src/cli/env.mjs && node --check src/cli/service.mjs && node --check src/cli/shell.mjs && node --check src/fs-access.mjs && node --check src/npm.mjs && node --check src/runtime.mjs && node --check src/version.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
