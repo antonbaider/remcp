@@ -17,6 +17,9 @@ const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_CHECK_TIMEOUT_MS = 5000;
 // A version that failed to install is retried after this cooldown instead of on every reconnect.
 const UPDATE_RETRY_COOLDOWN_MS = 30 * 60 * 1000;
+// How long a handing-over agent waits for its replacement to take the device over before it keeps
+// running itself. Long enough for a fresh process to install nothing, connect and be registered.
+const REPLACEMENT_HANDOVER_TIMEOUT_MS = 20_000;
 const METRICS_INTERVAL_MS = 60_000;
 const TELEMETRY_QUEUE_LIMIT = 500;
 const TELEMETRY_BATCH_LIMIT = 100;
@@ -109,7 +112,7 @@ export function updateDecision({ advertised, cliVersion, runtimeVersion, runtime
 // Applies a freshly installed version. Exiting is what a supervisor needs; without one the new CLI is
 // started in this process' place. Either way the agent stops holding a stale runtime, which is what
 // makes an update actually take effect on a machine that no service manager watches.
-async function restartToApplyUpdate(cli, stopAgent, markStopping, onRuntimeRepaired) {
+async function restartToApplyUpdate(cli, stopAgent, markStopping, onRuntimeRepaired, isStopping) {
   try {
     const installed = globalInstalledVersion();
     if (installed && !isNewer(installed, VERSION)) {
@@ -130,6 +133,15 @@ async function restartToApplyUpdate(cli, stopAgent, markStopping, onRuntimeRepai
     console.log(`ReMCP ${installed || 'a newer version'} installed and verified (${reported}); restarting to apply it.`);
     if (!supervisorRestart()) {
       spawn(process.execPath, [cli, 'start'], { detached: true, stdio: 'ignore', env: { ...process.env } }).unref();
+      // Stepping aside is only safe once the replacement really holds the device: the relay closes
+      // this socket with 1012 ('replaced') the moment another agent takes the machine over, and that
+      // close is what stops this process. Without the wait, a replacement that cannot start left the
+      // machine connected in `/health` and offline everywhere else, with nobody left to retry.
+      await new Promise(resolve => setTimeout(resolve, REPLACEMENT_HANDOVER_TIMEOUT_MS));
+      if (!isStopping()) {
+        console.error(`The replacement agent did not take over within ${Math.round(REPLACEMENT_HANDOVER_TIMEOUT_MS / 1000)}s; keeping ${VERSION} running. Retry with: remcp update`);
+        return;
+      }
     }
     markStopping();
     await stopAgent().catch(() => {});
@@ -158,9 +170,27 @@ function globalInstalledVersion() {
   }
 }
 
-function supervisorRestart() {
-  if (process.env.INVOCATION_ID || process.env.JOURNAL_STREAM) return 'systemd';
-  try { if (existsSync('/.dockerenv')) return 'docker'; } catch {}
+// True when this process is the one a service manager owns: launchd and systemd's system manager run
+// a unit's main process as a child of PID 1, and `systemd --user` runs it as a child of the user
+// manager. Anything else — a terminal, a shell inside another unit, a CI runner job — has nobody
+// waiting to start the agent again.
+function parentIsServiceManager() {
+  if (process.ppid === 1) return true;
+  if (process.platform === 'win32') return false;
+  try { return readFileSync(`/proc/${process.ppid}/comm`, 'utf8').trim() === 'systemd'; } catch { return false; }
+}
+
+// What starts the agent again after it exits to apply an update, or null when it has to start its own
+// replacement. systemd sets INVOCATION_ID and JOURNAL_STREAM for a unit and every child of that unit
+// inherits them, so a `remcp start` run from a shell inside a service (a CI runner, a systemd-run
+// scope, another agent) believed a supervisor would bring it back: the update exited into nothing and
+// the workspace showed the machine offline until someone started the agent by hand. Only the unit's
+// own main process is restarted, so that is what the check requires.
+//
+// Injectable for tests: the verdict must not depend on the machine that runs them.
+export function supervisorRestart({ platform = process.platform, dockerenv = existsSync('/.dockerenv'), parentOurs = parentIsServiceManager() } = {}) {
+  if (parentOurs) return platform === 'darwin' ? 'launchd' : 'systemd';
+  if (dockerenv) return 'docker';
   return null;
 }
 
@@ -500,7 +530,7 @@ export async function runAgent(options) {
             runtimeError = error instanceof Error ? error.message : String(error);
           }
           if (!runtimeDown && !stopping) await startRuntime();
-        });
+        }, () => stopping);
       });
       child.on('error', error => {
         updateInFlight = false;

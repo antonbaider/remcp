@@ -43,15 +43,19 @@ export function npmCandidates({ nodePath = process.execPath, home = os.homedir()
 
 // Resolves how to run npm. `source` is reported by `remcp doctor` and logged at agent startup so a
 // machine where npm cannot be found is obvious before an update is needed.
-export function resolveNpm({ nodePath = process.execPath, home = os.homedir(), platform = process.platform } = {}) {
+//
+// `exists` is injectable so a test can describe a machine with no npm at all instead of asking the
+// machine running the test: the Linux candidate list carries fixed prefixes (/usr, /usr/local) that
+// a CI runner or a developer laptop usually does have, which made that case untestable there.
+export function resolveNpm({ nodePath = process.execPath, home = os.homedir(), platform = process.platform, exists = existsSync } = {}) {
   const override = String(process.env.REMCP_NPM || '').trim();
   if (override) return { command: override, args: [], source: `REMCP_NPM=${override}` };
   const { cli, binaries } = npmCandidates({ nodePath, home, platform });
   for (const candidate of cli) {
-    if (existsSync(candidate)) return { command: nodePath, args: [candidate], source: `node ${candidate}` };
+    if (exists(candidate)) return { command: nodePath, args: [candidate], source: `node ${candidate}` };
   }
   for (const candidate of binaries) {
-    if (existsSync(candidate)) return { command: candidate, args: [], source: candidate };
+    if (exists(candidate)) return { command: candidate, args: [], source: candidate };
   }
   return { command: platform === 'win32' ? 'npm.cmd' : 'npm', args: [], source: 'PATH' };
 }

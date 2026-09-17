@@ -4,7 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { localRuntimeEntry, runAgent } from './agent.mjs';
+import { localRuntimeEntry, runAgent, supervisorRestart } from './agent.mjs';
 import { npmVersion, resolveNpm } from './npm.mjs';
 import { isRuntimeSpecFor, normalizeRuntime } from './runtime.mjs';
 import { PACKAGE_NAME, VERSION } from './version.mjs';
@@ -241,15 +241,9 @@ function restartPersistentServiceIfInstalled() {
 // The agent the user installed with `remcp install` is the one this CLI manages. A machine can also
 // be supervised by its own systemd unit, by Docker, or by a terminal, and in those cases installing
 // a new version is not enough: the running process keeps the old code until something restarts it.
-// systemd marks every unit process with INVOCATION_ID and Docker leaves /.dockerenv, so those two
-// cases can be handed over by exiting (the supervisor starts the new build); anything else gets an
-// explicit instruction instead of a silent exit that would take the device offline.
-function supervisorRestart() {
-  if (process.env.INVOCATION_ID || process.env.JOURNAL_STREAM) return 'systemd';
-  try { if (fs.existsSync('/.dockerenv')) return 'docker'; } catch {}
-  return null;
-}
-
+// `supervisorRestart` (agent.mjs) answers which of those is true, and only reports a service manager
+// when it really owns this process: a terminal gets an explicit instruction instead of a silent exit
+// that would take the device offline.
 // One real handshake with the local runtime, plus everything needed to explain a failure: where the
 // entry resolved, whether the package is installed, the node that would run it, and the exact error.
 async function diagnoseLocalRuntime(cfg) {

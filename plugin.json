@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "remcp",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "description": "Work with files, images, searches, terminal sessions, and processes on computers you have explicitly paired with ReMCP.",
   "author": {
     "name": "Anton Baider",
@@ -23,7 +23,7 @@
         "displayName": "ReMCP",
         "shortDescription": "Control your own computers",
         "developerName": "Anton Baider",
-        "longDescription": "ReMCP connects ChatGPT and Codex to computers you have explicitly paired, and to nothing else. Each computer runs an outbound agent with its own revocable credential, so no inbound port is opened and access can be withdrawn from the workspace at any time. Work with files and directories, read images and screenshots, transfer binaries, create and extract archives, search local content, and run or manage terminal sessions and processes. Tool annotations distinguish reads, reversible additions, destructive changes, and commands that can reach external systems. An isolated review sandbox is available for evaluation without a real computer.",
+        "longDescription": "ReMCP connects ChatGPT and Codex to computers you have explicitly paired, and to nothing else. Each computer runs an outbound agent with its own revocable credential, so no inbound port is opened and access can be withdrawn from the workspace at any time. Work with files and directories, read images and screenshots, transfer binaries, create and extract archives, search local content, and run or manage terminal sessions and processes. Read-only tools are annotated as such, and every tool that changes local state is annotated with a destructive hint. An isolated review sandbox is available for evaluation without a real computer.",
         "category": "Developer Tools",
         "websiteURL": "https://remcp.delio24.com",
         "privacyPolicyURL": "https://remcp.delio24.com/privacy",

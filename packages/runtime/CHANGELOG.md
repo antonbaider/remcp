@@ -2,7 +2,8 @@
 
 ## 0.2.16
 
-- Mark cursor-consuming `read_process_output` as non-idempotent so clients do not assume retries replay the same output.
+- Mark cursor-consuming `read_process_output` as non-idempotent so clients do not assume retries
+  replay the same output.
 
 ## 0.2.11
 

@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "ReMCP",
     "subtitle": "Control your own computers",
-    "description": "ReMCP lets an authenticated user work with computers they have explicitly paired: files and directories, images and screenshots, binary transfer, archives, searches, terminal sessions, and processes. Every device has its own revocable credential and connects outbound, so nothing listens on the computer. Tool annotations distinguish reads, reversible additions, destructive changes, and commands that can reach external systems. Reviewers can evaluate everything against an isolated per-account sandbox device that never touches a real computer.",
+    "description": "ReMCP lets an authenticated user work with computers they have explicitly paired: files and directories, images and screenshots, binary transfer, archives, searches, terminal sessions, and processes. Every device has its own revocable credential and connects outbound, so nothing listens on the computer. Read-only tools are annotated as read-only and every state-changing tool carries a destructive hint. Reviewers can evaluate everything against an isolated per-account sandbox device that never touches a real computer.",
     "category": "DEVELOPER_TOOLS"
   },
   "tools": {
