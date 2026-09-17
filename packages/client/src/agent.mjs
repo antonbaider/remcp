@@ -267,6 +267,8 @@ export async function runAgent(options) {
   let mcp = null;
   let transport = null;
   let runtimeRestartDelay = RUNTIME_RESTART_BASE_MS;
+  let runtimeRestartTimer = null;
+  let stopPromise = null;
 
   function runtimeEnv() {
     // The SDK's stdio transport does not inherit the environment by default; spreading
@@ -279,7 +281,19 @@ export async function runAgent(options) {
 
   async function startRuntime() {
     if (stopping) return;
-    runtimeDown = false;
+    clearTimeout(runtimeRestartTimer);
+    runtimeRestartTimer = null;
+    runtimeDown = true;
+    const previous = mcp;
+    mcp = null;
+    if (previous) await previous.close().catch(error => console.error('Runtime cleanup failed:', error.message));
+    if (stopping) return;
+    try { runtimeEntry = localRuntimeEntry(options.runtime); }
+    catch (error) {
+      runtimeError = error.message;
+      handleRuntimeExit('missing');
+      return;
+    }
     const client = new Client({ name: 'remcp-agent', version: VERSION });
     const stdio = new StdioClientTransport({ command: process.execPath, args: [runtimeEntry], env: runtimeEnv(), maxBufferSize: RUNTIME_STDIO_BUFFER_BYTES });
     mcp = client;
@@ -295,17 +309,18 @@ export async function runAgent(options) {
         telemetryQueue.push(event);
       }
     };
-    stdio.onclose = () => handleRuntimeExit('closed');
+    client.onclose = () => { if (mcp === client) handleRuntimeExit('closed'); };
     stdio.onerror = error => console.error(`ReMCP local runtime error: ${error instanceof Error ? error.message : String(error)}`);
     try {
       await client.connect(stdio);
+      if (stopping || mcp !== client) { await client.close(); return; }
       runtimeVersion = client.getServerVersion()?.version || runtimeVersion;
       runtimeRestarts += 1;
       runtimeRestartDelay = RUNTIME_RESTART_BASE_MS;
       runtimeDown = false;
       runtimeError = '';
       console.log(`ReMCP local runtime ready (${runtimeVersion})`);
-      send({ type: 'metrics', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown: false }) });
+      send({ type: 'metrics', runtimeState: 'ready', runtimeError: '', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown: false }) });
       if (runtimeRestarts > 1) queueEvent({ event: 'runtime_restart', at: Date.now(), count: runtimeRestarts, success: true });
     } catch (error) {
       runtimeDown = true;
@@ -316,14 +331,15 @@ export async function runAgent(options) {
   }
 
   function handleRuntimeExit(reason) {
-    if (stopping || runtimeDown) return;
+    if (stopping || runtimeRestartTimer) return;
     runtimeDown = true;
     const delay = jitter(runtimeRestartDelay);
     runtimeRestartDelay = Math.min(RUNTIME_RESTART_MAX_MS, runtimeRestartDelay * 2);
     console.error(`ReMCP local runtime ${reason}; restarting in ${delay}ms`);
     queueEvent({ event: 'runtime_down', at: Date.now(), reason: reason.slice(0, 24) });
-    send({ type: 'metrics', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown: true }) });
-    setTimeout(() => { void startRuntime(); }, delay).unref?.();
+    send({ type: 'metrics', runtimeState: 'down', runtimeError, metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown: true }) });
+    runtimeRestartTimer = setTimeout(() => { void startRuntime(); }, delay);
+    runtimeRestartTimer.unref?.();
   }
 
   // --- relay connection ---------------------------------------------------------------
@@ -382,10 +398,10 @@ export async function runAgent(options) {
       } else {
         throw new Error('The ReMCP local runtime is restarting. Retry in a few seconds.');
       }
-      ws.send(JSON.stringify({ type: 'response', id: message.id, result }));
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'response', id: message.id, result }));
     } catch (error) {
       const cancelled = controller.signal.aborted;
-      ws.send(JSON.stringify({ type: 'response', id: message.id, error: { message: cancelled ? 'Cancelled: the client stopped waiting for this call.' : error instanceof Error ? error.message : String(error) } }));
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'response', id: message.id, error: { message: cancelled ? 'Cancelled: the client stopped waiting for this call.' : error instanceof Error ? error.message : String(error) } }));
     } finally {
       inFlight.delete(message.id);
       pendingRequests = Math.max(0, pendingRequests - 1);
@@ -435,6 +451,7 @@ export async function runAgent(options) {
       }
     });
     ws.on('close', code => {
+      for (const controller of inFlight.values()) controller.abort();
       if (stopping) return;
       if (code === 1008 || revoked) {
         // The relay closes with 1008 when the device was revoked. Retrying forever would
@@ -544,7 +561,7 @@ export async function runAgent(options) {
 
   telemetryTimer = setInterval(() => {
     if (activeSocket?.readyState === 1) {
-      send({ type: 'metrics', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown, queueDepth: telemetryQueue.length }) });
+      send({ type: 'metrics', runtimeState: runtimeDown ? 'down' : 'ready', runtimeError, metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown, queueDepth: telemetryQueue.length }) });
       flushTelemetry();
     }
   }, METRICS_INTERVAL_MS);
@@ -555,14 +572,18 @@ export async function runAgent(options) {
   updateTimer.unref?.();
 
   async function stop() {
-    if (stopping) return;
+    if (stopPromise) return stopPromise;
     stopping = true;
+    clearTimeout(runtimeRestartTimer);
     if (telemetryTimer) clearInterval(telemetryTimer);
     clearInterval(telemetryFlushTimer);
     clearInterval(updateTimer);
-    try { activeSocket?.close(); } catch {}
-    try { await mcp?.close(); } catch {}
-    try { await transport?.close(); } catch {}
+    for (const controller of inFlight.values()) controller.abort();
+    activeSocket?.terminate();
+    stopPromise = Promise.allSettled([mcp?.close(), transport?.close()]).then(results => {
+      for (const result of results) if (result.status === 'rejected') console.error('Agent cleanup failed:', result.reason?.message || 'unknown error');
+    });
+    return stopPromise;
   }
 
   process.once('SIGINT', () => void stop().finally(() => process.exit(0)));

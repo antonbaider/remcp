@@ -19,7 +19,9 @@ credential under `~/.config/remcp/`, installs the runtime from npm, and register
 ```text
 remcp start                  Run the device agent in the foreground
 remcp status                 Show version, pairing, runtime, telemetry and server health as JSON
-remcp doctor                 Alias for status
+remcp doctor                 Same report plus a real tool handshake with the local runtime, and which
+                             macOS privacy folders (Desktop, Documents, Downloads, iCloud Drive) this
+                             computer currently lets ReMCP use
 remcp update                 Update the client and runtime, then restart the user service
 remcp install                Install or repair the user service
 remcp uninstall              Remove the user service
@@ -30,6 +32,16 @@ remcp --version
 
 `remcp status` reports the runtime the device would install, whether the agent service is running,
 and the current usage-metrics state, so a support request can be answered with one paste.
+
+## macOS folder permissions
+
+macOS protects Desktop, Documents, Downloads and iCloud Drive. Until it is granted access, ReMCP
+answers those writes with the errno the kernel returns:
+`EACCES: permission denied, mkdir '/Users/you/Desktop/…'` — on a Mac this is not a ReMCP setting and
+not an access-root problem. The tools cannot prompt for it either, because the agent runs as a
+background service: open **System Settings → Privacy & Security → Full Disk Access**, add the `node`
+binary that `remcp doctor` prints, and run `remcp start`. Folders outside those four need no new
+permission, and `remcp doctor` reports the state of each one.
 
 ## What runs on your computer
 

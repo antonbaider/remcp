@@ -18,7 +18,7 @@
     "README.md"
   ],
   "scripts": {
-    "check": "node --check bin/remcp.mjs && node --check src/cli.mjs && node --check src/agent.mjs && node --check src/runtime.mjs && node --check src/version.mjs && node --check src/npm.mjs",
+    "check": "node --check bin/remcp.mjs && node --check src/cli.mjs && node --check src/agent.mjs && node --check src/runtime.mjs && node --check src/version.mjs && node --check src/npm.mjs && node --check src/macos-permissions.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

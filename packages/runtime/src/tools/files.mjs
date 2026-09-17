@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { liveConfig, runtimeConfig } from '../config.mjs';
 import { documentKind, readDocxText, readPdfText } from '../documents.mjs';
 import { diffStats, unifiedDiff } from '../diff.mjs';
+import { describeFilesystemFailure } from '../permissions.mjs';
 import { applyHunks, parseUnifiedDiff } from '../patch.mjs';
 import { countEvent, recordEvent } from '../telemetry.mjs';
 import { clampInteger, decodeText, displayPath, fail, globToRegExp, image, looksBinary, multi, pageLines, resolveSafePath, splitLines, text } from '../util.mjs';
@@ -135,7 +136,7 @@ export async function readMultipleFilesTool(args) {
     try {
       absolute = await resolveSafePath(entry, 'paths[]');
     } catch (error) {
-      sections.push(`${String(entry)}: error - ${error instanceof Error ? error.message : String(error)}`);
+      sections.push(`${String(entry)}: error - ${describeFilesystemFailure(error, { path: error?.path })}`);
       continue;
     }
     try {
@@ -146,7 +147,7 @@ export async function readMultipleFilesTool(args) {
       const suffix = lines.length > limit ? `\n… ${lines.length - limit} more lines truncated` : '';
       sections.push(`${displayPath(absolute)}:\n${slice.join('\n')}${suffix}`);
     } catch (error) {
-      sections.push(`${displayPath(absolute)}: error - ${error instanceof Error ? error.message : String(error)}`);
+      sections.push(`${displayPath(absolute)}: error - ${describeFilesystemFailure(error, { path: error?.path })}`);
     }
   }
   return text(sections.join('\n\n'));
@@ -555,7 +556,7 @@ export async function readFilesTool(args) {
       sections.push(`===== ${displayPath(file)} (${lines.length} lines${encoding === 'utf8' ? '' : `, ${encoding}`}) =====\n${slice.join('\n')}${suffix}`);
     } catch (error) {
       skipped += 1;
-      sections.push(`===== ${displayPath(file)} =====\n(skipped: ${error instanceof Error ? error.message : String(error)})`);
+      sections.push(`===== ${displayPath(file)} =====\n(skipped: ${describeFilesystemFailure(error, { path: error?.path })})`);
     }
   }
   const notes = [];
@@ -588,7 +589,7 @@ export async function writeFilesTool(args) {
       await writeFile(absolute, content, entry.mode === 'append' ? { encoding: 'utf8', flag: 'a' } : 'utf8');
       results.push(`${entry.mode === 'append' ? 'appended' : 'wrote'} ${displayPath(absolute)} (${bytes} bytes)`);
     } catch (error) {
-      results.push(`failed ${target}: ${error instanceof Error ? error.message : String(error)}`);
+      results.push(`failed ${target}: ${describeFilesystemFailure(error, { path: error?.path })}`);
     }
   }
   countEvent('bytesWritten', totalBytes);
@@ -631,7 +632,7 @@ export async function deletePathsTool(args) {
       deleted += 1;
       results.push(`deleted ${displayPath(absolute)}`);
     } catch (error) {
-      results.push(`failed ${entry}: ${error instanceof Error ? error.message : String(error)}`);
+      results.push(`failed ${entry}: ${describeFilesystemFailure(error, { path: error?.path })}`);
     }
   }
   return text(`${deleted}/${paths.length} path(s) deleted\n${results.join('\n')}`, deleted !== paths.length);
@@ -660,7 +661,7 @@ export async function copyPathsTool(args) {
       copied += 1;
       results.push(`copied ${displayPath(source)} → ${displayPath(destination)}`);
     } catch (error) {
-      results.push(`failed ${entry?.source ?? '?'}: ${error instanceof Error ? error.message : String(error)}`);
+      results.push(`failed ${entry?.source ?? '?'}: ${describeFilesystemFailure(error, { path: error?.path })}`);
     }
   }
   return text(`${copied}/${pairs.length} path(s) copied\n${results.join('\n')}`, copied !== pairs.length);
@@ -693,7 +694,7 @@ export async function movePathsTool(args) {
       moved += 1;
       results.push(`moved ${displayPath(source)} → ${displayPath(destination)}`);
     } catch (error) {
-      results.push(`failed ${entry?.source ?? '?'}: ${error instanceof Error ? error.message : String(error)}`);
+      results.push(`failed ${entry?.source ?? '?'}: ${describeFilesystemFailure(error, { path: error?.path })}`);
     }
   }
   return text(`${moved}/${pairs.length} path(s) moved\n${results.join('\n')}`, moved !== pairs.length);
@@ -732,7 +733,7 @@ export async function applyPatchTool(args) {
       results.push(`${dryRun ? 'would patch' : 'patched'} ${displayPath(absolute)} · ${applied.length}/${file.hunks.length} hunk(s), +${stats.added}/-${stats.removed} lines${fuzzy ? `, ${fuzzy} with fuzz` : ''}${failed.length ? `, ${failed.length} hunk(s) did not match` : ''}`);
       if (dryRun) results.push(unifiedDiff(original, updated, { oldLabel: displayPath(absolute), newLabel: 'after' }));
     } catch (error) {
-      results.push(`failed ${target}: ${error instanceof Error ? error.message : String(error)}`);
+      results.push(`failed ${target}: ${describeFilesystemFailure(error, { path: error?.path })}`);
     }
   }
   const failedCount = results.filter(line => line.startsWith('failed')).length;
@@ -773,7 +774,7 @@ export async function setPermissionsTool(args) {
       changed += 1;
     } catch (error) {
       // One protected file must not abort a recursive change; the caller gets the full picture.
-      failures.push(`${displayPath(target)}: ${error instanceof Error ? error.message : String(error)}`);
+      failures.push(`${displayPath(target)}: ${describeFilesystemFailure(error, { path: error?.path })}`);
     }
   }
   const summary = `Set mode ${raw}${uid !== null || gid !== null ? ` (uid ${uid ?? '-'} gid ${gid ?? '-'})` : ''} on ${changed} path(s) starting at ${displayPath(absolute)}.`;
@@ -793,7 +794,7 @@ export async function createDirectoryTool(args) {
       await mkdir(absolute, { recursive: true });
       created.push(displayPath(absolute));
     } catch (error) {
-      failed.push(`${entry}: ${error instanceof Error ? error.message : String(error)}`);
+      failed.push(`${entry}: ${describeFilesystemFailure(error, { path: error?.path })}`);
     }
   }
   const header = `${created.length} director${created.length === 1 ? 'y' : 'ies'} ready`;

@@ -1,4 +1,5 @@
 import { toolHandlers } from './catalog.mjs';
+import { describeFilesystemFailure } from './permissions.mjs';
 import { recordEvent } from './telemetry.mjs';
 import { ToolError, text } from './util.mjs';
 
@@ -29,6 +30,7 @@ export async function invokeTool(name, args = {}, extra = {}) {
   } catch (error) {
     recordEvent('tool_call', { tool: definition.name, durationMs: performance.now() - started, success: false, errorKind: errorKind(error) });
     if (error instanceof ToolError) return text(error.message, true);
-    return text(`Tool ${name} failed: ${error instanceof Error ? error.message : String(error)}`, true);
+    // A filesystem error arrives with a bare errno; the explanation is what the person can act on.
+    return text(`Tool ${name} failed: ${describeFilesystemFailure(error, { path: error?.path })}`, true);
   }
 }
