@@ -20,6 +20,30 @@
         "destructive_justification": "Not destructive: returns a list; nothing is created, changed or removed."
       }
     },
+    "ping_device": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Read only: it sends a liveness request to one paired computer through the relay and returns the result without writing anything.",
+        "open_world_justification": "Not open world: contacts only the paired computer through the ReMCP relay.",
+        "destructive_justification": "Not destructive: the device agent answers with its own facts; nothing is created, changed or removed."
+      }
+    },
+    "who_am_i": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Read only: it reads the signed-in account record, its paired device count and this month of tool-call usage and returns the result without writing anything.",
+        "open_world_justification": "Not open world: reads the ReMCP account only, no machine is contacted.",
+        "destructive_justification": "Not destructive: returns account facts; nothing is created, changed or removed."
+      }
+    },
     "read_file": {
       "annotations": {
         "readOnlyHint": true,
