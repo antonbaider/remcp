@@ -9,6 +9,7 @@ import { liveConfig, runtimeConfig } from '../config.mjs';
 import { documentKind, readDocxText, readPdfText } from '../documents.mjs';
 import { diffStats, unifiedDiff } from '../diff.mjs';
 import { describeFilesystemFailure } from '../permissions.mjs';
+import { capturePortalScreenshot, isWaylandSession } from '../screenshot-portal.mjs';
 import { applyHunks, parseUnifiedDiff } from '../patch.mjs';
 import { countEvent, recordEvent } from '../telemetry.mjs';
 import { clampInteger, decodeText, displayPath, fail, globToRegExp, image, looksBinary, multi, pageLines, resolveSafePath, splitLines, text } from '../util.mjs';
@@ -936,15 +937,14 @@ function screenshotAdvice(attempts, { platform = process.platform, env = process
   if (!env.DISPLAY && !wayland) {
     return `This computer has no graphical session (no DISPLAY and no Wayland display), so there is nothing to capture — servers and containers usually have none.`;
   }
-  // GNOME on Wayland is its own case: Mutter does not expose wlr-screencopy, so grim cannot capture
-  // it at all, and the shell's own D-Bus method answers `Screenshot is not allowed` to anything that
-  // is not the screenshot portal. The tool that does work is gnome-screenshot (it goes through the
-  // portal and asks the person once), so the message names that instead of sending people to grim.
+  // GNOME on Wayland is its own case: Mutter does not expose wlr-screencopy, so grim cannot
+  // capture it. ReMCP tries the compositor-supported XDG Desktop Portal first; local screenshot
+  // commands remain fallbacks for environments where the portal is unavailable.
   if (wayland && /gnome/i.test(String(env.XDG_CURRENT_DESKTOP || ''))) {
-    return `Could not capture the screen on GNOME Wayland (${attempts.join('; ') || 'no capture command ran'}). Install the screenshot helper once — \`sudo apt install gnome-screenshot\` (or the equivalent for this distribution) — and approve the permission dialog it shows; GNOME blocks the shell's own screenshot API for background processes, and grim cannot read a GNOME session.`;
+    return `Could not capture the screen on GNOME Wayland (${attempts.join('; ') || 'no capture backend ran'}). ReMCP tried the XDG Desktop Portal first, which is GNOME's supported screenshot API. Make sure xdg-desktop-portal and xdg-desktop-portal-gnome are installed and the agent is running inside the signed-in user's graphical session; command-line capture helpers are only fallbacks.`;
   }
   if (wayland) {
-    return `Could not capture the screen on Wayland (${attempts.join('; ') || 'no capture command ran'}). Install \`grim\` (Wayland's capture tool) — X11 tools such as scrot or ImageMagick import cannot read a Wayland session.`;
+    return `Could not capture the screen on Wayland (${attempts.join('; ') || 'no capture backend ran'}). ReMCP tried the XDG Desktop Portal first. Verify xdg-desktop-portal is running; on wlroots compositors, \`grim\` is also supported as a fallback.`;
   }
   return `Could not capture the screen. Install one of grim, gnome-screenshot, spectacle, scrot, or ImageMagick import (tried: ${attempts.join('; ') || 'none available'}).`;
 }
@@ -969,11 +969,27 @@ export async function takeScreenshotTool(args) {
     const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', windowsScreenshotScript(file)], { encoding: 'utf8', timeout: 30000 });
     attempts.push(`powershell: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
   } else {
-    for (const candidate of SCREENSHOT_COMMANDS) {
-      if (spawnSync('which', [candidate.command], { encoding: 'utf8' }).status !== 0) continue;
-      const result = spawnSync(candidate.command, candidate.args(file), { encoding: 'utf8', timeout: 30000 });
-      if (result.status === 0 && await pathExists(file)) break;
-      attempts.push(`${candidate.command}: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+    // GNOME and other modern Wayland compositors intentionally prevent X11/wlroots
+    // screenshot commands from reading the desktop. The freedesktop Screenshot portal
+    // is the compositor-supported API and must run before command-line fallbacks.
+    if (process.platform === 'linux' && isWaylandSession()) {
+      try {
+        await capturePortalScreenshot(file);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `xdg-desktop-portal: ${String(error)}`;
+        attempts.push(message);
+        if (error && typeof error === 'object' && error.code === 'PORTAL_CANCELLED') {
+          fail(`Screen capture was cancelled in the desktop permission dialog (${message}).`);
+        }
+      }
+    }
+    if (!await pathExists(file)) {
+      for (const candidate of SCREENSHOT_COMMANDS) {
+        if (spawnSync('which', [candidate.command], { encoding: 'utf8' }).status !== 0) continue;
+        const result = spawnSync(candidate.command, candidate.args(file), { encoding: 'utf8', timeout: 30000 });
+        if (result.status === 0 && await pathExists(file)) break;
+        attempts.push(`${candidate.command}: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+      }
     }
   }
   if (!await pathExists(file)) {

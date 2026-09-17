@@ -516,7 +516,7 @@ export const toolDefinitions = [
   {
     name: 'take_screenshot',
     title: 'Take screenshot',
-    description: 'Capture the screen of the paired computer and return it as an image, for GUI work, visual checks, and demonstrating what is on screen. Uses grim, gnome-screenshot, spectacle, scrot, ImageMagick import, screencapture, or PowerShell depending on the platform.',
+    description: 'Capture the screen of the paired computer and return it as an image, for GUI work, visual checks, and demonstrating what is on screen. Uses the standard desktop screenshot portal on Wayland, with grim, gnome-screenshot, spectacle, scrot, ImageMagick import, screencapture, or PowerShell fallbacks depending on the platform.',
     inputSchema: {
       type: 'object',
       properties: {

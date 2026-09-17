@@ -190,7 +190,7 @@ MCP server.
 | | Desktop Commander 0.2.50 | ReMCP runtime 0.2.0 |
 | --- | --- | --- |
 | Tools | 26, including config mutators and document tooling | 35, including binary transfer, archives, screenshots, and diffs |
-| Runtime dependencies | 34 (Supabase, Puppeteer/md-to-pdf, `sharp`, `exceljs`, Tiptap, ripgrep download) | 1 (`@modelcontextprotocol/sdk`) |
+| Runtime dependencies | 34 (Supabase, Puppeteer/md-to-pdf, `sharp`, `exceljs`, Tiptap, ripgrep download) | 2 direct (`@modelcontextprotocol/sdk`, `@jellybrick/dbus-next`) |
 | Install scripts | `postinstall` posts an install payload that ignores the telemetry setting | none |
 | Telemetry | opt-out, 51 event names, remote feature flags, A/B assignment, third-party processor | opt-out, whitelisted event schema, no endpoint, no flags |
 | Install size | 3.78 MB unpacked, 249 files | ~110 kB unpacked, 20 files |

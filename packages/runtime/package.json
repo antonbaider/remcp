@@ -24,6 +24,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@jellybrick/dbus-next": "^0.11.3",
     "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "repository": {

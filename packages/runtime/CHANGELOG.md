@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Linux Wayland screenshots now use the standard XDG Desktop Portal before compositor-specific
+  command-line fallbacks. The runtime subscribes to the portal response before requesting the
+  capture, handles fast and legacy request handles without losing the signal, respects an explicit
+  cancellation, and cleans the portal-created intermediate PNG after copying it.
+
 ## 0.2.30
 
 - **Unrestricted mode.** `REMCP_RUNTIME_UNRESTRICTED=1` (or `"unrestricted": true` in `runtime.json`,
