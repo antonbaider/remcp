@@ -79,6 +79,21 @@ function isNewer(candidate, current) {
   return false;
 }
 
+// What the agent should install, if anything. The client version alone is not enough: a machine
+// that already runs the newest client but an older local runtime would otherwise never catch up,
+// because its runtime is what executes the tools.
+export function updateDecision({ advertised, cliVersion, runtimeVersion }) {
+  const cliSpec = String(advertised?.cli || '');
+  const runtimeSpec = String(advertised?.runtime || '');
+  const installedRuntime = String(runtimeVersion || '');
+  const runtimeKnown = Boolean(installedRuntime) && !/^unknown$/i.test(installedRuntime);
+  if (isNewer(cliSpec, cliVersion)) return { needed: true, target: cliSpec, runtime: runtimeSpec, reason: 'client' };
+  if (runtimeKnown && runtimeSpec && isNewer(runtimeSpec, installedRuntime)) {
+    return { needed: true, target: cliSpec || `@remcp/remcp@${cliVersion}`, runtime: runtimeSpec, reason: 'runtime' };
+  }
+  return { needed: false, target: cliSpec, runtime: runtimeSpec, reason: 'current' };
+}
+
 function globalCliEntry() {
   const prefix = spawnSync(npmCommand, ['prefix', '--global'], { encoding: 'utf8' });
   if (prefix.error || prefix.status !== 0) return null;
@@ -343,9 +358,10 @@ export async function runAgent(options) {
       if (minimum && isNewer(minimum, VERSION)) {
         console.error(`ReMCP ${VERSION} is older than the minimum supported agent ${minimum}; update with: remcp update`);
       }
-      if (!isNewer(advertised.cli, VERSION)) return;
-      const target = String(advertised.cli);
-      queueEvent({ event: 'agent_update', at: Date.now(), reason: target.slice(0, 32), success: true });
+      const decision = updateDecision({ advertised, cliVersion: VERSION, runtimeVersion });
+      if (!decision.needed) return;
+      const target = decision.target;
+      queueEvent({ event: 'agent_update', at: Date.now(), reason: `${decision.reason}:${target}`.slice(0, 32), success: true });
       const cli = globalCliEntry();
       if (!cli || !existsSync(cli)) {
         console.error(`ReMCP ${target} is available; run: remcp update`);
@@ -353,12 +369,13 @@ export async function runAgent(options) {
       }
       // A version that already failed to install is retried only after a cooldown, so a broken
       // release cannot turn into an install loop.
-      if (target === lastAttemptedVersion && Date.now() - lastAttemptAt < UPDATE_RETRY_COOLDOWN_MS) return;
-      lastAttemptedVersion = target;
+      const attemptKey = `${target}|${decision.runtime}`;
+      if (attemptKey === lastAttemptedVersion && Date.now() - lastAttemptAt < UPDATE_RETRY_COOLDOWN_MS) return;
+      lastAttemptedVersion = attemptKey;
       lastAttemptAt = Date.now();
       updateInFlight = true;
-      console.log(`Updating ReMCP to ${target}${advertised.runtime ? ` with ${advertised.runtime}` : ''}…`);
-      const child = spawn(process.execPath, [cli, 'update', '--trust-runtime', ...(advertised.runtime ? ['--runtime', advertised.runtime] : [])], {
+      console.log(`Updating ReMCP to ${target}${decision.runtime ? ` with ${decision.runtime}` : ''} (${decision.reason})…`);
+      const child = spawn(process.execPath, [cli, 'update', '--trust-runtime', ...(decision.runtime ? ['--runtime', decision.runtime] : [])], {
         detached: true,
         stdio: 'ignore',
         env: { ...process.env },
