@@ -1,0 +1,11 @@
+interface:
+  display_name: "Change code and verify"
+  short_description: "Edit code on a paired machine and run its own checks"
+  default_prompt: "Fix the failing test in my project on the paired machine and show the command you ran."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "remcp"
+      description: "Tools for computers explicitly paired with ReMCP"
+      transport: "streamable_http"
+      url: "https://remcp.delio24.com/mcp"

@@ -1,0 +1,11 @@
+interface:
+  display_name: "Safe destructive operations"
+  short_description: "Delete, overwrite or move files without losing anything"
+  default_prompt: "Clean up the build artefacts in my project folder, keeping anything I might still need."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "remcp"
+      description: "Tools for computers explicitly paired with ReMCP"
+      transport: "streamable_http"
+      url: "https://remcp.delio24.com/mcp"

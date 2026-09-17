@@ -4,7 +4,8 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { runAgent } from './agent.mjs';
+import { localRuntimeEntry, runAgent } from './agent.mjs';
+import { npmVersion, resolveNpm } from './npm.mjs';
 import { isRuntimeSpecFor, normalizeRuntime } from './runtime.mjs';
 import { PACKAGE_NAME, VERSION } from './version.mjs';
 
@@ -18,7 +19,9 @@ const macServiceLabel = 'com.remcp.agent';
 const macServiceFile = path.join(home, 'Library', 'LaunchAgents', `${macServiceLabel}.plist`);
 const macLogFile = path.join(home, 'Library', 'Logs', 'remcp-agent.log');
 const windowsTaskName = 'ReMCP Agent';
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+// How npm is invoked is resolved from the running node when possible: a background service has a
+// minimal PATH, which is why auto-update used to find no npm on macOS. See src/npm.mjs.
+const npm = resolveNpm();
 const officialOrigin = 'https://remcp.delio24.com';
 
 function parse(argv) {
@@ -130,7 +133,7 @@ function servicePlatform() {
 }
 
 function globalPrefix() {
-  return output(npmCommand, ['prefix', '--global']);
+  return output(npm.command, [...npm.args, 'prefix', '--global']);
 }
 
 function globalCliPath() {
@@ -139,7 +142,7 @@ function globalCliPath() {
 }
 
 function npmGlobalInstall(...specs) {
-  run(npmCommand, ['install', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
+  run(npm.command, [...npm.args, 'install', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
 }
 
 function quoteSystemd(value) {
@@ -192,7 +195,26 @@ function installPersistentAgent(config) {
   if (platform === 'linux') installLinuxService(cliPath);
   else if (platform === 'darwin') installMacService(cliPath);
   else installWindowsService(cliPath);
+  saveConfig({ ...config, serviceInstalled: true });
   console.log('ReMCP is installed as a background service. Future updates: remcp update');
+}
+
+// A machine that was installed as a service must still be one after an update: if the job is missing
+// (a failed install, a cleaned LaunchAgents directory, a re-imaged user), the next update recreates
+// it instead of leaving a hand-over to a process nobody supervises.
+function ensureServiceIfRecorded(config) {
+  if (config?.serviceInstalled !== true) return false;
+  try {
+    const cliPath = globalCliPath();
+    const platform = servicePlatform();
+    if (platform === 'linux') { if (!fs.existsSync(linuxServiceFile)) installLinuxService(cliPath); }
+    else if (platform === 'darwin') { if (!fs.existsSync(macServiceFile)) installMacService(cliPath); }
+    else if (platform === 'win32') installWindowsService(cliPath);
+    return true;
+  } catch (error) {
+    console.error(`Could not ensure the background service: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
 }
 
 function restartPersistentServiceIfInstalled() {
@@ -228,10 +250,66 @@ function supervisorRestart() {
   return null;
 }
 
+// One real handshake with the local runtime, plus everything needed to explain a failure: where the
+// entry resolved, whether the package is installed, the node that would run it, and the exact error.
+async function diagnoseLocalRuntime(cfg) {
+  const packageName = cfg.runtime?.packageName || '';
+  const diagnosis = {
+    platform: `${process.platform} ${process.arch}`,
+    node: process.execPath,
+    nodeVersion: process.versions.node,
+    packageName,
+    packageSpec: cfg.runtime?.packageSpec || '',
+    installedRuntime: installedVersion(packageName),
+    installedClient: installedVersion(PACKAGE_NAME),
+  };
+  const resolved = resolveNpm();
+  const npmInfo = npmVersion(resolved);
+  diagnosis.npm = npmInfo ? { version: npmInfo.version, source: npmInfo.source } : { error: `npm could not be executed (tried ${resolved.source})` };
+  let entry = '';
+  try {
+    entry = localRuntimeEntry(cfg.runtime);
+    diagnosis.entry = entry;
+    diagnosis.entryExists = fs.existsSync(entry);
+  } catch (error) {
+    diagnosis.entry = null;
+    diagnosis.entryExists = false;
+    diagnosis.verdict = 'runtime-not-installed';
+    diagnosis.error = error instanceof Error ? error.message : String(error);
+    diagnosis.hint = `Reinstall with: npx --yes ${PACKAGE_NAME}@latest update`;
+    return diagnosis;
+  }
+  if (!diagnosis.entryExists) {
+    diagnosis.verdict = 'runtime-entry-missing';
+    diagnosis.hint = `Reinstall with: npx --yes ${PACKAGE_NAME}@latest update`;
+    return diagnosis;
+  }
+  try {
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+    const client = new Client({ name: 'remcp-doctor', version: VERSION });
+    const stdio = new StdioClientTransport({ command: process.execPath, args: [entry], env: { ...process.env }, maxBufferSize: 4 * 1024 * 1024 });
+    const stderr = [];
+    stdio.onerror = error => stderr.push(String(error?.message || error));
+    await client.connect(stdio);
+    diagnosis.runtimeVersion = client.getServerVersion()?.version || 'unknown';
+    const tools = await client.listTools(undefined, { timeout: 20000 });
+    diagnosis.tools = tools.tools.length;
+    diagnosis.verdict = 'ok';
+    await client.close();
+    return diagnosis;
+  } catch (error) {
+    diagnosis.verdict = 'runtime-handshake-failed';
+    diagnosis.error = error instanceof Error ? error.message : String(error);
+    diagnosis.hint = 'Run the entry above by hand to see its output, then reinstall with: npx --yes @remcp/remcp@latest update';
+    return diagnosis;
+  }
+}
+
 // Reads the version a freshly installed global package reports, so an update that installed
 // nothing (wrong prefix, npm cache, permissions) is reported instead of assumed successful.
 function installedVersion(packageName) {
-  const prefix = spawnSync(npmCommand, ['prefix', '--global'], { encoding: 'utf8' });
+  const prefix = spawnSync(npm.command, [...npm.args, 'prefix', '--global'], { encoding: 'utf8' });
   if (prefix.error || prefix.status !== 0) return null;
   const manifest = path.join(String(prefix.stdout || '').trim(), 'lib', 'node_modules', ...packageName.split('/'), 'package.json');
   try { return JSON.parse(fs.readFileSync(manifest, 'utf8')).version || null; } catch { return null; }
@@ -353,8 +431,25 @@ export async function main(argv = process.argv.slice(2)) {
 
   if (command === 'status' || command === 'doctor') {
     const cfg = loadConfig();
-    const health = await fetch(`${cfg.serverUrl}/health?fresh=${Date.now()}`, { cache: 'no-store' }).then(r => r.json());
-    console.log(JSON.stringify({ configured: true, cliVersion: VERSION, deviceId: cfg.deviceId, deviceName: cfg.deviceName, server: cfg.serverUrl, runtime: cfg.runtime, telemetry: telemetryState(), serverHealth: health }, null, 2));
+    const health = await fetch(`${cfg.serverUrl}/health?fresh=${Date.now()}`, { cache: 'no-store' }).then(r => r.json()).catch(error => ({ error: error.message }));
+    const report = {
+      configured: true,
+      cliVersion: VERSION,
+      deviceId: cfg.deviceId,
+      deviceName: cfg.deviceName,
+      server: cfg.serverUrl,
+      runtime: cfg.runtime,
+      telemetry: telemetryState(),
+      serverHealth: health,
+    };
+    // `doctor` answers the question the workspace cannot: is this machine actually able to run a
+    // tool? It resolves the runtime entry, installs nothing, and tries one real MCP handshake with
+    // the runtime, so the failure is visible here instead of only as "runtime not running".
+    if (command === 'doctor') {
+      report.diagnosis = await diagnoseLocalRuntime(cfg);
+    }
+    console.log(JSON.stringify(report, null, 2));
+    if (command === 'doctor' && report.diagnosis.verdict !== 'ok') process.exitCode = 1;
     return;
   }
 
@@ -401,6 +496,7 @@ export async function main(argv = process.argv.slice(2)) {
       return;
     }
     const before = { cli: VERSION, runtime: installedVersion(cfg.runtime.packageName) };
+    ensureServiceIfRecorded(cfg);
     console.log(`Updating ReMCP to the latest published version (${runtimeSpec})…`);
     npmGlobalInstall(`${PACKAGE_NAME}@latest`, runtimeSpec);
     // Only a validated spec is persisted, so a failed update cannot leave the install unable to start.
@@ -425,7 +521,7 @@ export async function main(argv = process.argv.slice(2)) {
     if (flags.purge) {
       const cfg = loadConfig(false);
       const specs = [PACKAGE_NAME, ...(cfg?.runtime?.packageName ? [cfg.runtime.packageName] : [])];
-      run(npmCommand, ['uninstall', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
+      run(npm.command, [...npm.args, 'uninstall', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
     }
     return;
   }
