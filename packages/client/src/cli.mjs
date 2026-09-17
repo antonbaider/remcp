@@ -615,7 +615,7 @@ export async function main(argv = process.argv.slice(2)) {
         unrestricted: state,
         source: runtimeFile.unrestricted === true ? runtimeConfigFile : process.env.REMCP_RUNTIME_UNRESTRICTED === '1' ? 'REMCP_RUNTIME_UNRESTRICTED' : 'default',
         meaning: state
-          ? 'Every path and every command is allowed. Commands run as the user the agent runs as; run the agent as root (sudo remcp install --system) if you want root.'
+          ? 'Every path and every command is allowed. Commands run as the user the agent runs as, so sudo still needs your own sudoers rules; nothing here grants root by itself.'
           : 'The runtime confines file access to its allowed roots and applies its command guardrails.',
       }, null, 2));
       return;
