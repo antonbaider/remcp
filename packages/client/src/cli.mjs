@@ -244,59 +244,6 @@ function restartPersistentServiceIfInstalled() {
 // systemd marks every unit process with INVOCATION_ID and Docker leaves /.dockerenv, so those two
 // cases can be handed over by exiting (the supervisor starts the new build); anything else gets an
 // explicit instruction instead of a silent exit that would take the device offline.
-// One real handshake with the local runtime, plus everything needed to explain a failure: where the
-// entry resolved, whether the package is installed, the node that would run it, and the exact error.
-async function diagnoseLocalRuntime(cfg) {
-  const packageName = cfg.runtime?.packageName || '';
-  const diagnosis = {
-    platform: `${process.platform} ${process.arch}`,
-    node: process.execPath,
-    nodeVersion: process.versions.node,
-    packageName,
-    packageSpec: cfg.runtime?.packageSpec || '',
-    installedRuntime: installedVersion(packageName),
-    installedClient: installedVersion(PACKAGE_NAME),
-  };
-  let entry = '';
-  try {
-    entry = localRuntimeEntry(cfg.runtime);
-    diagnosis.entry = entry;
-    diagnosis.entryExists = fs.existsSync(entry);
-  } catch (error) {
-    diagnosis.entry = null;
-    diagnosis.entryExists = false;
-    diagnosis.verdict = 'runtime-not-installed';
-    diagnosis.error = error instanceof Error ? error.message : String(error);
-    diagnosis.hint = `Reinstall with: npx --yes ${PACKAGE_NAME}@latest update`;
-    return diagnosis;
-  }
-  if (!diagnosis.entryExists) {
-    diagnosis.verdict = 'runtime-entry-missing';
-    diagnosis.hint = `Reinstall with: npx --yes ${PACKAGE_NAME}@latest update`;
-    return diagnosis;
-  }
-  try {
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
-    const client = new Client({ name: 'remcp-doctor', version: VERSION });
-    const stdio = new StdioClientTransport({ command: process.execPath, args: [entry], env: { ...process.env }, maxBufferSize: 4 * 1024 * 1024 });
-    const stderr = [];
-    stdio.onerror = error => stderr.push(String(error?.message || error));
-    await client.connect(stdio);
-    diagnosis.runtimeVersion = client.getServerVersion()?.version || 'unknown';
-    const tools = await client.listTools(undefined, { timeout: 20000 });
-    diagnosis.tools = tools.tools.length;
-    diagnosis.verdict = 'ok';
-    await client.close();
-    return diagnosis;
-  } catch (error) {
-    diagnosis.verdict = 'runtime-handshake-failed';
-    diagnosis.error = error instanceof Error ? error.message : String(error);
-    diagnosis.hint = 'Run the entry above by hand to see its output, then reinstall with: npx --yes @remcp/remcp@latest update';
-    return diagnosis;
-  }
-}
-
 function supervisorRestart() {
   if (process.env.INVOCATION_ID || process.env.JOURNAL_STREAM) return 'systemd';
   try { if (fs.existsSync('/.dockerenv')) return 'docker'; } catch {}

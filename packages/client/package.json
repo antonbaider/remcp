@@ -1,6 +1,6 @@
 {
   "name": "@remcp/remcp",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "ReMCP device client: pair a computer with ReMCP and run the outbound-only agent that hosts the local MCP runtime.",
   "type": "module",
   "license": "MIT",
@@ -18,7 +18,7 @@
     "README.md"
   ],
   "scripts": {
-    "check": "node --check bin/remcp.mjs && node --check src/cli.mjs && node --check src/agent.mjs && node --check src/runtime.mjs && node --check src/version.mjs",
+    "check": "node --check bin/remcp.mjs && node --check src/cli.mjs && node --check src/agent.mjs && node --check src/runtime.mjs && node --check src/version.mjs && node --check src/npm.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
