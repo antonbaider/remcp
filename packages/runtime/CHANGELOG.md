@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.11
+
+- Version lockstep with the client.
+
+
 ## 0.2.10
 
 Tool-call reliability fixes found by the second audit round.

@@ -106,11 +106,14 @@ export function updateDecision({ advertised, cliVersion, runtimeVersion, runtime
 // Applies a freshly installed version. Exiting is what a supervisor needs; without one the new CLI is
 // started in this process' place. Either way the agent stops holding a stale runtime, which is what
 // makes an update actually take effect on a machine that no service manager watches.
-async function restartToApplyUpdate(cli, stopAgent, markStopping) {
+async function restartToApplyUpdate(cli, stopAgent, markStopping, onRuntimeRepaired) {
   try {
     const installed = globalInstalledVersion();
     if (installed && !isNewer(installed, VERSION)) {
-      console.log(`ReMCP ${VERSION} is already the installed version; nothing to restart.`);
+      // The client is current, so the update was a runtime repair: restart the runtime rather than
+      // the whole agent, or a device with no usable runtime would stay broken.
+      console.log(`ReMCP ${VERSION} is already the installed version; restarting the local runtime.`);
+      await onRuntimeRepaired?.();
       return;
     }
     console.log(`ReMCP ${installed || 'a newer version'} installed; restarting to apply it.`);
@@ -200,6 +203,9 @@ export async function runAgent(options) {
   let runtimeVersion = 'unknown';
   let runtimeRestarts = 0;
   let runtimeDown = false;
+  // The reason the runtime is not running, sent to the server so the workspace can show something
+  // actionable instead of a machine that merely looks connected.
+  let runtimeError = '';
   const telemetryQueue = [];
   let telemetryTimer = null;
   // A device whose runtime is missing or unreadable must still run the agent: the agent is what
@@ -209,7 +215,8 @@ export async function runAgent(options) {
     runtimeEntry = localRuntimeEntry(options.runtime);
   } catch (error) {
     runtimeDown = true;
-    console.error(`${error instanceof Error ? error.message : String(error)} The agent keeps running and retries; remcp update reinstalls the runtime.`);
+    runtimeError = error instanceof Error ? error.message : String(error);
+    console.error(`${runtimeError} The agent keeps running and retries; remcp update reinstalls the runtime.`);
   }
 
   // --- local runtime supervision ------------------------------------------------------
@@ -254,11 +261,15 @@ export async function runAgent(options) {
       runtimeVersion = client.getServerVersion()?.version || runtimeVersion;
       runtimeRestarts += 1;
       runtimeRestartDelay = RUNTIME_RESTART_BASE_MS;
+      runtimeDown = false;
+      runtimeError = '';
       console.log(`ReMCP local runtime ready (${runtimeVersion})`);
       send({ type: 'metrics', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown: false }) });
       if (runtimeRestarts > 1) queueEvent({ event: 'runtime_restart', at: Date.now(), count: runtimeRestarts, success: true });
     } catch (error) {
-      console.error(`ReMCP local runtime failed to start: ${error instanceof Error ? error.message : String(error)}`);
+      runtimeDown = true;
+      runtimeError = error instanceof Error ? error.message : String(error);
+      console.error(`ReMCP local runtime failed to start: ${runtimeError}`);
       handleRuntimeExit('failed');
     }
   }
@@ -305,6 +316,7 @@ export async function runAgent(options) {
       platform: process.platform,
       arch: process.arch,
       installSpec: String(options.installSpec || ''),
+      runtimeState: runtimeDown ? 'down' : 'ready',
     })) {
       persistState({ installReported: true });
       console.log('ReMCP reported this installation to your own workspace (disable with `remcp telemetry off`).');
@@ -361,11 +373,13 @@ export async function runAgent(options) {
         arch: process.arch,
         agentVersion: VERSION,
         runtimeVersion,
+        runtimeState: runtimeDown ? 'down' : 'ready',
+        runtimeError,
         telemetryEnabled,
         reconnects,
       }));
       console.log(`Connected to ${serverUrl} as ${deviceName}`);
-      send({ type: 'metrics', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown }) });
+      send({ type: 'metrics', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown }), runtimeState: runtimeDown ? 'down' : 'ready', runtimeError });
       reportInstallOnce();
       flushTelemetry();
       void checkForUpdate();
@@ -463,7 +477,19 @@ export async function runAgent(options) {
           console.error(`remcp update exited with ${code}; keeping ${VERSION} and retrying after the cooldown.`);
           return;
         }
-        void restartToApplyUpdate(cli, stop, () => { stopping = true; });
+        void restartToApplyUpdate(cli, stop, () => { stopping = true; }, async () => {
+          // The packages are installed now: clear the failure, reset the backoff and start again.
+          runtimeRestartDelay = RUNTIME_RESTART_BASE_MS;
+          runtimeDown = false;
+          runtimeError = '';
+          try {
+            runtimeEntry = localRuntimeEntry(options.runtime);
+          } catch (error) {
+            runtimeDown = true;
+            runtimeError = error instanceof Error ? error.message : String(error);
+          }
+          if (!runtimeDown && !stopping) await startRuntime();
+        });
       });
       child.on('error', error => {
         updateInFlight = false;
