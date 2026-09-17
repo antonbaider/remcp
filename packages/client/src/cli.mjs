@@ -252,7 +252,9 @@ async function pairWithDeviceCode(server, flags) {
   console.log(`Approve this computer in your browser: ${approvalUrl}`);
   console.log(`Pairing code: ${grant.user_code}  (expires in ${Math.max(1, Math.round(Number(grant.expires_in || 600) / 60))} minutes)`);
   openInBrowser(approvalUrl);
+  console.log('Waiting for approval… (Ctrl+C to cancel)');
   const deadline = Date.now() + (Number(grant.expires_in) || 600) * 1000;
+  let lastReminder = Date.now();
   const intervalMs = Math.max(1, Number(grant.interval) || 5) * 1000;
   while (Date.now() < deadline) {
     await sleep(intervalMs);
@@ -262,11 +264,19 @@ async function pairWithDeviceCode(server, flags) {
       body: new URLSearchParams({
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
         device_code: String(grant.device_code || ''),
+        machineId: ensureMachineId(),
       }).toString(),
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.device_token) return data;
-    if (data.error === 'authorization_pending' || data.error === 'slow_down') continue;
+    if (data.error === 'authorization_pending' || data.error === 'slow_down') {
+      if (Date.now() - lastReminder > 60_000) {
+        lastReminder = Date.now();
+        const left = Math.max(0, Math.round((deadline - Date.now()) / 60_000));
+        console.log(`Still waiting — approve at ${approvalUrl} (about ${left} min left)`);
+      }
+      continue;
+    }
     if (data.error === 'access_denied') throw new Error('That pairing request was denied in the browser. Run the command again if it was not you.');
     if (data.error === 'expired_token') break;
     throw new Error(`Pairing failed (${response.status}): ${JSON.stringify(data)}`);
@@ -434,7 +444,8 @@ export async function main(argv = process.argv.slice(2)) {
       trustRuntime: Boolean(flags['trust-runtime']) || new URL(server).origin === officialOrigin,
     };
     saveConfig(config);
-    console.log(`Paired ${os.hostname()} with ${server}`);
+    const accountEmail = String(paired.account?.email || '');
+    console.log(`Paired ${os.hostname()} with ${server}${accountEmail ? ` as ${accountEmail}` : ''}`);
     if (flags.install) {
       installPersistentAgent(config);
       return;
@@ -443,6 +454,15 @@ export async function main(argv = process.argv.slice(2)) {
     // a fresh machine expects the connection to be live when the command finishes. A workspace code
     // keeps its old meaning (pair, then `remcp start` or `--install`).
     if (!deviceInitiated) return;
+    // One question, and the machine survives a reboot afterwards. Nothing about the credential
+    // changes: the same revocable token is used either way.
+    if (!flags.install && process.stdin.isTTY) {
+      const answer = await new Promise(resolve => {
+        process.stdout.write('Install ReMCP as a background service so it stays connected after a reboot? [Y/n] ');
+        process.stdin.once('data', chunk => resolve(String(chunk).trim().toLowerCase()));
+      });
+      if (answer === '' || answer === 'y' || answer === 'yes') { installPersistentAgent(config); return; }
+    }
     // Nobody supervises this machine yet, so the agent runs in this window: Ctrl+C disconnects it,
     // which is the behaviour people expect from a command they just ran themselves.
     console.log('ReMCP is connected. Keep this window open, or run `remcp install` for a background service. Press Ctrl+C to stop.');

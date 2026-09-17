@@ -1,13 +1,13 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "remcp",
-  "version": "0.2.22",
+  "version": "0.2.23",
   "description": "Work with files, images, searches, terminal sessions, and processes on computers you have explicitly paired with ReMCP.",
   "author": {
     "name": "Anton Baider",
-    "url": "https://remcp.delio24.com"
+    "url": "https://remcp.site"
   },
-  "homepage": "https://remcp.delio24.com",
+  "homepage": "https://remcp.site",
   "repository": "https://github.com/antonbaider/remcp",
   "license": "MIT",
   "keywords": [
@@ -25,9 +25,9 @@
         "developerName": "Anton Baider",
         "longDescription": "ReMCP connects ChatGPT and Codex to computers you have explicitly paired, and to nothing else. Each computer runs an outbound agent with its own revocable credential, so no inbound port is opened and access can be withdrawn from the workspace at any time. Work with files and directories, read images and screenshots, transfer binaries, create and extract archives, search local content, and run or manage terminal sessions and processes. Read-only tools are annotated as such, and every tool that changes local state is annotated with a destructive hint. An isolated review sandbox is available for evaluation without a real computer.",
         "category": "Developer Tools",
-        "websiteURL": "https://remcp.delio24.com",
-        "privacyPolicyURL": "https://remcp.delio24.com/privacy",
-        "termsOfServiceURL": "https://remcp.delio24.com/terms",
+        "websiteURL": "https://remcp.site",
+        "privacyPolicyURL": "https://remcp.site/privacy",
+        "termsOfServiceURL": "https://remcp.site/terms",
         "defaultPrompt": [
           "Show my paired ReMCP computers and tell me which ones are online.",
           "On my laptop, list the files in my project folder and summarize what is there without changing anything.",

@@ -1,10 +1,10 @@
 {
   "name": "@remcp/remcp",
-  "version": "0.2.22",
+  "version": "0.2.23",
   "description": "ReMCP device client: pair a computer with ReMCP and run the outbound-only agent that hosts the local MCP runtime.",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://remcp.delio24.com",
+  "homepage": "https://remcp.site",
   "bin": {
     "remcp": "bin/remcp.mjs"
   },

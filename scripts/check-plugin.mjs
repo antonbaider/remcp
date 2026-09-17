@@ -12,7 +12,7 @@ export function checkPlugin(root = fileURLToPath(new URL('..', import.meta.url))
   const mcp = JSON.parse(read('mcp.json'));
   assert.equal(plugin.version, pkg.version, 'plugin and package versions must match');
   assert.equal(mcp.mcpServers.remcp.type, 'streamable-http');
-  assert.equal(mcp.mcpServers.remcp.url, 'https://remcp.delio24.com/mcp');
+  assert.equal(mcp.mcpServers.remcp.url, 'https://remcp.site/mcp');
   const files = ['plugin.json', 'mcp.json'];
   const iface = plugin.extensions['com.openai'].interface;
   for (const asset of new Set([iface.logo, iface.composerIcon])) {
@@ -39,7 +39,7 @@ export function checkPlugin(root = fileURLToPath(new URL('..', import.meta.url))
     assert.match(metadata, /short_description: ".+"/);
     assert.match(metadata, /value: "remcp"/);
     assert.match(metadata, /transport: "streamable_http"/);
-    assert.match(metadata, /url: "https:\/\/remcp.delio24.com\/mcp"/);
+    assert.match(metadata, /url: "https:\/\/remcp.site\/mcp"/);
     walk(skillPath);
   }
   for (const file of files.filter(file => file.endsWith('.md'))) {

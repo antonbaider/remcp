@@ -8,4 +8,4 @@ dependencies:
       value: "remcp"
       description: "Tools for computers explicitly paired with ReMCP"
       transport: "streamable_http"
-      url: "https://remcp.delio24.com/mcp"
+      url: "https://remcp.site/mcp"

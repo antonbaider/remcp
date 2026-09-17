@@ -1,11 +1,11 @@
 {
   "name": "remcp",
-  "version": "0.2.22",
+  "version": "0.2.23",
   "private": true,
   "description": "ReMCP: secure remote MCP bridge. Device client and first-party local runtime.",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://remcp.delio24.com",
+  "homepage": "https://remcp.site",
   "workspaces": [
     "packages/*"
   ],
