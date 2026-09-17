@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "ReMCP",
     "subtitle": "Control your own computers",
-    "description": "ReMCP lets an authenticated user work with computers they have explicitly paired: files and directories, images and screenshots, binary transfer, archives, searches, terminal sessions, and processes. Every device has its own revocable credential and connects outbound, so nothing listens on the computer. Read-only tools are annotated as read-only and every state-changing tool carries a destructive hint. Reviewers can evaluate everything against an isolated per-account sandbox device that never touches a real computer.",
+    "description": "ReMCP lets an authenticated user work with computers they have explicitly paired: files and directories, images and screenshots, binary transfer, archives, searches, terminal sessions, and processes. Every device has its own revocable credential and connects outbound, so nothing listens on the computer. Every tool carries explicit read-only, destructive, and open-world annotations that match its actual side effects. Reviewers can evaluate the surface against an isolated per-account sandbox device that never touches a real computer.",
     "category": "DEVELOPER_TOOLS"
   },
   "tools": {
@@ -659,11 +659,11 @@
       "expected_output_url": null
     },
     {
-      "description": "Run a harmless terminal command on a paired review computer.",
-      "user_prompt": "Using ReMCP device id review-sandbox, run pwd and show me the result.",
+      "description": "Render the screenshot preview safely with the hosted review fixture.",
+      "user_prompt": "Using ReMCP device id review-sandbox, take a screenshot and show it.",
       "file_attachment_urls": null,
-      "tools_triggered": "start_process",
-      "expected_output": "Runs the sandbox-safe command and returns /workspace; arbitrary terminal commands remain restricted inside the review sandbox.",
+      "tools_triggered": "take_screenshot",
+      "expected_output": "Returns the clearly labelled synthetic Review Sandbox PNG as native image content and renders the image/screenshot preview component. No real computer or private screen is captured.",
       "expected_output_url": null
     },
     {
