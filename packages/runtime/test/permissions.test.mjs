@@ -7,6 +7,7 @@ import {
   describeFilesystemFailure,
   filesystemErrorExplanation,
   macosProtectedLocation,
+  windowsProtectedLocation,
 } from '../src/permissions.mjs';
 
 const errno = (code, extra = {}) => Object.assign(new Error(`${code}: something failed`), { code, ...extra });
@@ -42,10 +43,33 @@ test('an EACCES inside Desktop explains the grant instead of the errno alone', (
 test('other platforms and other errnos get their own sentence, or none at all', () => {
   assert.match(filesystemErrorExplanation(errno('EACCES'), { path: '/srv/app/data', platform: 'linux' }), /denied access to \/srv\/app\/data \(EACCES\)/);
   assert.doesNotMatch(filesystemErrorExplanation(errno('EACCES'), { path: '/srv/app/data', platform: 'linux' }), /Full Disk Access/);
+  assert.match(filesystemErrorExplanation(errno('EACCES'), { path: '/srv/app/data', platform: 'linux' }), /owns the folder and its parents/);
   assert.match(filesystemErrorExplanation(errno('EROFS'), { path: '/mnt/ro' }), /read-only file system/);
+  assert.match(filesystemErrorExplanation(errno('EBUSY'), { path: 'C:\\logs\\app.log' }), /in use by another program/);
   assert.match(filesystemErrorExplanation(errno('ENOSPC'), {}), /disk is full/);
   assert.equal(filesystemErrorExplanation(errno('ENOENT'), { path: '/tmp/x' }), null);
   assert.equal(filesystemErrorExplanation(new Error('not found'), {}), null);
+});
+
+test('Windows controlled folder access is named for Desktop, Documents and Downloads', () => {
+  const options = { platform: 'win32', home: 'C:\\Users\\Ada' };
+  assert.equal(windowsProtectedLocation('C:\\Users\\Ada\\Desktop\\notes.md', options), '%USERPROFILE%\\Desktop');
+  assert.equal(windowsProtectedLocation('C:\\Users\\Ada\\Documents', options), '%USERPROFILE%\\Documents');
+  assert.equal(windowsProtectedLocation('C:\\Users\\Ada\\OneDrive\\Desktop\\x', options), '%USERPROFILE%\\OneDrive\\Desktop');
+  assert.equal(windowsProtectedLocation('C:\\Users\\Ada\\projects\\a.md', options), null);
+  assert.equal(windowsProtectedLocation('C:\\Users\\Ada\\Desktop', { platform: 'linux', home: 'C:\\Users\\Ada' }), null);
+  const explanation = filesystemErrorExplanation(errno('EPERM'), {
+    path: 'C:\\Users\\Ada\\Desktop\\notes.md',
+    platform: 'win32',
+    home: 'C:\\Users\\Ada',
+    execPath: 'C:\\Program Files\\nodejs\\node.exe',
+  });
+  assert.match(explanation, /Controlled folder access/);
+  assert.match(explanation, /node\.exe/);
+  // A permission failure outside those folders still gets Windows-specific advice instead of the
+  // generic sentence.
+  const generic = filesystemErrorExplanation(errno('EPERM'), { path: 'D:\\data\\x', platform: 'win32', execPath: 'C:\\node.exe' });
+  assert.match(generic, /read-only|Controlled folder access/);
 });
 
 test('describeFilesystemFailure keeps the kernel message and appends the fix', () => {

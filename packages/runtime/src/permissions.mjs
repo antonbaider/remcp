@@ -9,6 +9,7 @@ import path from 'node:path';
 //     System Settings → Privacy & Security → Full Disk Access → + → the binary that runs the tools
 // These helpers turn those errnos into that instruction. They never widen access — they explain it.
 const MACOS_HOME_FOLDERS = Object.freeze(['Desktop', 'Documents', 'Downloads']);
+const WINDOWS_HOME_FOLDERS = Object.freeze([['Desktop'], ['Documents'], ['Downloads'], ['OneDrive', 'Desktop'], ['OneDrive', 'Documents']]);
 const PERMISSION_CODES = new Set(['EACCES', 'EPERM']);
 
 // The protected location a path belongs to ("~/Desktop", "iCloud Drive", "an external volume"), or
@@ -34,6 +35,20 @@ export function macosProtectedLocation(target, { platform = process.platform, ho
   return null;
 }
 
+// Windows 11 ships the same idea as TCC under a different name: Controlled folder access (Windows
+// Security → Virus & threat protection → Ransomware protection) blocks Desktop, Documents and
+// Downloads for every application that is not on its allow list, and the process sees EPERM/EACCES.
+export function windowsProtectedLocation(target, { platform = process.platform, home = os.homedir() } = {}) {
+  if (platform !== 'win32') return null;
+  const value = typeof target === 'string' ? target.trim() : '';
+  if (!value || !home) return null;
+  const relative = path.win32.relative(path.win32.resolve(home), path.win32.resolve(value));
+  if (!relative || relative.startsWith('..') || path.win32.isAbsolute(relative)) return null;
+  const parts = relative.split(path.win32.sep);
+  const match = WINDOWS_HOME_FOLDERS.find(entry => entry.every((segment, index) => (parts[index] || '').toLowerCase() === segment.toLowerCase()));
+  return match ? `%USERPROFILE%\\${match.join('\\')}` : null;
+}
+
 // What the person should do about this failure, or null when the error is not a filesystem permission
 // problem this module has better words for.
 export function filesystemErrorExplanation(error, options = {}) {
@@ -49,13 +64,21 @@ export function filesystemErrorExplanation(error, options = {}) {
   const where = typeof target === 'string' && target.trim() ? target.trim() : 'that path';
   if (code === 'ENOSPC') return 'The disk is full (ENOSPC). Free some space or write to another volume.';
   if (code === 'EROFS') return `${where} is on a read-only file system (EROFS). Write somewhere else, or remount it read-write.`;
+  if (code === 'EBUSY') return `${where} is in use by another program (EBUSY). Close whatever holds it and try again.`;
   if (!PERMISSION_CODES.has(code)) return null;
   const protectedLocation = macosProtectedLocation(target, { platform, home });
   if (protectedLocation) {
     return `macOS protects ${protectedLocation} (${code}), and ReMCP runs as a background service, which cannot show the permission prompt. Grant it by hand: System Settings → Privacy & Security → Full Disk Access → + → ${execPath}, then restart the agent with \`remcp start\`. A folder outside Desktop, Documents, Downloads and iCloud Drive needs no new permission.`;
   }
+  const windowsLocation = windowsProtectedLocation(target, { platform, home });
+  if (windowsLocation) {
+    return `Windows Controlled folder access is blocking ${windowsLocation} (${code}). Add the binary that runs the tools (${execPath}) under Windows Security → Virus & threat protection → Ransomware protection → Allow an app through Controlled folder access, then restart the agent with \`remcp start\`. A folder outside Desktop, Documents, Downloads and OneDrive needs no new permission.`;
+  }
   if (platform === 'darwin') {
     return `macOS denied access to ${where} (${code}). Check the ownership and permissions of that folder, or add ${execPath} to System Settings → Privacy & Security → Full Disk Access and restart the agent with \`remcp start\`.`;
+  }
+  if (platform === 'win32') {
+    return `Windows denied access to ${where} (${code}). Check whether the file is read-only, open in another program, or inside a Controlled folder access area, then allow ${execPath} through Windows Security (Controlled folder access) and restart the agent with \`remcp start\`.`;
   }
   return `The operating system denied access to ${where} (${code}). Check that this user owns the folder and its parents, or choose another path.`;
 }

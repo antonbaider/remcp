@@ -1,6 +1,6 @@
 # ReMCP local runtime
 
-`@remcp/runtime` is the local device runtime for [ReMCP](https://remcp.delio24.com). It is an MCP
+`@remcp/runtime` is the local device runtime for [ReMCP](https://remcp.site). It is an MCP
 server that runs on a computer you paired with ReMCP and executes the file, image, search, terminal,
 and process tools that the hosted ReMCP MCP endpoint exposes to ChatGPT and Codex.
 

@@ -1,10 +1,10 @@
 {
   "name": "@remcp/runtime",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "description": "First-party ReMCP local device runtime: file, search, terminal and process tools over MCP for computers paired with ReMCP.",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://remcp.delio24.com",
+  "homepage": "https://remcp.site",
   "author": "Anton Baider",
   "bin": {
     "remcp-runtime": "src/index.mjs"

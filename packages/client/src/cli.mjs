@@ -8,7 +8,7 @@ import { localRuntimeEntry, runAgent, supervisorRestart } from './agent.mjs';
 import { npmVersion, resolveNpm } from './npm.mjs';
 import { isRuntimeSpecFor, normalizeRuntime } from './runtime.mjs';
 import { PACKAGE_NAME, VERSION } from './version.mjs';
-import { probeMacosFolderAccess } from './macos-permissions.mjs';
+import { probeFilesystemAccess } from './fs-access.mjs';
 
 const home = os.homedir();
 const configDir = process.env.REMCP_CONFIG_DIR || path.join(home, '.config', 'remcp');
@@ -417,6 +417,16 @@ async function diagnoseLocalRuntime(cfg) {
 
 // Reads the version a freshly installed global package reports, so an update that installed
 // nothing (wrong prefix, npm cache, permissions) is reported instead of assumed successful.
+// The roots the runtime is allowed to work in, as the person configured them. An empty list means
+// "the whole file system", so the doctor probes the home directory instead of guessing a root.
+function runtimeAllowedRoots() {
+  try {
+    const configured = JSON.parse(fs.readFileSync(runtimeConfigFile, 'utf8')).allowedRoots;
+    if (Array.isArray(configured) && configured.length) return configured.map(root => String(root).replace(/^~/, os.homedir()));
+  } catch {}
+  return [os.homedir()];
+}
+
 function installedVersion(packageName) {
   const prefix = spawnSync(npm.command, [...npm.args, 'prefix', '--global'], { encoding: 'utf8' });
   if (prefix.error || prefix.status !== 0) return null;
@@ -479,6 +489,11 @@ export async function main(argv = process.argv.slice(2)) {
     } else {
       deviceInitiated = true;
       paired = await pairWithDeviceCode(server, flags);
+    }
+    if (paired.moved_from_another_account) {
+      console.log('This computer was paired to another ReMCP account. That device was revoked and this machine now belongs to the account you approved.');
+    } else if (paired.movedFromUid) {
+      console.log('This computer was paired to another ReMCP account. That device was revoked and this machine now belongs to the account you approved.');
     }
     const config = {
       serverUrl: server,
@@ -576,11 +591,12 @@ export async function main(argv = process.argv.slice(2)) {
     // the runtime, so the failure is visible here instead of only as "runtime not running".
     if (command === 'doctor') {
       report.diagnosis = await diagnoseLocalRuntime(cfg);
-      // A Mac can pass every other check and still be unable to write to Desktop: macOS answers EACCES
-      // and the model only ever sees the errno. This is where the person can see it before ChatGPT
-      // does, with the grant that fixes it named for this exact binary.
-      const filesystem = await probeMacosFolderAccess();
-      if (filesystem.supported) report.diagnosis.filesystem = filesystem;
+      // A computer can pass every other check and still be unable to write where the tools work:
+      // macOS answers EACCES for Desktop until TCC is granted, Windows has Controlled folder access,
+      // Linux answers EACCES for a folder this user does not own. The probe writes and removes a
+      // temporary file in each allowed root, so the doctor reports what actually happens rather than
+      // what the permission bits claim, and names the fix for this platform and this binary.
+      report.diagnosis.filesystem = await probeFilesystemAccess({ roots: runtimeAllowedRoots() });
     }
     console.log(JSON.stringify(report, null, 2));
     if (command === 'doctor' && report.diagnosis.verdict !== 'ok') process.exitCode = 1;
