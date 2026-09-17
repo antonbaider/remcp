@@ -6,6 +6,16 @@ import { splitLines } from './util.mjs';
 
 const HUNK_HEADER = /^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/;
 
+// `diff -u` writes `--- a/file<TAB>2026-09-17 12:00:00` and a model may paste that verbatim. The
+// tab-separated timestamp is not part of the path, and keeping it made apply_patch create a file
+// whose name contained the date while the real target was never touched.
+function patchPath(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const [path] = raw.split('\t');
+  return path.trim();
+}
+
 export function parseUnifiedDiff(patch) {
   const lines = String(patch).replace(/\r\n/g, '\n').split('\n');
   const files = [];
@@ -13,13 +23,13 @@ export function parseUnifiedDiff(patch) {
   let hunk = null;
   for (const line of lines) {
     if (line.startsWith('--- ')) {
-      current = { oldPath: line.slice(4).trim(), newPath: null, hunks: [] };
+      current = { oldPath: patchPath(line.slice(4)), newPath: null, hunks: [] };
       files.push(current);
       hunk = null;
       continue;
     }
     if (line.startsWith('+++ ')) {
-      if (current) current.newPath = line.slice(4).trim();
+      if (current) current.newPath = patchPath(line.slice(4));
       continue;
     }
     const header = line.match(HUNK_HEADER);
@@ -37,9 +47,31 @@ export function parseUnifiedDiff(patch) {
     }
     if (!hunk) continue;
     if (line.startsWith('\\')) continue; // "\ No newline at end of file"
-    if (line === '' && hunk.lines.length === 0) continue;
+    if (line === '') {
+      // A blank line inside a hunk is an empty context line (" " with its trailing space stripped by
+      // an editor or a chat client), not a separator. Dropping it shifted every following line and
+      // applied the hunk in the wrong place while still reporting success.
+      if (hunk.lines.length) hunk.lines.push({ type: ' ', text: '' });
+      continue;
+    }
     const marker = line[0];
     if (marker === ' ' || marker === '+' || marker === '-') hunk.lines.push({ type: marker, text: line.slice(1) });
+  }
+  // A diff ends with a newline, and a chat client may strip the trailing space of the last context
+  // line, leaving an empty string that is not part of any hunk. The declared line counts say how
+  // many lines belong to a hunk, so trailing empty context lines beyond them are dropped.
+  for (const file of files) {
+    for (const entry of file.hunks) {
+      const countOld = lines => lines.filter(line => line.type !== '+').length;
+      const countNew = lines => lines.filter(line => line.type !== '-').length;
+      while (entry.lines.length > 1) {
+        const last = entry.lines[entry.lines.length - 1];
+        const overOld = countOld(entry.lines) > entry.oldCount;
+        const overNew = countNew(entry.lines) > entry.newCount;
+        if (last.type !== ' ' || last.text !== '' || (!overOld && !overNew)) break;
+        entry.lines.pop();
+      }
+    }
   }
   return files.filter(file => file.hunks.length);
 }

@@ -385,3 +385,23 @@ test('apply_patch inserts a zero-context hunk at the position the diff names', a
   assert.equal(isError(tailResult), false, body(tailResult));
   assert.equal(readFileSync(target, 'utf8'), 'a\nb\nINSERTED\nc\nLAST\n');
 });
+
+test('apply_patch accepts a diff -u header with a timestamp and empty context lines', async () => {
+  const stamped = join(root, 'stamped.txt');
+  writeFileSync(stamped, 'old\n');
+  // A model often pastes `diff -u` output verbatim, timestamp and all. The timestamp must not end
+  // up in the path, and the real target must be the file that changes.
+  const patch = `--- a/stamped.txt\t2026-09-17 12:00:00.000000000 +0200\n+++ b/stamped.txt\t2026-09-17 12:00:01.000000000 +0200\n@@ -1 +1 @@\n-old\n+new\n`;
+  const result = await invokeTool('apply_patch', { patch, path: stamped });
+  assert.equal(isError(result), false, body(result));
+  assert.equal(readFileSync(stamped, 'utf8'), 'new\n');
+  assert.equal(existsSync(join(root, 'stamped.txt\t2026-09-17 12:00:00.000000000 +0200')), false, 'no junk-named file');
+
+  // A blank line inside a hunk is an empty context line: dropping it used to shift the hunk.
+  const blank = join(root, 'blank.txt');
+  writeFileSync(blank, 'a\n\nb\nc\n');
+  const blankPatch = '--- a/blank.txt\n+++ b/blank.txt\n@@ -1,4 +1,4 @@\n a\n \n-b\n+B\n c\n';
+  const blankResult = await invokeTool('apply_patch', { patch: blankPatch, path: blank });
+  assert.equal(isError(blankResult), false, body(blankResult));
+  assert.equal(readFileSync(blank, 'utf8'), 'a\n\nB\nc\n');
+});

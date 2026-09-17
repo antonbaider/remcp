@@ -28,20 +28,38 @@ function detectEol(content) {
   return crlf > lf ? '\r\n' : '\n';
 }
 
+// Only regular files can be read: a FIFO blocks until a writer appears, a device node can be
+// endless, and both would hang or flood a tool call instead of returning an answer.
+function assertRegularFile(info, absolute) {
+  if (info.isDirectory()) fail(`${displayPath(absolute)} is a directory, not a file`);
+  if (!info.isFile()) fail(`${displayPath(absolute)} is not a regular file`);
+  return info;
+}
+
 // Traversal helper for every multi-file tool. A symbolic link inside an allowed root can point
 // anywhere, so links are never followed and each collected path is resolved through
 // resolveSafePath again before a tool reads or writes it. `stat` follows links, which is exactly
 // how a symlinked directory inside a root used to expose files outside it.
 async function collectTree(root, { maxFiles = 500, skip = [] } = {}) {
   const found = [];
+  const denied = [];
   const skipName = name => skip.some(entry => (entry.endsWith('*') ? name.startsWith(entry.slice(0, -1)) : name === entry));
   async function visit(target) {
     if (found.length >= maxFiles) return;
     const info = await lstat(target).catch(() => null);
+    // A symlink is skipped on purpose (it can point outside the allowed roots); that is not a denial
+    // and must not be reported as one.
     if (!info || info.isSymbolicLink()) return;
     if (info.isFile()) { found.push(target); return; }
     if (!info.isDirectory()) return;
-    const entries = await readdir(target, { withFileTypes: true }).catch(() => []);
+    let entries;
+    try {
+      entries = await readdir(target, { withFileTypes: true });
+    } catch {
+      // Reporting the skip matters: silently dropping a directory made a partial walk look complete.
+      denied.push(target);
+      return;
+    }
     for (const entry of entries) {
       if (found.length >= maxFiles) return;
       if (entry.isSymbolicLink() || skipName(entry.name)) continue;
@@ -49,7 +67,7 @@ async function collectTree(root, { maxFiles = 500, skip = [] } = {}) {
     }
   }
   await visit(root);
-  return found;
+  return { files: found, denied };
 }
 
 // Every path a multi-file tool is about to touch passes through the same confinement check as a
@@ -64,7 +82,7 @@ async function confineAll(paths) {
 
 async function readTextFile(absolute) {
   const info = await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`));
-  if (info.isDirectory()) fail(`${displayPath(absolute)} is a directory, not a file`);
+  assertRegularFile(info, absolute);
   if (info.size > MAX_INLINE_FILE_BYTES) fail(`File is too large to read inline (${info.size} bytes)`);
   const buffer = await readFile(absolute);
   const decoded = decodeText(buffer);
@@ -116,8 +134,7 @@ export async function readMultipleFilesTool(args) {
 
 export async function readImageTool(args) {
   const absolute = await resolveSafePath(args.path);
-  const info = await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`));
-  if (info.isDirectory()) fail(`${displayPath(absolute)} is a directory, not an image`);
+  const info = assertRegularFile(await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`)), absolute);
   if (info.size > MAX_IMAGE_BYTES) fail(`Image is ${info.size} bytes, above the ${MAX_IMAGE_BYTES}-byte inline limit`);
   const mimeType = IMAGE_TYPES.get(path.extname(absolute).toLowerCase());
   if (!mimeType) fail(`${displayPath(absolute)} is not a supported image type (${[...IMAGE_TYPES.keys()].join(', ')})`);
@@ -134,8 +151,7 @@ export async function readImageTool(args) {
 
 export async function hashFileTool(args) {
   const absolute = await resolveSafePath(args.path);
-  const info = await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`));
-  if (info.isDirectory()) fail(`${displayPath(absolute)} is a directory, not a file`);
+  const info = assertRegularFile(await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`)), absolute);
   const algorithm = String(args.algorithm || 'sha256').toLowerCase();
   if (!['sha256', 'sha1', 'md5'].includes(algorithm)) fail('algorithm must be sha256, sha1, or md5');
   const hash = createHash(algorithm);
@@ -245,8 +261,7 @@ export async function writeFileTool(args) {
 // large file is read as a sequence of base64 slices and written back the same way.
 export async function readBinaryTool(args) {
   const absolute = await resolveSafePath(args.path);
-  const info = await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`));
-  if (info.isDirectory()) fail(`${displayPath(absolute)} is a directory, not a file`);
+  const info = assertRegularFile(await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`)), absolute);
   const offset = Math.max(0, Number.isFinite(Number(args.offset_bytes)) ? Math.trunc(Number(args.offset_bytes)) : 0);
   const length = clampInteger(args.length_bytes, MAX_BINARY_CHUNK_BYTES, 1, MAX_BINARY_CHUNK_BYTES);
   const start = Math.min(offset, info.size);
@@ -403,7 +418,8 @@ export async function replaceInFilesTool(args) {
     }
   }
   const info = await stat(root).catch(() => fail(`Path not found: ${displayPath(root)}`));
-  const files = await confineAll(info.isFile() ? [root] : await collectTree(root, { maxFiles, skip: ['.git', 'node_modules', '.remcp-trash*'] }));
+  const walk = info.isFile() ? { files: [root], denied: [] } : await collectTree(root, { maxFiles, skip: ['.git', 'node_modules', '.remcp-trash*'] });
+  const files = await confineAll(walk.files);
   const glob = filePattern ? globToRegExp(filePattern) : null;
   const changed = [];
   let scanned = 0;
@@ -495,16 +511,18 @@ export async function readFilesTool(args) {
   const matcher = globToRegExp(pattern);
   const rootInfo = await stat(root).catch(() => null);
   // A file path is matched directly; a directory is walked without following links.
-  const candidates = rootInfo?.isFile()
-    ? [root]
-    : await confineAll(await collectTree(root, {
+  const walk = rootInfo?.isFile()
+    ? { files: [root], denied: [] }
+    : await collectTree(root, {
       maxFiles: maxFiles + 1,
       skip: includeIgnored ? ['.remcp-trash*'] : ['node_modules', '.git', '.remcp-trash*'],
-    }));
-  const files = candidates.filter(target => {
+    });
+  const candidates = await confineAll(walk.files);
+  const matched = candidates.filter(target => {
     const relative = path.relative(root, target) || path.basename(target);
     return matcher.test(relative.split(path.sep).join('/')) || matcher.test(path.basename(target));
-  }).slice(0, maxFiles);
+  });
+  const files = matched.slice(0, maxFiles);
   if (!files.length) return text(`No files matched ${pattern} under ${displayPath(root)}.`);
   const sections = [];
   let skipped = 0;
@@ -520,7 +538,11 @@ export async function readFilesTool(args) {
       sections.push(`===== ${displayPath(file)} =====\n(skipped: ${error instanceof Error ? error.message : String(error)})`);
     }
   }
-  const header = `${files.length} file(s) matched ${pattern} under ${displayPath(root)}${files.length > maxFiles ? ` (showing the first ${maxFiles})` : ''}${skipped ? `, ${skipped} skipped` : ''}`;
+  const notes = [];
+  if (matched.length > files.length) notes.push(`showing the first ${files.length}`);
+  if (skipped) notes.push(`${skipped} unreadable`);
+  if (walk.denied.length) notes.push(`${walk.denied.length} unreadable director${walk.denied.length === 1 ? 'y' : 'ies'} skipped`);
+  const header = `${matched.length} file(s) matched ${pattern} under ${displayPath(root)}${notes.length ? ` (${notes.join(', ')})` : ''}`;
   return text(`${header}\n\n${sections.join('\n\n')}`);
 }
 
@@ -723,16 +745,20 @@ export async function setPermissionsTool(args) {
   }
   const confined = await confineAll(targets);
   let changed = 0;
+  const failures = [];
   for (const target of confined) {
     try {
       await chmod(target, mode);
       if (uid !== null || gid !== null) await chown(target, uid ?? -1, gid ?? -1);
       changed += 1;
     } catch (error) {
-      fail(`Could not change permissions on ${displayPath(target)}: ${error instanceof Error ? error.message : String(error)}`);
+      // One protected file must not abort a recursive change; the caller gets the full picture.
+      failures.push(`${displayPath(target)}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  return text(`Set mode ${raw}${uid !== null || gid !== null ? ` (uid ${uid ?? '-'} gid ${gid ?? '-'})` : ''} on ${changed} path(s) starting at ${displayPath(absolute)}.`);
+  const summary = `Set mode ${raw}${uid !== null || gid !== null ? ` (uid ${uid ?? '-'} gid ${gid ?? '-'})` : ''} on ${changed} path(s) starting at ${displayPath(absolute)}.`;
+  if (!failures.length) return text(summary);
+  return text(`${summary}\n${failures.length} path(s) could not be changed:\n${failures.slice(0, 20).join('\n')}`, true);
 }
 
 export async function createDirectoryTool(args) {

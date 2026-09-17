@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.10
+
+Tool-call reliability fixes found by the second audit round.
+
+- `apply_patch` accepts `diff -u` headers that carry a tab and timestamp (the timestamp is not part
+  of the file path), treats a blank line inside a hunk as an empty context line instead of dropping
+  it, and drops trailing empty context lines the diff's own line counts say are not part of the hunk.
+- The output budget now bounds the serialised frame, not the raw bytes: a control character becomes
+  six bytes once JSON-escaped, so an ANSI-heavy result used to pass the check and still exceed the
+  transport limit, closing the connection mid-call.
+- `read_file`, `read_binary`, `read_image` and `hash_file` refuse anything that is not a regular
+  file, so a FIFO cannot hang a call and a device node cannot flood it.
+- Tree walks report the directories they could not read instead of silently returning a partial
+  result, `read_files` reports the real number of matches, `set_permissions` reports per-path
+  failures instead of stopping at the first one, and a glob character class with an invalid range
+  falls back to a literal match instead of throwing out of the tool.
+
 ## 0.2.7
 
 Security and correctness fixes for the device runtime.

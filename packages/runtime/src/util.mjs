@@ -103,13 +103,31 @@ export function displayPath(absolute) {
   return absolute.startsWith(home + path.sep) ? `~/${absolute.slice(home.length + 1)}` : absolute;
 }
 
+// The transport measures the serialised frame, not the raw string: a control character becomes six
+// bytes once JSON-escaped, so an ANSI-heavy command output could pass this check and still exceed
+// the stdio/relay frame limit, which closes the connection and restarts the runtime.
+function frameBytes(text) {
+  return Buffer.byteLength(JSON.stringify(String(text)), 'utf8');
+}
+
 export function truncate(text, maxBytes) {
   const limit = maxBytes || runtimeConfig.maxOutputBytes;
-  const buffer = Buffer.from(text, 'utf8');
-  if (buffer.length <= limit) return text;
-  const head = buffer.subarray(0, Math.floor(limit * 0.7)).toString('utf8');
-  const tail = buffer.subarray(buffer.length - Math.floor(limit * 0.2)).toString('utf8');
-  return `${head}\n… output truncated (${buffer.length} bytes, limit ${limit}) …\n${tail}`;
+  const value = String(text);
+  if (Buffer.byteLength(value, 'utf8') <= limit && frameBytes(value) <= limit) return value;
+  // Shrink until the escaped frame fits, so the escaped size is what the caller gets is bounded.
+  let size = Math.min(Buffer.byteLength(value, 'utf8'), limit);
+  let rendered = '';
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const buffer = Buffer.from(value, 'utf8');
+    const head = buffer.subarray(0, Math.max(0, Math.floor(size * 0.7))).toString('utf8');
+    const tail = buffer.subarray(Math.max(0, buffer.length - Math.floor(size * 0.2))).toString('utf8');
+    rendered = `${head}\n… output truncated (${buffer.length} bytes, limit ${limit}) …\n${tail}`;
+    if (frameBytes(rendered) <= limit) return rendered;
+    size = Math.floor(size * 0.6);
+    if (size < 512) break;
+  }
+  const buffer = Buffer.from(value, 'utf8');
+  return `${buffer.subarray(0, 256).toString('utf8')}\n… output truncated (${buffer.length} bytes, limit ${limit}) …`;
 }
 
 // structuredContent mirrors the text so a client can rely on the declared outputSchema, but the
@@ -196,12 +214,20 @@ export function globToRegExp(pattern) {
     if (char === '?') { out += '[^/]'; continue; }
     if (char === '[') {
       const close = source.indexOf(']', index + 1);
-      if (close > index + 1) {
+      if (close > index + 1 && close - index <= 64) {
         let body = source.slice(index + 1, close);
         const negated = body.startsWith('!') || body.startsWith('^');
         if (negated) body = body.slice(1);
         body = body.replace(/\\/g, '\\\\').replace(/\]/g, '\\]').replace(/\^/g, '\\^');
-        out += `[${negated ? '^/' : ''}${body}]`;
+        const candidate = `[${negated ? '^/' : ''}${body}]`;
+        // A class like [z-a] is not a valid range: the pattern falls back to a literal match instead
+        // of throwing out of the tool, because a user pattern must never break a call.
+        try {
+          new RegExp(candidate);
+          out += candidate;
+        } catch {
+          out += `\\${char}`;
+        }
         index = close;
         continue;
       }

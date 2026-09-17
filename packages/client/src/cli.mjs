@@ -5,7 +5,7 @@ import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { runAgent } from './agent.mjs';
-import { normalizeRuntime } from './runtime.mjs';
+import { isRuntimeSpecFor, normalizeRuntime } from './runtime.mjs';
 import { PACKAGE_NAME, VERSION } from './version.mjs';
 
 const home = os.homedir();
@@ -200,12 +200,41 @@ function restartPersistentServiceIfInstalled() {
   if (platform === 'linux' && fs.existsSync(linuxServiceFile)) {
     run('systemctl', ['--user', 'daemon-reload']);
     run('systemctl', ['--user', 'restart', 'remcp-agent.service']);
-  } else if (platform === 'darwin' && fs.existsSync(macServiceFile)) {
-    run('launchctl', ['kickstart', '-k', `${macLaunchDomain()}/${macServiceLabel}`]);
-  } else if (platform === 'win32') {
-    const result = spawnSync('schtasks.exe', ['/Query', '/TN', windowsTaskName], { stdio: 'ignore' });
-    if (result.status === 0) run('schtasks.exe', ['/Run', '/TN', windowsTaskName]);
+    return 'remcp-agent.service';
   }
+  if (platform === 'darwin' && fs.existsSync(macServiceFile)) {
+    run('launchctl', ['kickstart', '-k', `${macLaunchDomain()}/${macServiceLabel}`]);
+    return macServiceLabel;
+  }
+  if (platform === 'win32') {
+    const result = spawnSync('schtasks.exe', ['/Query', '/TN', windowsTaskName], { stdio: 'ignore' });
+    if (result.status === 0) {
+      run('schtasks.exe', ['/Run', '/TN', windowsTaskName]);
+      return windowsTaskName;
+    }
+  }
+  return null;
+}
+
+// The agent the user installed with `remcp install` is the one this CLI manages. A machine can also
+// be supervised by its own systemd unit, by Docker, or by a terminal, and in those cases installing
+// a new version is not enough: the running process keeps the old code until something restarts it.
+// systemd marks every unit process with INVOCATION_ID and Docker leaves /.dockerenv, so those two
+// cases can be handed over by exiting (the supervisor starts the new build); anything else gets an
+// explicit instruction instead of a silent exit that would take the device offline.
+function supervisorRestart() {
+  if (process.env.INVOCATION_ID || process.env.JOURNAL_STREAM) return 'systemd';
+  try { if (fs.existsSync('/.dockerenv')) return 'docker'; } catch {}
+  return null;
+}
+
+// Reads the version a freshly installed global package reports, so an update that installed
+// nothing (wrong prefix, npm cache, permissions) is reported instead of assumed successful.
+function installedVersion(packageName) {
+  const prefix = spawnSync(npmCommand, ['prefix', '--global'], { encoding: 'utf8' });
+  if (prefix.error || prefix.status !== 0) return null;
+  const manifest = path.join(String(prefix.stdout || '').trim(), 'lib', 'node_modules', ...packageName.split('/'), 'package.json');
+  try { return JSON.parse(fs.readFileSync(manifest, 'utf8')).version || null; } catch { return null; }
 }
 
 function uninstallPersistentService() {
@@ -262,6 +291,9 @@ export async function main(argv = process.argv.slice(2)) {
       deviceName: String(flags.name || os.hostname()),
       runtime: normalizeRuntime(paired.runtime),
       machineId: ensureMachineId(),
+      // Remember whether this machine's owner trusted the server to name a runtime version. The
+      // auto-updater must not widen that decision on its own later.
+      trustRuntime: Boolean(flags['trust-runtime']) || new URL(server).origin === officialOrigin,
     };
     saveConfig(config);
     console.log(`Paired ${os.hostname()} with ${server}`);
@@ -275,6 +307,9 @@ export async function main(argv = process.argv.slice(2)) {
     await runAgent({
       ...cfg,
       autoUpdate: cfg.autoUpdate !== false,
+      trustRuntime: cfg.trustRuntime === true
+        || process.env.REMCP_TRUST_RUNTIME === '1'
+        || new URL(cfg.serverUrl).origin === officialOrigin,
       telemetryEnabled: telemetry.enabled,
       installReported: telemetry.installReported,
       installSpec: `${PACKAGE_NAME}@${VERSION}`,
@@ -338,26 +373,50 @@ export async function main(argv = process.argv.slice(2)) {
     // parses, and an explicit --trust-runtime before a custom server may change it.
     let runtimeSpec = cfg.runtime.packageSpec;
     if (requested) {
-      const parsed = requested.match(/^(@?[a-z0-9._-]+(?:\/[a-z0-9._-]+)?)@(\S+)$/i);
-      if (!parsed) throw new Error('--runtime must look like @scope/package@1.2.3');
-      if (parsed[1] !== cfg.runtime.packageName) {
-        throw new Error(`--runtime must stay on ${cfg.runtime.packageName}; refusing to install ${parsed[1]}`);
+      // Only `<configured package>@<semver>` is installable: an alias, a git/URL/file spec, a tag or
+      // a range would run code the user never agreed to.
+      if (!isRuntimeSpecFor(cfg.runtime.packageName, requested)) {
+        throw new Error(`--runtime must be ${cfg.runtime.packageName}@<version>`);
       }
-      if (!flags['trust-runtime'] && !flags['yes']) {
-        throw new Error('Installing a runtime version from the server requires --trust-runtime.');
+      const trusted = cfg.trustRuntime === true
+        || Boolean(flags['trust-runtime'])
+        || process.env.REMCP_TRUST_RUNTIME === '1'
+        // A configuration written before the field existed paired with the official server, which is
+        // trusted by definition; refusing it would silently stop every existing device updating.
+        || new URL(cfg.serverUrl).origin === officialOrigin;
+      if (!trusted) {
+        throw new Error(`This machine was paired without trusting ${cfg.serverUrl} to choose a runtime version. Re-run with --trust-runtime if you trust that server.`);
       }
-      runtimeSpec = normalizeRuntime({ kind: 'npm', packageName: parsed[1], packageSpec: requested, entry: cfg.runtime.entry }).packageSpec;
+      runtimeSpec = normalizeRuntime({ kind: 'npm', packageName: cfg.runtime.packageName, packageSpec: requested, entry: cfg.runtime.entry }).packageSpec;
     }
     if (flags.check) {
-      console.log(JSON.stringify({ current: VERSION, runtime: cfg.runtime.packageSpec, available: `${PACKAGE_NAME}@latest` }, null, 2));
+      console.log(JSON.stringify({
+        current: VERSION,
+        installedRuntime: installedVersion(cfg.runtime.packageName),
+        runtimeSpec: runtimeSpec,
+        available: `${PACKAGE_NAME}@latest`,
+        managedService: fs.existsSync(linuxServiceFile) || fs.existsSync(macServiceFile),
+        supervisor: supervisorRestart() ?? 'none',
+      }, null, 2));
       return;
     }
+    const before = { cli: VERSION, runtime: installedVersion(cfg.runtime.packageName) };
     console.log(`Updating ReMCP to the latest published version (${runtimeSpec})…`);
     npmGlobalInstall(`${PACKAGE_NAME}@latest`, runtimeSpec);
     // Only a validated spec is persisted, so a failed update cannot leave the install unable to start.
     if (requested && runtimeSpec !== cfg.runtime.packageSpec) saveConfig({ ...cfg, runtime: { ...cfg.runtime, packageSpec: runtimeSpec } });
-    restartPersistentServiceIfInstalled();
-    console.log('ReMCP updated. Run `remcp --version` or `remcp status` to verify.');
+    const after = { cli: installedVersion(PACKAGE_NAME), runtime: installedVersion(cfg.runtime.packageName) };
+    const restarted = restartPersistentServiceIfInstalled();
+    if (restarted) {
+      console.log(`ReMCP updated and ${restarted} restarted (client ${before.cli} → ${after.cli ?? '?'}, runtime ${before.runtime ?? '?'} → ${after.runtime ?? '?'}).`);
+      return;
+    }
+    // This process is the updater, not the agent: exiting here would restart nothing. The agent sees
+    // the exit status, verifies the installed version, and restarts itself.
+    console.log(`ReMCP updated (client ${before.cli} → ${after.cli ?? '?'}, runtime ${before.runtime ?? '?'} → ${after.runtime ?? '?'}). The running agent restarts itself to apply it.`);
+    if (after.cli === before.cli && after.runtime === before.runtime) {
+      console.log('Nothing changed: the installed versions already match the requested ones.');
+    }
     return;
   }
 

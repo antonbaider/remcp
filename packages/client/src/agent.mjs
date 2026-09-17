@@ -1,12 +1,12 @@
 import os from 'node:os';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
 import WebSocket from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { normalizeRuntime } from './runtime.mjs';
+import { isRuntimeSpecFor, normalizeRuntime } from './runtime.mjs';
 import { VERSION } from './version.mjs';
 
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -82,16 +82,72 @@ function isNewer(candidate, current) {
 // What the agent should install, if anything. The client version alone is not enough: a machine
 // that already runs the newest client but an older local runtime would otherwise never catch up,
 // because its runtime is what executes the tools.
-export function updateDecision({ advertised, cliVersion, runtimeVersion }) {
+export function updateDecision({ advertised, cliVersion, runtimeVersion, runtimePackageName, runtimeDown = false }) {
   const cliSpec = String(advertised?.cli || '');
-  const runtimeSpec = String(advertised?.runtime || '');
+  const advertisedRuntime = String(advertised?.runtime || '');
+  // A spec that is not a plain version of the configured runtime package is ignored rather than
+  // installed: this is the only place a server-chosen string reaches npm.
+  const runtimeSpec = runtimePackageName && advertisedRuntime && !isRuntimeSpecFor(runtimePackageName, advertisedRuntime) ? '' : advertisedRuntime;
   const installedRuntime = String(runtimeVersion || '');
   const runtimeKnown = Boolean(installedRuntime) && !/^unknown$/i.test(installedRuntime);
   if (isNewer(cliSpec, cliVersion)) return { needed: true, target: cliSpec, runtime: runtimeSpec, reason: 'client' };
-  if (runtimeKnown && runtimeSpec && isNewer(runtimeSpec, installedRuntime)) {
+  if (runtimeSpec && runtimeKnown && isNewer(runtimeSpec, installedRuntime)) {
     return { needed: true, target: cliSpec || `@remcp/remcp@${cliVersion}`, runtime: runtimeSpec, reason: 'runtime' };
   }
+  // A runtime that never reported a version cannot be compared, so a device whose runtime is down
+  // (or was never installed) would never repair itself. The cooldown in checkForUpdate keeps this
+  // from becoming an install loop.
+  if (runtimeSpec && !runtimeKnown && runtimeDown) {
+    return { needed: true, target: cliSpec || `@remcp/remcp@${cliVersion}`, runtime: runtimeSpec, reason: 'runtime-repair' };
+  }
   return { needed: false, target: cliSpec, runtime: runtimeSpec, reason: 'current' };
+}
+
+// Applies a freshly installed version. Exiting is what a supervisor needs; without one the new CLI is
+// started in this process' place. Either way the agent stops holding a stale runtime, which is what
+// makes an update actually take effect on a machine that no service manager watches.
+async function restartToApplyUpdate(cli, stopAgent, markStopping) {
+  try {
+    const installed = globalInstalledVersion();
+    if (installed && !isNewer(installed, VERSION)) {
+      console.log(`ReMCP ${VERSION} is already the installed version; nothing to restart.`);
+      return;
+    }
+    console.log(`ReMCP ${installed || 'a newer version'} installed; restarting to apply it.`);
+    if (!supervisorRestart()) {
+      spawn(process.execPath, [cli, 'start'], { detached: true, stdio: 'ignore', env: { ...process.env } }).unref();
+    }
+    markStopping();
+    await stopAgent().catch(() => {});
+    setTimeout(() => process.exit(0), 100);
+  } catch (error) {
+    console.error(`Could not restart after the update: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// The version of the globally installed client, read from the package the CLI resolves to.
+function globalInstalledVersion() {
+  try {
+    const cli = globalCliEntry();
+    if (!cli) return null;
+    const base = path.dirname(cli);
+    const candidates = [
+      path.join(base, '..', 'lib', 'node_modules', '@remcp', 'remcp', 'package.json'),
+      path.join(base, '..', 'node_modules', '@remcp', 'remcp', 'package.json'),
+    ];
+    for (const manifest of candidates) {
+      try { return JSON.parse(readFileSync(manifest, 'utf8')).version || null; } catch {}
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function supervisorRestart() {
+  if (process.env.INVOCATION_ID || process.env.JOURNAL_STREAM) return 'systemd';
+  try { if (existsSync('/.dockerenv')) return 'docker'; } catch {}
+  return null;
 }
 
 function globalCliEntry() {
@@ -146,7 +202,15 @@ export async function runAgent(options) {
   let runtimeDown = false;
   const telemetryQueue = [];
   let telemetryTimer = null;
-  const runtimeEntry = localRuntimeEntry(options.runtime);
+  // A device whose runtime is missing or unreadable must still run the agent: the agent is what
+  // installs and repairs the runtime, so failing here would remove the only path back.
+  let runtimeEntry = '';
+  try {
+    runtimeEntry = localRuntimeEntry(options.runtime);
+  } catch (error) {
+    runtimeDown = true;
+    console.error(`${error instanceof Error ? error.message : String(error)} The agent keeps running and retries; remcp update reinstalls the runtime.`);
+  }
 
   // --- local runtime supervision ------------------------------------------------------
   // If the runtime dies (a bad shell, a broken pipe, an OOM) the agent used to stay
@@ -324,10 +388,12 @@ export async function runAgent(options) {
         return;
       }
       if (code === 1012) {
-        // 1012 ('service restart') is what the relay sends when another agent process took over
-        // this device. Reconnecting immediately produced two agents evicting each other in a loop,
-        // so back off and let the surviving process keep the connection.
-        console.error('Another ReMCP agent connected for this device; this process will stop. Run one agent per machine (systemd service or `remcp start`).');
+        // 1012 ('service restart') is what the relay sends when another agent process took over this
+        // device. Staying alive would keep a second runtime and a reconnect loop, so this process
+        // stops and leaves the device to the agent that owns the connection.
+        console.error('Another ReMCP agent connected for this device; this process will stop. Run one agent per machine (a service manager or the remcp start command).');
+        stopping = true;
+        void stop().finally(() => setTimeout(() => process.exit(0), 100));
         return;
       }
       reconnects += 1;
@@ -358,7 +424,7 @@ export async function runAgent(options) {
       if (minimum && isNewer(minimum, VERSION)) {
         console.error(`ReMCP ${VERSION} is older than the minimum supported agent ${minimum}; update with: remcp update`);
       }
-      const decision = updateDecision({ advertised, cliVersion: VERSION, runtimeVersion });
+      const decision = updateDecision({ advertised, cliVersion: VERSION, runtimeVersion, runtimePackageName: options.runtime?.packageName, runtimeDown });
       if (!decision.needed) return;
       const target = decision.target;
       queueEvent({ event: 'agent_update', at: Date.now(), reason: `${decision.reason}:${target}`.slice(0, 32), success: true });
@@ -375,13 +441,34 @@ export async function runAgent(options) {
       lastAttemptAt = Date.now();
       updateInFlight = true;
       console.log(`Updating ReMCP to ${target}${decision.runtime ? ` with ${decision.runtime}` : ''} (${decision.reason})…`);
-      const child = spawn(process.execPath, [cli, 'update', '--trust-runtime', ...(decision.runtime ? ['--runtime', decision.runtime] : [])], {
+      // The trust flag is only forwarded when this machine's owner trusted the server at pairing
+      // time; otherwise the update stops at the server's own version and asks the user.
+      const trustFlag = options.trustRuntime === true ? ['--trust-runtime'] : [];
+      const child = spawn(process.execPath, [cli, 'update', ...trustFlag, ...(decision.runtime ? ['--runtime', decision.runtime] : [])], {
         detached: true,
-        stdio: 'ignore',
+        // The updater's own output is the only record of why an install failed, so it is piped back
+        // into this agent's log instead of being discarded.
+        stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env },
       });
-      child.on('exit', () => { updateInFlight = false; });
-      child.on('error', () => { updateInFlight = false; });
+      const forward = chunk => {
+        const line = String(chunk).trim();
+        if (line) console.error(`remcp update: ${line}`);
+      };
+      child.stdout?.on('data', forward);
+      child.stderr?.on('data', forward);
+      child.on('exit', code => {
+        updateInFlight = false;
+        if (code !== 0) {
+          console.error(`remcp update exited with ${code}; keeping ${VERSION} and retrying after the cooldown.`);
+          return;
+        }
+        void restartToApplyUpdate(cli, stop, () => { stopping = true; });
+      });
+      child.on('error', error => {
+        updateInFlight = false;
+        console.error(`remcp update could not start: ${error.message}`);
+      });
       child.unref();
     } catch {
       // Offline, DNS failure, older server without the endpoint: keep running as-is.
