@@ -1,0 +1,128 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - run: npm audit --omit=dev
+      - name: Every package version agrees
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          version="$(node -p "require('./package.json').version")"
+          for manifest in plugin.json packages/client/package.json packages/runtime/package.json; do
+            test "$version" = "$(node -p "require('./$manifest').version")" || { echo "$manifest is not at $version" >&2; exit 1; }
+          done
+          echo "all packages are at $version"
+      - name: The advertised tool contract is real
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          count="$(node packages/runtime/src/index.mjs --print-tools | node -e 'let raw="";process.stdin.on("data",c=>raw+=c).on("end",()=>console.log(JSON.parse(raw).length))')"
+          echo "runtime tools: $count"
+          test "$count" -ge 20
+      - name: The contract commands work with no dependencies installed
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bare="$(mktemp -d)"
+          cp -r packages/runtime/src "$bare/src"
+          cp packages/runtime/package.json "$bare/package.json"
+          (cd "$bare" && node src/index.mjs --describe >/dev/null && node src/index.mjs --print-tools >/dev/null)
+          echo "bare-metadata ok"
+
+  publish:
+    name: publish to npm and open a release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      # Trusted publishing: npm exchanges the workflow's GitHub OIDC token for a
+      # short-lived credential, so no NPM_TOKEN secret and no one-time password are
+      # involved. Configure it once per package on npmjs.com:
+      #   Package settings -> Trusted Publisher -> GitHub Actions
+      #   organization/user: antonbaider, repository: remcp, workflow: ci.yml
+      - name: Publish @remcp/runtime
+        run: npm publish --workspace packages/runtime --access public --provenance
+      - name: Publish @remcp/remcp
+        run: npm publish --workspace packages/client --access public --provenance
+      - name: Verify the published versions resolve
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          version="$(node -p "require('./package.json').version")"
+          for attempt in {1..10}; do
+            if npm view "@remcp/runtime@$version" version >/dev/null 2>&1 && npm view "@remcp/remcp@$version" version >/dev/null 2>&1; then
+              echo "published @remcp/runtime@$version and @remcp/remcp@$version"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "published packages did not resolve from the registry" >&2
+          exit 1
+      - name: Open the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          version="$(node -p "require('./package.json').version")"
+          notes="$(mktemp)"
+          {
+            echo "## Packages"
+            echo
+            echo "- [\`@remcp/runtime@$version\`](https://www.npmjs.com/package/@remcp/runtime/v/$version) — the local device runtime"
+            echo "- [\`@remcp/remcp@$version\`](https://www.npmjs.com/package/@remcp/remcp/v/$version) — the device client and outbound agent"
+            echo
+            echo "## Install"
+            echo
+            echo '```bash'
+            echo "npm install --global @remcp/remcp@$version"
+            echo '```'
+            echo
+            echo "Pairing commands are generated at https://remcp.delio24.com/app/connect."
+            echo
+            echo "## Tool surface"
+            echo
+            echo '```'
+            node packages/runtime/src/index.mjs --print-tools | node -e 'let raw="";process.stdin.on("data",c=>raw+=c).on("end",()=>{for(const tool of JSON.parse(raw)) console.log(`${tool.name} — ${tool.title}`)})'
+            echo '```'
+            echo
+            echo "Both packages are published with a signed provenance statement."
+          } > "$notes"
+          gh release create "$GITHUB_REF_NAME" --title "ReMCP $version" --notes-file "$notes" --verify-tag

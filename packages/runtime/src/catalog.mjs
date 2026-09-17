@@ -297,14 +297,14 @@ export const toolDefinitions = [
   },
   {
     name: 'create_directory',
-    title: 'Create directory',
-    description: 'Create a directory, including any missing parent directories. Succeeds when the directory already exists.',
+    title: 'Create directories',
+    description: 'Create one directory or many in a single call, including any missing parent directories. Succeeds when a directory already exists.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Absolute path of the directory to create.' },
+        paths: { type: 'array', items: { type: 'string' }, description: 'Several directories to create at once, at most 200.' },
       },
-      required: ['path'],
       additionalProperties: false,
     },
     annotations: additive,
@@ -343,6 +343,94 @@ export const toolDefinitions = [
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     handler: fileToolHandlers.copy_file,
+  },
+  {
+    name: 'copy_paths',
+    title: 'Copy paths',
+    description: 'Copy many files or whole directories in one call, each with its own source and destination. Directories are copied recursively.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          description: 'Pairs to copy, at most 200 per call.',
+          items: {
+            type: 'object',
+            properties: {
+              source: { type: 'string', description: 'Absolute path to copy.' },
+              destination: { type: 'string', description: 'Absolute destination path.' },
+            },
+            required: ['source', 'destination'],
+            additionalProperties: false,
+          },
+        },
+        overwrite: { type: 'boolean', description: 'Replace an existing destination. Default true.' },
+      },
+      required: ['paths'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    handler: fileToolHandlers.copy_paths,
+  },
+  {
+    name: 'move_paths',
+    title: 'Move paths',
+    description: 'Move or rename many files or whole directories in one call, each with its own source and destination. Falls back to copy-and-delete across filesystems.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          description: 'Pairs to move, at most 200 per call.',
+          items: {
+            type: 'object',
+            properties: {
+              source: { type: 'string', description: 'Absolute path to move.' },
+              destination: { type: 'string', description: 'Absolute destination path.' },
+            },
+            required: ['source', 'destination'],
+            additionalProperties: false,
+          },
+        },
+        overwrite: { type: 'boolean', description: 'Replace an existing destination. Default true.' },
+      },
+      required: ['paths'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    handler: fileToolHandlers.move_paths,
+  },
+  {
+    name: 'delete_path',
+    title: 'Delete path',
+    description: 'Delete a file or a directory on the computer. Directories are removed with their contents unless recursive is false. The filesystem root is refused.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path to delete.' },
+        recursive: { type: 'boolean', description: 'Delete a non-empty directory with its contents. Default true.' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    handler: fileToolHandlers.delete_path,
+  },
+  {
+    name: 'delete_paths',
+    title: 'Delete paths',
+    description: 'Delete many files and directories in one call, reporting each result. Use move_to_trash instead when the deletion should be reversible.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: { type: 'array', items: { type: 'string' }, description: 'Absolute paths to delete, at most 500 per call.' },
+        recursive: { type: 'boolean', description: 'Delete non-empty directories with their contents. Default true.' },
+      },
+      required: ['paths'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    handler: fileToolHandlers.delete_paths,
   },
   {
     name: 'create_archive',

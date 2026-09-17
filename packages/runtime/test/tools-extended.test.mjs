@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { body, freshWorkspace, isError } from './helpers.mjs';
 
@@ -274,4 +274,44 @@ test('an archive created inside the tree it packs excludes itself', async () => 
   const listing = body(await invokeTool('start_process', { command: `tar -tzf ${archive}`, timeout_ms: 3000 }));
   assert.match(listing, /nested\/file\.txt/);
   assert.doesNotMatch(listing, /bundle\.tar\.gz/);
+});
+
+test('create, bulk create, delete, bulk delete, bulk copy and bulk move all work', async () => {
+  const base = join(root, 'lifecycle');
+  const created = body(await invokeTool('create_directory', { paths: [join(base, 'a', 'deep'), join(base, 'b'), join(base, 'c')] }));
+  assert.match(created, /3 directories ready/);
+  assert.equal(statSync(join(base, 'a', 'deep')).isDirectory(), true);
+
+  const written = body(await invokeTool('write_files', {
+    files: [
+      { path: join(base, 'a', 'one.txt'), content: 'one\n' },
+      { path: join(base, 'a', 'deep', 'two.txt'), content: 'two\n' },
+      { path: join(base, 'b', 'three.txt'), content: 'three\n' },
+    ],
+  }));
+  assert.match(written, /3\/3 file\(s\) written/);
+
+  const copied = body(await invokeTool('copy_paths', { paths: [{ source: join(base, 'a'), destination: join(base, 'copy-of-a') }] }));
+  assert.match(copied, /1\/1 path\(s\) copied/);
+  assert.equal(readFileSync(join(base, 'copy-of-a', 'deep', 'two.txt'), 'utf8'), 'two\n');
+
+  const moved = body(await invokeTool('move_paths', { paths: [{ source: join(base, 'b'), destination: join(base, 'moved-b') }] }));
+  assert.match(moved, /1\/1 path\(s\) moved/);
+  assert.equal(readFileSync(join(base, 'moved-b', 'three.txt'), 'utf8'), 'three\n');
+
+  const single = await invokeTool('delete_path', { path: join(base, 'c') });
+  assert.equal(isError(single), false);
+  assert.equal(existsSync(join(base, 'c')), false);
+
+  const nonRecursive = await invokeTool('delete_path', { path: join(base, 'a'), recursive: false });
+  assert.equal(isError(nonRecursive), true);
+  assert.match(body(nonRecursive), /not empty/);
+
+  const bulk = body(await invokeTool('delete_paths', { paths: [join(base, 'a'), join(base, 'copy-of-a'), join(base, 'moved-b'), join(base, 'nope')] }));
+  assert.match(bulk, /3\/4 path\(s\) deleted/);
+  assert.match(bulk, /failed .*nope: not found/);
+  assert.equal(existsSync(join(base, 'a')), false);
+  assert.equal(existsSync(join(base, 'moved-b')), false);
+
+  assert.equal(isError(await invokeTool('delete_path', { path: '/' })), true, 'the filesystem root is refused');
 });

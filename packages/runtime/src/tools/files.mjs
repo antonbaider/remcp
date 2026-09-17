@@ -3,7 +3,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { access, copyFile, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, copyFile, cp, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { runtimeConfig } from '../config.mjs';
 import { diffStats, unifiedDiff } from '../diff.mjs';
@@ -540,13 +540,129 @@ export async function writeFilesTool(args) {
   }
   countEvent('bytesWritten', totalBytes);
   const failed = results.filter(line => line.startsWith('failed') || line.startsWith('skipped')).length;
-  return text(`${results.length - failed}/${results.length} file(s) written, ${totalBytes} bytes total\n${results.join('\n')}`);
+  return text(`${results.length - failed}/${results.length} file(s) written, ${totalBytes} bytes total\n${results.join('\n')}`, failed > 0);
+}
+
+export async function deletePathTool(args) {
+  const absolute = await resolveSafePath(args.path);
+  const info = await stat(absolute).catch(() => fail(`Path not found: ${displayPath(absolute)}`));
+  if (path.dirname(absolute) === absolute) fail(`Refusing to delete the filesystem root ${displayPath(absolute)}`);
+  const recursive = args.recursive !== false;
+  if (info.isDirectory() && !recursive) {
+    const entries = await readdir(absolute).catch(() => []);
+    if (entries.length) fail(`Directory is not empty: ${displayPath(absolute)}. Pass recursive: true to delete it with its contents.`);
+  }
+  const entries = info.isDirectory() ? await readdir(absolute).catch(() => []) : [];
+  await rm(absolute, { recursive: true, force: false });
+  return text(`Deleted ${info.isDirectory() ? 'directory' : 'file'} ${displayPath(absolute)}${info.isDirectory() ? ` and its ${entries.length} top-level entr${entries.length === 1 ? 'y' : 'ies'}` : ''}.`);
+}
+
+export async function deletePathsTool(args) {
+  const paths = Array.isArray(args.paths) ? args.paths : fail('paths must be an array of absolute paths');
+  if (!paths.length) fail('paths must not be empty');
+  if (paths.length > 500) fail('paths accepts at most 500 entries per call');
+  const recursive = args.recursive !== false;
+  const results = [];
+  let deleted = 0;
+  for (const entry of paths) {
+    try {
+      const absolute = await resolveSafePath(entry, 'paths[]');
+      if (path.dirname(absolute) === absolute) throw new Error('refusing to delete the filesystem root');
+      const info = await stat(absolute).catch(() => null);
+      if (!info) throw new Error('not found');
+      if (info.isDirectory() && !recursive) {
+        const children = await readdir(absolute).catch(() => []);
+        if (children.length) throw new Error('directory is not empty (pass recursive: true)');
+      }
+      await rm(absolute, { recursive: true, force: false });
+      deleted += 1;
+      results.push(`deleted ${displayPath(absolute)}`);
+    } catch (error) {
+      results.push(`failed ${entry}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return text(`${deleted}/${paths.length} path(s) deleted\n${results.join('\n')}`, deleted !== paths.length);
+}
+
+// Recursive copy for files and whole directories, so a project or a backup can be
+// duplicated in one call.
+export async function copyPathsTool(args) {
+  const pairs = Array.isArray(args.paths) ? args.paths : fail('paths must be an array of { source, destination } objects');
+  if (!pairs.length) fail('paths must not be empty');
+  if (pairs.length > 200) fail('paths accepts at most 200 entries per call');
+  const overwrite = args.overwrite !== false;
+  const results = [];
+  let copied = 0;
+  for (const entry of pairs) {
+    try {
+      const source = await resolveSafePath(entry?.source, 'paths[].source');
+      const destination = await resolveSafePath(entry?.destination, 'paths[].destination');
+      if (source === destination) throw new Error('source and destination are the same path');
+      const info = await stat(source).catch(() => null);
+      if (!info) throw new Error('source not found');
+      const existing = await stat(destination).catch(() => null);
+      if (existing && !overwrite) throw new Error('destination already exists (pass overwrite: true)');
+      await mkdir(path.dirname(destination), { recursive: true });
+      await cp(source, destination, { recursive: true, force: overwrite, errorOnExist: !overwrite });
+      copied += 1;
+      results.push(`copied ${displayPath(source)} → ${displayPath(destination)}`);
+    } catch (error) {
+      results.push(`failed ${entry?.source ?? '?'}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return text(`${copied}/${pairs.length} path(s) copied\n${results.join('\n')}`, copied !== pairs.length);
+}
+
+export async function movePathsTool(args) {
+  const pairs = Array.isArray(args.paths) ? args.paths : fail('paths must be an array of { source, destination } objects');
+  if (!pairs.length) fail('paths must not be empty');
+  if (pairs.length > 200) fail('paths accepts at most 200 entries per call');
+  const overwrite = args.overwrite !== false;
+  const results = [];
+  let moved = 0;
+  for (const entry of pairs) {
+    try {
+      const source = await resolveSafePath(entry?.source, 'paths[].source');
+      const destination = await resolveSafePath(entry?.destination, 'paths[].destination');
+      if (source === destination) throw new Error('source and destination are the same path');
+      const info = await stat(source).catch(() => null);
+      if (!info) throw new Error('source not found');
+      const existing = await stat(destination).catch(() => null);
+      if (existing && !overwrite) throw new Error('destination already exists (pass overwrite: true)');
+      await mkdir(path.dirname(destination), { recursive: true });
+      try {
+        await rename(source, destination);
+      } catch (error) {
+        if (error?.code !== 'EXDEV') throw error;
+        await cp(source, destination, { recursive: true, force: overwrite, errorOnExist: !overwrite });
+        await rm(source, { recursive: true, force: true });
+      }
+      moved += 1;
+      results.push(`moved ${displayPath(source)} → ${displayPath(destination)}`);
+    } catch (error) {
+      results.push(`failed ${entry?.source ?? '?'}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return text(`${moved}/${pairs.length} path(s) moved\n${results.join('\n')}`, moved !== pairs.length);
 }
 
 export async function createDirectoryTool(args) {
-  const absolute = await resolveSafePath(args.path);
-  await mkdir(absolute, { recursive: true });
-  return text(`Directory ready: ${displayPath(absolute)}`);
+  const list = Array.isArray(args.paths) ? args.paths : [args.path];
+  if (!list.filter(Boolean).length) fail('path (or paths) is required');
+  if (list.length > 200) fail('paths accepts at most 200 entries per call');
+  const created = [];
+  const failed = [];
+  for (const entry of list) {
+    try {
+      const absolute = await resolveSafePath(entry);
+      await mkdir(absolute, { recursive: true });
+      created.push(displayPath(absolute));
+    } catch (error) {
+      failed.push(`${entry}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const header = `${created.length} director${created.length === 1 ? 'y' : 'ies'} ready`;
+  return text([header, ...created, ...failed.map(line => `failed ${line}`)].join('\n'), failed.length > 0);
 }
 
 async function pathExists(target) {
@@ -729,8 +845,12 @@ export const fileToolHandlers = {
   replace_in_files: replaceInFilesTool,
   diff_files: diffFilesTool,
   create_directory: createDirectoryTool,
+  delete_path: deletePathTool,
+  delete_paths: deletePathsTool,
   move_file: moveFileTool,
+  move_paths: movePathsTool,
   copy_file: copyFileTool,
+  copy_paths: copyPathsTool,
   move_to_trash: moveToTrashTool,
   create_archive: createArchiveTool,
   extract_archive: extractArchiveTool,
