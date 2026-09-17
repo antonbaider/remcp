@@ -262,3 +262,16 @@ test('get_system_info reports host facts without leaking anything sensitive', as
   assert.match(process.version, new RegExp(`^v${info.node.replace(/\./g, '\\.')}`));
   assert.equal(statSync(root).isDirectory(), true);
 });
+
+test('an archive created inside the tree it packs excludes itself', async () => {
+  const tree = join(root, 'self-archive');
+  mkdirSync(join(tree, 'nested'), { recursive: true });
+  writeFileSync(join(tree, 'nested', 'file.txt'), 'payload\n');
+  const archive = join(tree, 'bundle.tar.gz');
+  const created = await invokeTool('create_archive', { paths: [tree], destination: archive, format: 'tar.gz' });
+  assert.equal(isError(created), false, body(created));
+  assert.match(body(created), /built outside the tree/);
+  const listing = body(await invokeTool('start_process', { command: `tar -tzf ${archive}`, timeout_ms: 3000 }));
+  assert.match(listing, /nested\/file\.txt/);
+  assert.doesNotMatch(listing, /bundle\.tar\.gz/);
+});

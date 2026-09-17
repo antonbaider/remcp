@@ -611,20 +611,33 @@ export async function createArchiveTool(args) {
   await mkdir(path.dirname(destination), { recursive: true });
   const baseDir = path.dirname(resolved[0]);
   const names = resolved.map(entry => path.relative(baseDir, entry));
+  // An archive written inside the tree it packs makes tar abort with "file changed as we
+  // read it" (the directory mtime moves while it is being read), so build it outside the
+  // tree first and move it into place afterwards.
+  const destinationRelative = path.relative(baseDir, destination);
+  const selfInside = !destinationRelative.startsWith('..') && !path.isAbsolute(destinationRelative);
+  const suffix = format === 'zip' ? '.zip' : format === 'tar' ? '.tar' : '.tar.gz';
+  const staging = selfInside ? path.join(os.tmpdir(), `remcp-archive-${Date.now()}-${process.pid}${suffix}`) : destination;
+  const output = staging;
   if (format === 'zip') {
     if (!tools.zip) fail('zip is not installed on this device; use format "tar.gz"');
-    const result = spawnSync(tools.zip, ['-r', '-q', destination, ...names], { cwd: baseDir, encoding: 'utf8' });
+    const result = spawnSync(tools.zip, ['-r', '-q', output, ...names], { cwd: baseDir, encoding: 'utf8' });
     if (result.status !== 0) fail(`zip failed: ${(result.stderr || result.stdout || '').trim() || `exit ${result.status}`}`);
   } else if (format === 'tar' || format === 'tar.gz' || format === 'tgz') {
     if (!tools.tar) fail('tar is not installed on this device');
     const flags = format === 'tar' ? '-cf' : '-czf';
-    const result = spawnSync(tools.tar, [flags, destination, ...names], { cwd: baseDir, encoding: 'utf8' });
+    const result = spawnSync(tools.tar, [flags, output, ...names], { cwd: baseDir, encoding: 'utf8' });
     if (result.status !== 0) fail(`tar failed: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
   } else {
     fail('format must be tar, tar.gz, or zip');
   }
+  if (selfInside) {
+    await mkdir(path.dirname(destination), { recursive: true });
+    await rename(staging, destination);
+  }
   const info = await stat(destination).catch(() => null);
-  return text(`Created ${displayPath(destination)} (${format}, ${info?.size ?? 0} bytes) from ${resolved.length} path(s).`);
+  const note = selfInside ? ' (built outside the tree so it does not include itself)' : '';
+  return text(`Created ${displayPath(destination)} (${format}, ${info?.size ?? 0} bytes) from ${resolved.length} path(s)${note}.`);
 }
 
 export async function extractArchiveTool(args) {
