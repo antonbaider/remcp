@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.33
 
 - Linux Wayland screenshots now use the standard XDG Desktop Portal before compositor-specific
   command-line fallbacks. The runtime subscribes to the portal response before requesting the
