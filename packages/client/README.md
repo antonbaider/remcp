@@ -33,6 +33,25 @@ remcp --version
 `remcp status` reports the runtime the device would install, whether the agent service is running,
 and the current usage-metrics state, so a support request can be answered with one paste.
 
+## Unrestricted mode
+
+`remcp godmode on` removes the runtime's own safety rails on **this** computer: file access is no
+longer confined to the allowed roots, the configured command blocklist is ignored, and the
+catastrophic-command guardrail is set to allow. `remcp godmode off` puts them back; `remcp godmode
+status` says which state you are in and where it comes from.
+
+Two things it deliberately does not do:
+
+- **It is not reachable from a model.** `set_config_value` lists the settings a model may change and
+  this is not one of them; only a person at the computer (this command, `REMCP_RUNTIME_UNRESTRICTED=1`,
+  or `unrestricted: true` in `~/.config/remcp/runtime.json`) can turn it on. That is what keeps a
+  prompt injection from becoming root.
+- **It does not make the agent root.** Commands run as the user the agent runs as. `sudo` is no longer
+  blocked, but it still needs your sudoers rules; to run everything as root, run the agent as root.
+
+While it is on, `get_runtime_info` reports `policy.unrestricted: true`, so the model can see it and
+say so instead of assuming the guardrails are still there.
+
 ## macOS folder permissions
 
 macOS protects Desktop, Documents, Downloads and iCloud Drive. Until it is granted access, ReMCP

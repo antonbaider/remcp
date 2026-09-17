@@ -487,7 +487,7 @@ function assertRuntimeTrust(server, flags) {
 }
 
 function printHelp() {
-  console.log(`ReMCP ${VERSION}\n\nCommands:\n  remcp start\n  remcp status\n  remcp doctor\n  remcp update\n  remcp install\n  remcp uninstall\n  remcp uninstall --purge\n  remcp telemetry [status|on|off]\n  remcp --version\n\nPairing commands are generated in the ReMCP workspace.\n\nUsage metrics are opt-out (tool names, timings, outcomes only, sent to your own ReMCP\naccount through the paired agent). Disable them at any time with: remcp telemetry off`);
+  console.log(`ReMCP ${VERSION}\n\nCommands:\n  remcp start\n  remcp status\n  remcp doctor\n  remcp update\n  remcp install\n  remcp uninstall\n  remcp uninstall --purge\n  remcp telemetry [status|on|off]\n  remcp godmode [status|on|off]\n  remcp --version\n\nPairing commands are generated in the ReMCP workspace.\n\nUsage metrics are opt-out (tool names, timings, outcomes only, sent to your own ReMCP\naccount through the paired agent). Disable them at any time with: remcp telemetry off\n\nUnrestricted mode (remcp godmode on) lifts the access roots and the command guardrails for this\ncomputer only. It is deliberately not reachable from a model or an MCP tool.`);
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -600,6 +600,37 @@ export async function main(argv = process.argv.slice(2)) {
       return;
     }
     throw new Error('Usage: remcp telemetry [status|on|off]');
+  }
+
+  // The switch that lifts every guardrail: no access roots, no command blocklist, no catastrophic
+  // command protection. It lives here, on the machine, because a model that could turn it on would
+  // turn any prompt injection into root. The runtime refuses to set it through MCP
+  // (`set_config_value` lists what it accepts, and this is not on the list).
+  if (command === 'godmode' || command === 'unrestricted') {
+    const action = String(positional[0] || 'status').toLowerCase();
+    if (action === 'status') {
+      const runtimeFile = readJsonFile(runtimeConfigFile);
+      const state = runtimeFile.unrestricted === true || process.env.REMCP_RUNTIME_UNRESTRICTED === '1';
+      console.log(JSON.stringify({
+        unrestricted: state,
+        source: runtimeFile.unrestricted === true ? runtimeConfigFile : process.env.REMCP_RUNTIME_UNRESTRICTED === '1' ? 'REMCP_RUNTIME_UNRESTRICTED' : 'default',
+        meaning: state
+          ? 'Every path and every command is allowed. Commands run as the user the agent runs as; run the agent as root (sudo remcp install --system) if you want root.'
+          : 'The runtime confines file access to its allowed roots and applies its command guardrails.',
+      }, null, 2));
+      return;
+    }
+    if (!['on', 'off', 'enable', 'disable'].includes(action)) throw new Error('Usage: remcp godmode [status|on|off]');
+    const enabled = action === 'on' || action === 'enable';
+    writeJsonFile(runtimeConfigFile, { ...readJsonFile(runtimeConfigFile), unrestricted: enabled });
+    const restarted = restartPersistentServiceIfInstalled();
+    if (enabled) {
+      console.error('Unrestricted mode is ON for this computer: every path and every command is allowed, including sudo. Anything the model is asked to do -- and anything a prompt injection asks it to do -- can now change this machine. Turn it off with `remcp godmode off` when you are done.');
+    } else {
+      console.log('Unrestricted mode is off: the runtime is back to its allowed roots and command guardrails.');
+    }
+    console.log(JSON.stringify({ unrestricted: enabled, configFile: runtimeConfigFile, restarted }, null, 2));
+    return;
   }
 
   if (command === 'status' || command === 'doctor') {

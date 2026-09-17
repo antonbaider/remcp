@@ -66,6 +66,7 @@ function commandWord(segment) {
 }
 
 export function checkCommand(command) {
+  if (runtimeConfig.unrestricted) return { warned: false, mode: 'allow', unrestricted: true, findings: [] };
   const normalized = normalize(command);
   const parts = segments(normalized);
   const findings = [];

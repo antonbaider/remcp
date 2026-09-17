@@ -72,6 +72,19 @@ function dangerousMode(value, fallback = 'warn') {
 const allowedRoots = stringList(process.env.REMCP_RUNTIME_ALLOWED_ROOTS ?? file.allowedRoots)
   .map(root => path.resolve(expandHome(root)));
 
+// "Everything is allowed" mode. It is deliberately *not* settable through MCP: a model that could
+// widen its own reach would turn any prompt injection into root. The person at the computer turns it
+// on (environment variable, runtime.json, or `remcp godmode on`), and the runtime then reports it in
+// get_runtime_info so the model and the workspace can say so out loud.
+//
+// What it changes: no access-root confinement (allowedRoots becomes empty, which the path resolver
+// already reads as "the whole filesystem"), the configured command blocklist is ignored, and the
+// catastrophic-command guardrail is set to `allow`. What it does not change: the per-call size limits
+// (maxWriteBytes, maxOutputBytes, line limits) — they bound one call, not what a person may do — and
+// the fact that commands run as the user the agent runs as. To act as root, run the agent as root
+// (`sudo remcp install --system`) or start it under sudo.
+const unrestricted = booleanValue(process.env.REMCP_RUNTIME_UNRESTRICTED, booleanValue(file.unrestricted, false));
+
 // Telemetry is opt-out, matching the ReMCP client: it is on unless the user (or the
 // ReMCP agent that spawned this runtime) turns it off. It never sends file paths,
 // command strings, arguments, or tool output - only tool names, timings and outcomes.
@@ -85,9 +98,10 @@ const telemetryEnabled = telemetryDisabled
 const configuredOutputBytes = positiveNumber(process.env.REMCP_RUNTIME_MAX_OUTPUT_BYTES ?? file.maxOutputBytes, 2 * 1024 * 1024);
 
 export const runtimeConfig = Object.freeze({
-  allowedRoots: Object.freeze(allowedRoots),
-  blockedCommands: Object.freeze(stringList(process.env.REMCP_RUNTIME_BLOCKED_COMMANDS ?? file.blockedCommands)),
-  dangerousCommands: dangerousMode(process.env.REMCP_RUNTIME_DANGEROUS_COMMANDS ?? file.dangerousCommands),
+  unrestricted,
+  allowedRoots: Object.freeze(unrestricted ? [] : allowedRoots),
+  blockedCommands: Object.freeze(unrestricted ? [] : stringList(process.env.REMCP_RUNTIME_BLOCKED_COMMANDS ?? file.blockedCommands)),
+  dangerousCommands: unrestricted ? 'allow' : dangerousMode(process.env.REMCP_RUNTIME_DANGEROUS_COMMANDS ?? file.dangerousCommands),
   maxOutputBytes: Math.min(configuredOutputBytes, HARD_OUTPUT_CEILING_BYTES),
   maxReadLines: positiveNumber(process.env.REMCP_RUNTIME_MAX_READ_LINES ?? file.maxReadLines, 4000),
   maxBufferedLines: positiveNumber(process.env.REMCP_RUNTIME_MAX_BUFFERED_LINES ?? file.maxBufferedLines, 100000),
