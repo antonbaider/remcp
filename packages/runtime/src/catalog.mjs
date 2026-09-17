@@ -37,7 +37,7 @@ export const toolDefinitions = [
       properties: {
         path: { type: 'string', description: 'Absolute directory (or single file) to start from.' },
         pattern: { type: 'string', description: 'Glob matched against the relative path and the file name, such as "src/**/*.ts" or "*.md". Default **/* .' },
-        max_files: { type: 'number', description: 'Stop after this many files. Default 50, maximum 200.' },
+        max_files: { type: 'number', description: 'Stop after this many files. Default 100, maximum 500.' },
         max_lines_per_file: { type: 'number', description: 'Lines kept per file. Default 2000.' },
         include_ignored: { type: 'boolean', description: 'Also descend into .git and node_modules. Default false.' },
       },
@@ -85,7 +85,7 @@ export const toolDefinitions = [
       properties: {
         path: { type: 'string', description: 'Absolute path of the file to read.' },
         offset_bytes: { type: 'number', description: 'Byte offset to start at. Default 0.' },
-        length_bytes: { type: 'number', description: 'Chunk size in bytes. Default and maximum 524288 (512 KiB).' },
+        length_bytes: { type: 'number', description: 'Chunk size in bytes. Default and maximum 1048576 (1 MiB).' },
       },
       required: ['path'],
       additionalProperties: false,
@@ -202,6 +202,42 @@ export const toolDefinitions = [
     },
     annotations: mutating,
     handler: fileToolHandlers.write_files,
+  },
+  {
+    name: 'apply_patch',
+    title: 'Apply patch',
+    description: 'Apply a unified diff to one file or to several files at once, matching each hunk with a little fuzz so small offsets and whitespace differences still apply. This is the fastest way to land a multi-line change a model has already worked out. Pass dry_run to see the result as a diff first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        patch: { type: 'string', description: 'Unified diff, including ---/+++ headers and @@ hunks.' },
+        path: { type: 'string', description: 'Apply every hunk to this file, ignoring the patch headers.' },
+        dry_run: { type: 'boolean', description: 'Report the diff without writing. Default false.' },
+      },
+      required: ['patch'],
+      additionalProperties: false,
+    },
+    annotations: mutating,
+    handler: fileToolHandlers.apply_patch,
+  },
+  {
+    name: 'set_permissions',
+    title: 'Set permissions',
+    description: 'Change the permission mode of a file or directory, optionally recursively and optionally with a numeric owner. Use this to make a script executable after writing it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path whose permissions should change.' },
+        mode: { type: 'string', description: 'Octal mode such as "755" or "0644".' },
+        recursive: { type: 'boolean', description: 'Apply to a directory and everything inside it. Default false.' },
+        uid: { type: 'number', description: 'Optional numeric user id to set as owner.' },
+        gid: { type: 'number', description: 'Optional numeric group id to set as owner.' },
+      },
+      required: ['path', 'mode'],
+      additionalProperties: false,
+    },
+    annotations: mutating,
+    handler: fileToolHandlers.set_permissions,
   },
   {
     name: 'edit_block',

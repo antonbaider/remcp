@@ -3,16 +3,17 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { access, copyFile, cp, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, chown, copyFile, cp, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { runtimeConfig } from '../config.mjs';
 import { diffStats, unifiedDiff } from '../diff.mjs';
+import { applyHunks, parseUnifiedDiff } from '../patch.mjs';
 import { countEvent, recordEvent } from '../telemetry.mjs';
 import { clampInteger, decodeText, displayPath, fail, globToRegExp, image, looksBinary, multi, pageLines, resolveSafePath, splitLines, text } from '../util.mjs';
 
-const MAX_INLINE_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_INLINE_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const MAX_BINARY_CHUNK_BYTES = 512 * 1024;
+const MAX_BINARY_CHUNK_BYTES = 1024 * 1024;
 const IMAGE_TYPES = new Map([
   ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'], ['.gif', 'image/gif'],
   ['.webp', 'image/webp'], ['.bmp', 'image/bmp'], ['.svg', 'image/svg+xml'], ['.avif', 'image/avif'],
@@ -466,8 +467,8 @@ export async function readFilesTool(args) {
   // instead of one round trip per path.
   const root = await resolveSafePath(args.path || '.');
   const pattern = typeof args.pattern === 'string' && args.pattern.trim() ? args.pattern.trim() : '**/*';
-  const maxFiles = clampInteger(args.max_files, 50, 1, 200);
-  const maxLinesPerFile = clampInteger(args.max_lines_per_file, runtimeConfig.maxReadLines, 1, 10000);
+  const maxFiles = clampInteger(args.max_files, 100, 1, 500);
+  const maxLinesPerFile = clampInteger(args.max_lines_per_file, runtimeConfig.maxReadLines, 1, 20000);
   const includeIgnored = args.include_ignored === true;
   const matcher = globToRegExp(pattern);
   const files = [];
@@ -644,6 +645,76 @@ export async function movePathsTool(args) {
     }
   }
   return text(`${moved}/${pairs.length} path(s) moved\n${results.join('\n')}`, moved !== pairs.length);
+}
+
+// Applying a unified diff is the fastest path from "the model knows the change" to "the
+// change is on disk": no exact-block matching, no re-sending whole files.
+export async function applyPatchTool(args) {
+  const patch = typeof args.patch === 'string' && args.patch.trim() ? args.patch : fail('patch must be a unified diff');
+  const dryRun = args.dry_run === true;
+  const forcePath = typeof args.path === 'string' && args.path.trim() ? args.path : null;
+  const files = parseUnifiedDiff(patch);
+  if (!files.length) fail('patch does not contain any @@ hunks');
+  const results = [];
+  let changed = 0;
+  for (const file of files) {
+    const target = forcePath || (file.newPath && file.newPath !== '/dev/null' ? file.newPath : file.oldPath);
+    if (!target || target === '/dev/null') { results.push('failed: a hunk has no target path; pass path explicitly'); continue; }
+    try {
+      const absolute = await resolveSafePath(target);
+      let original = '';
+      try { original = (await readTextFile(absolute)).content; } catch (error) {
+        if (file.oldPath === '/dev/null' || /not found/i.test(error?.message || '')) original = '';
+        else throw error;
+      }
+      const { updated, applied, failed } = applyHunks(original, file.hunks);
+      if (failed.length && !applied.length) { results.push(`failed ${displayPath(absolute)}: none of the ${file.hunks.length} hunk(s) matched`); continue; }
+      const stats = diffStats(original, updated);
+      if (!dryRun) {
+        assertWritableSize(updated);
+        await mkdir(path.dirname(absolute), { recursive: true });
+        await writeFile(absolute, updated, 'utf8');
+      }
+      changed += 1;
+      const fuzzy = applied.filter(entry => entry.fuzz > 0).length;
+      results.push(`${dryRun ? 'would patch' : 'patched'} ${displayPath(absolute)} · ${applied.length}/${file.hunks.length} hunk(s), +${stats.added}/-${stats.removed} lines${fuzzy ? `, ${fuzzy} with fuzz` : ''}${failed.length ? `, ${failed.length} hunk(s) did not match` : ''}`);
+      if (dryRun) results.push(unifiedDiff(original, updated, { oldLabel: displayPath(absolute), newLabel: 'after' }));
+    } catch (error) {
+      results.push(`failed ${target}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const failedCount = results.filter(line => line.startsWith('failed')).length;
+  return text([`${changed}/${files.length} file(s) ${dryRun ? 'would be patched' : 'patched'}`, ...results].join('\n'), failedCount > 0);
+}
+
+export async function setPermissionsTool(args) {
+  const absolute = await resolveSafePath(args.path);
+  const info = await stat(absolute).catch(() => fail(`Path not found: ${displayPath(absolute)}`));
+  const raw = typeof args.mode === 'string' ? args.mode.trim() : String(args.mode ?? '');
+  if (!/^[0-7]{3,4}$/.test(raw)) fail('mode must be an octal string such as "755" or "0644"');
+  const mode = Number.parseInt(raw, 8);
+  const recursive = args.recursive === true;
+  const uid = Number.isInteger(Number(args.uid)) ? Number(args.uid) : null;
+  const gid = Number.isInteger(Number(args.gid)) ? Number(args.gid) : null;
+  const targets = [];
+  async function collect(target) {
+    targets.push(target);
+    const entry = await stat(target).catch(() => null);
+    if (!entry?.isDirectory() || !recursive) return;
+    for (const child of await readdir(target).catch(() => [])) await collect(path.join(target, child));
+  }
+  await collect(absolute);
+  let changed = 0;
+  for (const target of targets) {
+    try {
+      await chmod(target, mode);
+      if (uid !== null || gid !== null) await chown(target, uid ?? -1, gid ?? -1);
+      changed += 1;
+    } catch (error) {
+      fail(`Could not change permissions on ${displayPath(target)}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return text(`Set mode ${raw}${uid !== null || gid !== null ? ` (uid ${uid ?? '-'} gid ${gid ?? '-'})` : ''} on ${changed} path(s) starting at ${displayPath(absolute)}.`);
 }
 
 export async function createDirectoryTool(args) {
@@ -845,6 +916,8 @@ export const fileToolHandlers = {
   replace_in_files: replaceInFilesTool,
   diff_files: diffFilesTool,
   create_directory: createDirectoryTool,
+  apply_patch: applyPatchTool,
+  set_permissions: setPermissionsTool,
   delete_path: deletePathTool,
   delete_paths: deletePathsTool,
   move_file: moveFileTool,

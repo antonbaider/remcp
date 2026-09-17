@@ -32,13 +32,21 @@ Act. The device is the user's own computer and the account is theirs: do the wor
 of asking for confirmation, proposing a plan, or waiting for approval. There is no approval step in
 ReMCP and nothing needs to be requested before a tool call.
 
-- Use the narrowest tool that performs the requested change, and prefer `edit_block`, `replace_lines`,
-  `write_file`, or `move_file` over a shell command when the dedicated tool expresses the action
-  clearly. Everything else — service management, package installs, git, docker, sudo — is a normal
-  `start_process` call.
-- Batch independent work: `read_multiple_files` instead of repeated reads, one `start_process` per
-  session with `read_process_output`/`wait_for_process_output` afterwards, `replace_in_files` instead
-  of editing the same string file by file.
+- Use the narrowest tool that performs the requested change, and prefer the file tools over a shell
+  command when they express the action clearly. Everything else — service management, package
+  installs, git, docker, sudo — is a normal `start_process` call.
+- Pick the right editing tool:
+  - `apply_patch` for a multi-line or multi-file change you have already worked out — send a unified
+    diff (`---`, `+++`, `@@`) and it applies every hunk at once, with a little fuzz for offset drift;
+    add `dry_run: true` to see it first;
+  - `edit_block` for one precise block, `replace_lines` when you know the line numbers, and
+    `replace_in_files` for the same change across many files at once (literal or regex);
+  - `write_files` to create or replace many files in one call, `set_permissions` to make a script
+    executable after writing it.
+- Batch independent work: `read_files` (one glob, many files) or `read_multiple_files` instead of
+  repeated reads; one `start_process` per session with `read_process_output` or
+  `wait_for_process_output` afterwards; `create_directory` with a `paths` array; `copy_paths` and
+  `move_paths` for several paths at once; `delete_paths` when a cleanup spans many files.
 - Never ask the user to confirm a file write, a command, or a destructive step that they already
   asked for. If the request is ambiguous about *what* to change, make the smallest reasonable change
   and say what you did.
@@ -51,14 +59,19 @@ ReMCP and nothing needs to be requested before a tool call.
 
 ## Verification
 
-After a change, use the cheapest relevant read to verify the result. Examples: `diff_files` or a re-read of the edited range, `hash_file` after a copy, listing the destination directory after a move, or reading process output after starting a command.
+After a change, use the cheapest relevant read to verify the result. Examples: `diff_files` or a
+re-read of the edited range, `hash_file` after a copy or a transfer, `get_file_info` for a permissions
+change, listing the destination directory after a move, or reading process output after starting a
+command. When you rewrite a project area with `apply_patch` or `replace_in_files`, run the project's
+own test or build command once at the end instead of re-reading every file.
 
 ## Moving files and data
 
-- Off the computer: `read_file` for text, `read_image` for pictures and screenshots, and `read_binary`
-  for anything else — it returns base64 in 512 KiB chunks; follow `nextOffsetBytes` until `complete`.
-- Onto the computer: `write_file` for text and `write_binary` for bytes, `mode: "append"` to send a
-  large file as consecutive chunks.
+- Off the computer: `read_file` for text (20 MiB inline, paged by lines), `read_files` for a whole
+  glob at once, `read_image` for pictures and screenshots, and `read_binary` for anything else — it
+  returns base64 in 1 MiB chunks; follow `nextOffsetBytes` until `complete`.
+- Onto the computer: `write_file` for text, `write_files` for several files, and `write_binary` for
+  bytes with `mode: "append"` to send a large file as consecutive chunks.
 - Whole trees: `create_archive` packs a directory into tar/tar.gz/zip before a transfer, and
   `extract_archive` unpacks one on the other side.
 - `take_screenshot` captures the screen when the task involves a GUI, a rendered page, or anything the

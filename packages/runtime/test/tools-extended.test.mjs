@@ -28,7 +28,7 @@ test('write_file still creates new files and points binary data at write_binary'
 
 test('read_binary and write_binary transfer a file byte for byte in chunks', async () => {
   const source = join(root, 'blob.bin');
-  const payload = Buffer.alloc(700 * 1024);
+  const payload = Buffer.alloc(2500 * 1024);
   for (let index = 0; index < payload.length; index += 1) payload[index] = index % 251;
   writeFileSync(source, payload);
 
@@ -36,7 +36,7 @@ test('read_binary and write_binary transfer a file byte for byte in chunks', asy
   assert.equal(first.size, payload.length);
   assert.equal(first.encoding, 'base64');
   assert.equal(first.complete, false);
-  assert.ok(Buffer.from(first.data, 'base64').length <= 512 * 1024);
+  assert.ok(Buffer.from(first.data, "base64").length <= 1024 * 1024);
 
   const copy = join(root, 'blob-copy.bin');
   let offset = 0;
@@ -314,4 +314,57 @@ test('create, bulk create, delete, bulk delete, bulk copy and bulk move all work
   assert.equal(existsSync(join(base, 'moved-b')), false);
 
   assert.equal(isError(await invokeTool('delete_path', { path: '/' })), true, 'the filesystem root is refused');
+});
+
+test('apply_patch lands a unified diff, with fuzz for small offsets, and can preview', async () => {
+  const target = join(root, 'patched.js');
+  writeFileSync(target, 'function main() {\n  const value = 1;\n  return value;\n}\n');
+  const patch = [
+    '--- a/patched.js',
+    '+++ b/patched.js',
+    '@@ -1,4 +1,5 @@',
+    ' function main() {',
+    '-  const value = 1;',
+    '+  const value = 2;',
+    '+  const extra = value * 2;',
+    '   return value;',
+    ' }',
+  ].join('\n');
+  const preview = body(await invokeTool('apply_patch', { patch, path: target, dry_run: true }));
+  assert.match(preview, /would patch/);
+  assert.match(preview, /\+  const value = 2;/);
+  assert.equal(readFileSync(target, 'utf8').includes('const value = 1'), true, 'dry run must not write');
+
+  const applied = body(await invokeTool('apply_patch', { patch, path: target }));
+  assert.match(applied, /1\/1 file\(s\) patched/);
+  assert.equal(readFileSync(target, 'utf8'), 'function main() {\n  const value = 2;\n  const extra = value * 2;\n  return value;\n}\n');
+
+  // Drifted context (extra line above) still applies with fuzz.
+  writeFileSync(target, '// header\nfunction main() {\n  const value = 2;\n  const extra = value * 2;\n  return value;\n}\n');
+  const fuzzed = body(await invokeTool('apply_patch', { patch, path: target }));
+  assert.match(fuzzed, /patched/);
+
+  const multi = [
+    '--- a/one.txt', '+++ b/one.txt', '@@ -1 +1 @@', '-old one', '+new one',
+    '--- a/two.txt', '+++ b/two.txt', '@@ -1 +1 @@', '-old two', '+new two',
+  ].join('\n');
+  writeFileSync(join(root, 'one.txt'), 'old one\n');
+  writeFileSync(join(root, 'two.txt'), 'old two\n');
+  const both = body(await invokeTool('apply_patch', { patch: multi, path: null }));
+  void both;
+  const perFile = body(await invokeTool('apply_patch', { patch: multi, path: join(root, 'one.txt') }));
+  assert.match(perFile, /patched/);
+});
+
+test('set_permissions makes a written script executable', async () => {
+  const script = join(root, 'run.sh');
+  writeFileSync(script, '#!/bin/sh\necho ok\n');
+  assert.equal(isError(await invokeTool('set_permissions', { path: script, mode: '755' })), false);
+  assert.equal(statSync(script).mode & 0o777, 0o755);
+  assert.equal(isError(await invokeTool('set_permissions', { path: script, mode: 'nope' })), true);
+  const dir = join(root, 'perms-dir');
+  mkdirSync(join(dir, 'nested'), { recursive: true });
+  writeFileSync(join(dir, 'nested', 'file.txt'), 'x\n');
+  assert.equal(isError(await invokeTool('set_permissions', { path: dir, mode: '750', recursive: true })), false);
+  assert.equal(statSync(join(dir, 'nested', 'file.txt')).mode & 0o777, 0o750);
 });

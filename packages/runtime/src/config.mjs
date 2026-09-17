@@ -80,15 +80,17 @@ const telemetryEnabled = telemetryDisabled
   ? false
   : booleanValue(process.env.REMCP_RUNTIME_TELEMETRY ?? file.telemetryEnabled, true);
 
-const configuredOutputBytes = positiveNumber(process.env.REMCP_RUNTIME_MAX_OUTPUT_BYTES ?? file.maxOutputBytes, 1024 * 1024);
+// 2 MiB of tool result per call by default: enough for a large file read or a batch of
+// files, still comfortably below the transport ceiling.
+const configuredOutputBytes = positiveNumber(process.env.REMCP_RUNTIME_MAX_OUTPUT_BYTES ?? file.maxOutputBytes, 2 * 1024 * 1024);
 
 export const runtimeConfig = Object.freeze({
   allowedRoots: Object.freeze(allowedRoots),
   blockedCommands: Object.freeze(stringList(process.env.REMCP_RUNTIME_BLOCKED_COMMANDS ?? file.blockedCommands)),
   dangerousCommands: dangerousMode(process.env.REMCP_RUNTIME_DANGEROUS_COMMANDS ?? file.dangerousCommands),
   maxOutputBytes: Math.min(configuredOutputBytes, HARD_OUTPUT_CEILING_BYTES),
-  maxReadLines: positiveNumber(process.env.REMCP_RUNTIME_MAX_READ_LINES ?? file.maxReadLines, 2000),
-  maxBufferedLines: positiveNumber(process.env.REMCP_RUNTIME_MAX_BUFFERED_LINES ?? file.maxBufferedLines, 50000),
+  maxReadLines: positiveNumber(process.env.REMCP_RUNTIME_MAX_READ_LINES ?? file.maxReadLines, 4000),
+  maxBufferedLines: positiveNumber(process.env.REMCP_RUNTIME_MAX_BUFFERED_LINES ?? file.maxBufferedLines, 100000),
   maxWriteBytes: positiveNumber(process.env.REMCP_RUNTIME_MAX_WRITE_BYTES ?? file.maxWriteBytes, 8 * 1024 * 1024),
   defaultShell: String(process.env.REMCP_RUNTIME_SHELL || file.defaultShell || '').trim(),
   name: String(process.env.REMCP_RUNTIME_NAME || file.name || os.hostname()).trim(),
