@@ -25,6 +25,9 @@ const TELEMETRY_QUEUE_LIMIT = 500;
 const TELEMETRY_BATCH_LIMIT = 100;
 const TELEMETRY_SEND_INTERVAL_MS = 5_000;
 const RECONNECT_BASE_MS = 2_000;
+// The first retry after an unexpected drop: fast enough that a blip is invisible, slow enough not to
+// hammer a server that is genuinely down.
+const RECONNECT_FIRST_MS = 500;
 // Must stay above the runtime's own output ceiling (8 MiB), otherwise a large but legal tool result
 // closes the stdio connection and restarts the runtime mid-call.
 const RUNTIME_STDIO_BUFFER_BYTES = 24 * 1024 * 1024;
@@ -240,6 +243,8 @@ export async function runAgent(options) {
   const inFlight = new Map();
   let activeSocket;
   let reconnects = 0;
+  // Set when a replica asks this agent to move before it is replaced; the close handler reads it.
+  let askedToReconnect = false;
   let pendingRequests = 0;
   let runtimeVersion = 'unknown';
   let runtimeRestarts = 0;
@@ -444,6 +449,10 @@ export async function runAgent(options) {
     ws.on('message', raw => {
       let message;
       try { message = JSON.parse(raw.toString()); } catch { return; }
+      if (message?.type === 'reconnect') {
+        askedToReconnect = true;
+        return;
+      }
       if (message?.type === 'request') void respond(ws, message);
       if (message?.type === 'cancel' && message.id) {
         const controller = inFlight.get(message.id);
@@ -453,6 +462,16 @@ export async function runAgent(options) {
     ws.on('close', code => {
       for (const controller of inFlight.values()) controller.abort();
       if (stopping) return;
+      // 1013 ('reconnect') is what a replica sends before it is replaced by a deployment. The machine
+      // is not down, it is moving: reconnect at once and forget the backoff, so the person and the
+      // model see nothing at all.
+      if (code === 1013 || askedToReconnect) {
+        askedToReconnect = false;
+        reconnects = 0;
+        console.log('ReMCP relay is being redeployed; reconnecting now.');
+        setTimeout(connect, 150);
+        return;
+      }
       if (code === 1008 || revoked) {
         // The relay closes with 1008 when the device was revoked. Retrying forever would
         // hide that from the person at the computer.
@@ -469,7 +488,11 @@ export async function runAgent(options) {
         return;
       }
       reconnects += 1;
-      const delay = jitter(Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(reconnects, 5)));
+      // The first retry after an unexpected drop is quick on purpose: a deploy blip, a proxy restart or
+      // a dropped packet should cost a fraction of a second, not the two seconds the backoff starts at.
+      const delay = reconnects === 1
+        ? jitter(RECONNECT_FIRST_MS)
+        : jitter(Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(reconnects, 5)));
       setTimeout(connect, delay);
     });
     ws.on('error', error => console.error(`ReMCP relay: ${error.message}`));
