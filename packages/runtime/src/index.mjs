@@ -2,7 +2,7 @@
 import process from 'node:process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { toolDefinitions } from './catalog.mjs';
+import { advertisedTools, toolDefinitions } from './catalog.mjs';
 import { describeConfig, configurationError, runtimeConfigDir } from './config.mjs';
 import { invokeTool } from './invoke.mjs';
 import { shutdownSessions, startSessionSweeper } from './sessions.mjs';
@@ -40,7 +40,7 @@ if (args.includes('--version')) {
 }
 
 if (args.includes('--print-tools')) {
-  process.stdout.write(`${JSON.stringify(toolDefinitions.map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations })), null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(advertisedTools(), null, 2)}\n`);
   process.exit(0);
 }
 
@@ -86,9 +86,7 @@ const server = new Server(
   },
 );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: toolDefinitions.map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations })),
-}));
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: advertisedTools() }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   return invokeTool(request.params.name, request.params.arguments, extra);

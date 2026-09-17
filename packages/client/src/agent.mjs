@@ -2,7 +2,7 @@ import os from 'node:os';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import WebSocket from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -10,6 +10,8 @@ import { normalizeRuntime } from './runtime.mjs';
 import { VERSION } from './version.mjs';
 
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const UPDATE_CHECK_TIMEOUT_MS = 5000;
 const METRICS_INTERVAL_MS = 60_000;
 const TELEMETRY_QUEUE_LIMIT = 500;
 const TELEMETRY_BATCH_LIMIT = 100;
@@ -33,6 +35,31 @@ function localRuntimeEntry(runtimeValue) {
   const candidate = path.join(globalNodeModules(), ...runtime.packageName.split('/'), ...runtime.entry.split(/[\\/]+/));
   if (!existsSync(candidate)) throw new Error('ReMCP local runtime is not installed. Run `remcp install`.');
   return candidate;
+}
+
+function parseVersion(value) {
+  const match = String(value || '').match(/(\d+)\.(\d+)\.(\d+)/);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function isNewer(candidate, current) {
+  const a = parseVersion(candidate);
+  const b = parseVersion(current);
+  if (!a || !b) return false;
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] > b[index]) return true;
+    if (a[index] < b[index]) return false;
+  }
+  return false;
+}
+
+function globalCliEntry() {
+  const prefix = spawnSync(npmCommand, ['prefix', '--global'], { encoding: 'utf8' });
+  if (prefix.error || prefix.status !== 0) return null;
+  const base = String(prefix.stdout || '').trim();
+  return process.platform === 'win32'
+    ? path.join(base, 'remcp.cmd')
+    : path.join(base, 'bin', 'remcp');
 }
 
 function jitter(ms) {
@@ -220,6 +247,7 @@ export async function runAgent(options) {
       send({ type: 'metrics', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown }) });
       reportInstallOnce();
       flushTelemetry();
+      void checkForUpdate();
     });
     ws.on('message', raw => {
       let message;
@@ -241,6 +269,38 @@ export async function runAgent(options) {
     ws.on('error', error => console.error(`ReMCP relay: ${error.message}`));
   }
 
+  // Auto-update: the server publishes the versions an agent should be running. A newer
+  // release is installed in the background and the service restart picks it up; a failed
+  // or skipped update leaves the current version running, so an old agent keeps working.
+  async function checkForUpdate() {
+    if (options.autoUpdate === false) return;
+    try {
+      const response = await fetch(`${serverUrl}/api/agent/version`, { signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS) });
+      if (!response.ok) return;
+      const advertised = await response.json();
+      const minimum = advertised.minimum;
+      if (minimum && isNewer(minimum, VERSION)) {
+        console.error(`ReMCP ${VERSION} is older than the minimum supported agent ${minimum}; update with: remcp update`);
+      }
+      if (!isNewer(advertised.cli, VERSION)) return;
+      queueEvent({ event: 'agent_update', at: Date.now(), reason: String(advertised.cli).slice(0, 32), success: true });
+      const cli = globalCliEntry();
+      if (!cli || !existsSync(cli)) {
+        console.error(`ReMCP ${advertised.cli} is available; run: remcp update`);
+        return;
+      }
+      console.log(`Updating ReMCP to ${advertised.cli}${advertised.runtime ? ` with ${advertised.runtime}` : ''}…`);
+      const child = spawn(process.execPath, [cli, 'update', ...(advertised.runtime ? ['--runtime', advertised.runtime] : [])], {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env },
+      });
+      child.unref();
+    } catch {
+      // Offline, DNS failure, older server without the endpoint: keep running as-is.
+    }
+  }
+
   telemetryTimer = setInterval(() => {
     if (activeSocket?.readyState === 1) {
       send({ type: 'metrics', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown, queueDepth: telemetryQueue.length }) });
@@ -250,12 +310,15 @@ export async function runAgent(options) {
   telemetryTimer.unref?.();
   const telemetryFlushTimer = setInterval(flushTelemetry, TELEMETRY_SEND_INTERVAL_MS);
   telemetryFlushTimer.unref?.();
+  const updateTimer = setInterval(() => void checkForUpdate(), UPDATE_CHECK_INTERVAL_MS);
+  updateTimer.unref?.();
 
   async function stop() {
     if (stopping) return;
     stopping = true;
     if (telemetryTimer) clearInterval(telemetryTimer);
     clearInterval(telemetryFlushTimer);
+    clearInterval(updateTimer);
     try { activeSocket?.close(); } catch {}
     try { await mcp?.close(); } catch {}
     try { await transport?.close(); } catch {}

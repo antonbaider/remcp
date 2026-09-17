@@ -32,7 +32,7 @@ runtime.
 | Package | What it is |
 | --- | --- |
 | [`@remcp/remcp`](packages/client) | The device client: pairing, the outbound agent, the background service, and the usage-metrics switch. |
-| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **41 MCP tools** for files, images, binary transfer, archives, screenshots, search, terminal sessions, and processes, with **one dependency**. |
+| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **43 MCP tools** for files, images, binary transfer, archives, screenshots, search, terminal sessions, and processes, with **one dependency**. |
 
 ## Install
 
@@ -69,7 +69,7 @@ runtime and registers the background service.
 with, [DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) or any other MCP
 server.
 
-**41 tools, seven areas:**
+**43 tools, seven areas:**
 
 | Area | Tools |
 | --- | --- |

@@ -272,12 +272,25 @@ export async function main(argv = process.argv.slice(2)) {
     const telemetry = telemetryState();
     await runAgent({
       ...cfg,
+      autoUpdate: cfg.autoUpdate !== false,
       telemetryEnabled: telemetry.enabled,
       installReported: telemetry.installReported,
       installSpec: `${PACKAGE_NAME}@${VERSION}`,
       persistState: patch => saveConfig({ ...cfg, ...patch }),
     });
     return;
+  }
+
+  if (command === 'auto-update') {
+    const action = String(positional[0] || 'status').toLowerCase();
+    const cfg = loadConfig(false) || {};
+    if (action === 'status') {
+      console.log(JSON.stringify({ autoUpdate: cfg.autoUpdate !== false, checkIntervalHours: 6 }, null, 2));
+      return;
+    }
+    if (action === 'on' || action === 'enable') { saveConfig({ ...cfg, autoUpdate: true }); console.log('Auto-update enabled.'); return; }
+    if (action === 'off' || action === 'disable') { saveConfig({ ...cfg, autoUpdate: false }); console.log('Auto-update disabled. Run `remcp update` yourself when you want a new version.'); return; }
+    throw new Error('Usage: remcp auto-update [status|on|off]');
   }
 
   if (command === 'telemetry') {
@@ -315,8 +328,20 @@ export async function main(argv = process.argv.slice(2)) {
 
   if (command === 'update') {
     const cfg = loadConfig();
-    console.log('Updating ReMCP to the latest published version…');
-    npmGlobalInstall(`${PACKAGE_NAME}@latest`, cfg.runtime.packageSpec);
+    // The server advertises which runtime version it expects; an agent that is updating
+    // itself passes it through so client and runtime move together.
+    const requested = typeof flags.runtime === 'string' ? flags.runtime.trim() : '';
+    if (requested && (!/^@?[a-z0-9._-]+(\/[a-z0-9._-]+)?@\S+$/i.test(requested) || requested.includes(' '))) {
+      throw new Error('--runtime must look like @scope/package@1.2.3');
+    }
+    const runtimeSpec = requested || cfg.runtime.packageSpec;
+    if (flags.check) {
+      console.log(JSON.stringify({ current: VERSION, runtime: cfg.runtime.packageSpec, available: `${PACKAGE_NAME}@latest` }, null, 2));
+      return;
+    }
+    console.log(`Updating ReMCP to the latest published version (${runtimeSpec})…`);
+    npmGlobalInstall(`${PACKAGE_NAME}@latest`, runtimeSpec);
+    if (requested) saveConfig({ ...cfg, runtime: { ...cfg.runtime, packageSpec: requested } });
     restartPersistentServiceIfInstalled();
     console.log('ReMCP updated. Run `remcp --version` or `remcp status` to verify.');
     return;

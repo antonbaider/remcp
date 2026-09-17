@@ -4,6 +4,17 @@ import { terminalToolHandlers } from './tools/terminal.mjs';
 import { systemToolHandlers } from './tools/system.mjs';
 import { statsToolHandlers } from './tools/stats.mjs';
 
+// Every tool answers with a text result (image tools add an image part as well), so the
+// declared output schema is the same shape everywhere and clients can rely on it.
+export const TEXT_OUTPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    text: { type: 'string', description: 'Human-readable result of the tool call.' },
+  },
+  required: ['text'],
+  additionalProperties: false,
+};
+
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const readOnlyNonIdempotent = { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const additive = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -725,5 +736,16 @@ export const toolDefinitions = [
     handler: statsToolHandlers.get_runtime_stats,
   },
 ];
+
+export function advertisedTools() {
+  return toolDefinitions.map(({ name, title, description, inputSchema, annotations, outputSchema }) => ({
+    name,
+    title,
+    description,
+    inputSchema,
+    annotations,
+    outputSchema: outputSchema || TEXT_OUTPUT_SCHEMA,
+  }));
+}
 
 export const toolHandlers = new Map(toolDefinitions.map(definition => [definition.name, definition]));

@@ -114,7 +114,9 @@ export function truncate(text, maxBytes) {
 
 export function text(value, isError = false) {
   const body = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-  return { content: [{ type: 'text', text: truncate(body) }], ...(isError ? { isError: true } : {}) };
+  const rendered = truncate(body);
+  // structuredContent mirrors the text so a client can rely on the declared outputSchema.
+  return { content: [{ type: 'text', text: rendered }], structuredContent: { text: rendered }, ...(isError ? { isError: true } : {}) };
 }
 
 export function image(data, mimeType) {
@@ -122,7 +124,8 @@ export function image(data, mimeType) {
 }
 
 export function multi(parts) {
-  return { content: parts };
+  const summary = parts.find(part => part.type === 'text')?.text ?? '';
+  return { content: parts, structuredContent: { text: summary } };
 }
 
 export function splitLines(value) {
