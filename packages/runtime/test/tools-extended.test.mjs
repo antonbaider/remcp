@@ -74,7 +74,9 @@ test('archives can be created and extracted', async () => {
 test('take_screenshot either returns an image or explains what is missing', async () => {
   const result = await invokeTool('take_screenshot', { directory: root });
   if (result.isError === true) {
-    assert.match(body(result), /Could not capture the screen|Install one of/);
+    // The message is platform-specific now: no session at all, a missing Wayland capture tool, a
+    // Windows session that nobody is signed in to, or macOS Screen Recording that was never granted.
+    assert.match(body(result), /no graphical session|Could not capture the screen|Install one of|Screen Recording|interactive desktop session|grim/);
   } else {
     assert.equal(result.content[1].type, 'image');
     assert.equal(result.content[1].mimeType, 'image/png');
