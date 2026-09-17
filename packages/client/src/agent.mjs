@@ -35,7 +35,7 @@ function globalNodeModules() {
   return String(result.stdout || '').trim();
 }
 
-function localRuntimeEntry(runtimeValue) {
+export function localRuntimeEntry(runtimeValue) {
   const runtime = normalizeRuntime(runtimeValue);
   const candidate = path.join(globalNodeModules(), ...runtime.packageName.split('/'), ...runtime.entry.split(/[\\/]+/));
   if (!existsSync(candidate)) throw new Error('ReMCP local runtime is not installed. Run `remcp install`.');

@@ -1,0 +1,11 @@
+interface:
+  display_name: "Transfer between machines"
+  short_description: "Copy a file or folder from one paired computer to another"
+  default_prompt: "Copy my notes folder from the laptop to the server and verify both copies match."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "remcp"
+      description: "Tools for computers explicitly paired with ReMCP"
+      transport: "streamable_http"
+      url: "https://remcp.delio24.com/mcp"

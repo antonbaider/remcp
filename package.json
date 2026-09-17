@@ -1,6 +1,6 @@
 {
   "name": "remcp",
-  "version": "0.2.13",
+  "version": "0.2.15",
   "private": true,
   "description": "ReMCP: secure remote MCP bridge. Device client and first-party local runtime.",
   "type": "module",
@@ -13,7 +13,7 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "check": "npm run check --workspaces --if-present",
+    "check": "node scripts/check-plugin.mjs && npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
   },
   "repository": {

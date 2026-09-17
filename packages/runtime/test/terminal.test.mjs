@@ -27,6 +27,22 @@ test('read_process_output returns new output and supports tail offsets', async (
   assert.match(tail, /line-3/);
 });
 
+test('cursor-consuming output tools do not advertise idempotent retries', async () => {
+  const { toolDefinitions } = await import('../src/catalog.mjs');
+  for (const name of ['read_process_output', 'wait_for_process_output']) {
+    const tool = toolDefinitions.find(tool => tool.name === name);
+    assert.equal(tool.annotations.readOnlyHint, true);
+    assert.equal(tool.annotations.destructiveHint, false);
+    assert.equal(tool.annotations.idempotentHint, false);
+  }
+  const started = await invokeTool('start_process', { command: 'sleep 0.3; echo cursor-marker', timeout_ms: 1 });
+  const pid = pidOf(started);
+  const first = body(await invokeTool('read_process_output', { pid, timeout_ms: 8000 }));
+  assert.match(first, /cursor-marker/);
+  const retry = body(await invokeTool('read_process_output', { pid }));
+  assert.doesNotMatch(retry, /cursor-marker/, 'the same arguments cannot replay consumed output');
+});
+
 test('interact_with_process sends input and list_sessions reports the session', async () => {
   const started = await invokeTool('start_process', { command: 'node -e "process.stdin.on(\'data\', d => process.stdout.write(\'echo:\' + d.toString()))"', timeout_ms: 300 });
   const pid = pidOf(started);

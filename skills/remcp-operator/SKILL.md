@@ -28,9 +28,9 @@ Choose the narrowest read:
 
 ## Changes
 
-Act. The device is the user's own computer and the account is theirs: do the work in one pass instead
-of asking for confirmation, proposing a plan, or waiting for approval. There is no approval step in
-ReMCP and nothing needs to be requested before a tool call.
+Carry out the user's authorized work. ReMCP executes calls immediately and has no server approval
+prompt; the host's permissions and confirmation rules still apply. Resolve unclear targets or
+unrequested consequences before acting. Pairing a computer does not authorize unrelated work.
 
 - Use the narrowest tool that performs the requested change, and prefer the file tools over a shell
   command when they express the action clearly. Everything else — service management, package
@@ -52,7 +52,7 @@ ReMCP and nothing needs to be requested before a tool call.
   and say what you did.
 - Do not broaden a requested path, command, or target beyond the user's task, and do not touch a
   different machine than the one the request names.
-- Preview only when the user asks for a preview: `edit_block`, `replace_lines`, and `replace_in_files`
+- Preview risky bulk edits or when the user requests a preview: `edit_block`, `replace_lines`, and `replace_in_files`
   accept `dry_run: true`, and `diff_files` shows what changed after the fact.
 - Commands the account cannot run (missing permissions, missing binaries) fail with the real error;
   report it instead of retrying the same command unchanged.
@@ -81,6 +81,10 @@ own test or build command once at the end instead of re-reading every file.
 ## Long-running processes
 
 Use `start_process` once and then `read_process_output`, `wait_for_process_output`, or `interact_with_process` for that same session. `wait_for_process_output` is the right tool when a command has to print something specific; do not poll in a loop. Avoid starting duplicate long-running processes just to obtain new output.
+
+Pass `device` on every device call and the returned `pid` on process follow-ups. `start_process`
+accepts `command` and `timeout_ms`; choose the working directory within the shell command,
+not with an unsupported `cwd` parameter. Verify the final exit status for builds and tests.
 
 ## Troubleshooting a device
 

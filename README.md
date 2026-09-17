@@ -63,6 +63,21 @@ runtime and registers the background service.
 | `remcp telemetry [status\|on\|off]` | Show or change usage metrics for the client **and** the runtime |
 | `remcp --version` | Print the installed client version |
 
+## ChatGPT and Codex plugin
+
+The repository root is a portable Agent Plugins package: `plugin.json`, `mcp.json`, icons, and
+five workflows in `skills/`. Each skill declares its ReMCP MCP dependency. npm installation pairs
+a device; it does not install ChatGPT skills or submit a plugin to OpenAI.
+
+Use the matching release's `remcp-plugin.zip` for a portal upload. It includes every skill reference
+and presentation asset. `chatgpt-app-submission.json` contains the tool review metadata. Public CI
+checks that the ZIP matches the source tree before publishing either npm package.
+
+The hosted OAuth issuer is `https://remcp.delio24.com`; it advertises `openid` and `email`, OIDC
+discovery at `/.well-known/openid-configuration`, and UserInfo at `/oauth/userinfo`. Enterprise
+restrictions require the linked account's verified email and workspace domain verification.
+The front end, backend and database are deployed from the separate `remcp-full` repository.
+
 ## The local runtime
 
 `@remcp/runtime` is a clean-room MCP server written for ReMCP. It is not a fork of, and shares no code

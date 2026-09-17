@@ -622,7 +622,9 @@ export const toolDefinitions = [
       required: ['pid'],
       additionalProperties: false,
     },
-    annotations: readOnly,
+    // Reading without an explicit offset advances the session cursor, so retries can return
+    // different output even after the process exits. It never modifies user files.
+    annotations: readOnlyNonIdempotent,
     handler: terminalToolHandlers.read_process_output,
   },
   {

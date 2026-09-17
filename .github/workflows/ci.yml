@@ -26,6 +26,10 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm audit --omit=dev
+      - name: Inspect the exact npm package contents
+        run: |
+          npm pack --workspace packages/runtime --dry-run
+          npm pack --workspace packages/client --dry-run
       - name: Every package version agrees
         shell: bash
         run: |
@@ -35,6 +39,9 @@ jobs:
             test "$version" = "$(node -p "require('./$manifest').version")" || { echo "$manifest is not at $version" >&2; exit 1; }
           done
           echo "all packages are at $version"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "v$version" || { echo 'release tag does not match package version' >&2; exit 1; }
+          fi
       - name: The advertised tool contract is real
         shell: bash
         run: |
@@ -147,4 +154,8 @@ jobs:
             echo
             echo "Both packages are published with a signed provenance statement."
           } > "$notes"
-          gh release create "$GITHUB_REF_NAME" --title "ReMCP $version" --notes-file "$notes" --verify-tag
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" submission/remcp-plugin.zip chatgpt-app-submission.json --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" submission/remcp-plugin.zip chatgpt-app-submission.json --title "ReMCP $version" --notes-file "$notes" --verify-tag
+          fi
