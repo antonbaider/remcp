@@ -6,6 +6,7 @@ import { constants, createReadStream } from 'node:fs';
 import { access, chmod, chown, copyFile, cp, lstat, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { liveConfig, runtimeConfig } from '../config.mjs';
+import { documentKind, readDocxText, readPdfText } from '../documents.mjs';
 import { diffStats, unifiedDiff } from '../diff.mjs';
 import { applyHunks, parseUnifiedDiff } from '../patch.mjs';
 import { countEvent, recordEvent } from '../telemetry.mjs';
@@ -94,6 +95,25 @@ async function readTextFile(absolute) {
 
 export async function readFileTool(args) {
   const absolute = await resolveSafePath(args.path);
+  // Documents first: a .docx or .pdf is not text, and the binary guard below would refuse it.
+  const kind = documentKind(absolute);
+  if (kind) {
+    const info = await stat(absolute);
+    assertRegularFile(info, absolute);
+    if (info.size > MAX_INLINE_FILE_BYTES) fail(`File is too large to read inline (${info.size} bytes)`);
+    const buffer = await readFile(absolute);
+    const extracted = kind === 'docx' ? readDocxText(buffer) : readPdfText(buffer);
+    const documentLines = splitLines(extracted);
+    const offset = Number.isFinite(Number(args.offset)) ? Math.trunc(Number(args.offset)) : 0;
+    const length = clampInteger(args.length, liveConfig('maxReadLines'), 1, 10000);
+    const page = pageLines(documentLines, offset, length);
+    const label = kind === 'docx' ? 'Word document' : 'PDF text';
+    const header = documentLines.length
+      ? `${displayPath(absolute)} (${label}, lines ${page.start + 1}-${page.end} of ${documentLines.length})`
+      : `${displayPath(absolute)} (${label}, no text)`;
+    return text(`${header}
+${page.slice.join('\n')}`);
+  }
   const { content, encoding, eol } = await readTextFile(absolute);
   const lines = splitLines(content);
   const offset = Number.isFinite(Number(args.offset)) ? Math.trunc(Number(args.offset)) : 0;
