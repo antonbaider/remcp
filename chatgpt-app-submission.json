@@ -619,6 +619,18 @@
         "open_world_justification": "Not open world: reads local counters only.",
         "destructive_justification": "Not destructive: read only."
       }
+    },
+    "set_config_value": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Not read only: it changes one preference inside the device runtime on the paired computer (telemetry opt-out, read and buffer line limits, result size), which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Not open world: writes that runtime’s own runtime.json; no external service is contacted.",
+        "destructive_justification": "Not destructive: rewrites one key of the local runtime.json; access roots, blocked commands, the command guardrail, the shell and the write limit are refused."
+      }
     }
   },
   "test_cases": [
