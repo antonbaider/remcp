@@ -37,9 +37,19 @@ test('install uses a stable global CLI path and update refreshes/restarts it', (
   assert.match(calls, /@example\/local-runtime@1\.2\.3/);
   assert.match(calls, /systemctl --user enable --now remcp-agent\.service/);
 
+  // Reproduce a real upgrade from one Node manager to another: the service still points at a CLI in
+  // an old nvm prefix while npm now installs to the current global prefix. Update must repair the unit
+  // before it restarts it, otherwise the old agent reconnects and starts the same update again.
+  const serviceFile = path.join(home, '.config', 'systemd', 'user', 'remcp-agent.service');
+  writeFileSync(serviceFile, readFileSync(serviceFile, 'utf8').replace(`${prefix}/bin/remcp`, '/old/nvm/bin/remcp'));
+
   const update = spawnSync(process.execPath, [bin, 'update'], { env, encoding: 'utf8' });
   assert.equal(update.status, 0, update.stderr || update.stdout);
+  const repairedUnit = readFileSync(serviceFile, 'utf8');
+  assert.match(repairedUnit, new RegExp(`ExecStart=\"${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp\" start`));
+  assert.doesNotMatch(repairedUnit, /old\/nvm/);
   calls = readFileSync(log, 'utf8');
   assert.match(calls, /npm install --global @remcp\/remcp@latest/);
+  assert.match(calls, /systemctl --user daemon-reload/);
   assert.match(calls, /systemctl --user restart remcp-agent\.service/);
 });

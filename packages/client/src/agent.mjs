@@ -531,9 +531,20 @@ export async function runAgent(options) {
       child.stderr?.on('data', forward);
       child.on('exit', code => {
         updateInFlight = false;
-        if (code !== 0) {
+        // The updater installs the packages and then restarts the service this agent runs in, so it is
+        // routinely killed by that restart and exits with a signal (`code` is null). That is success,
+        // not failure: the installed version is the proof. Without this check the agent kept
+        // reinstalling every few seconds — each cycle taking the device offline and making every tool
+        // call in that window fail in 1-3 ms ("Device is offline").
+        const targetVersion = String(target).split('@').pop();
+        const installedNow = globalInstalledVersion();
+        const installedTarget = installedNow && targetVersion && !isNewer(targetVersion, installedNow);
+        if (code !== 0 && !installedTarget) {
           console.error(`remcp update exited with ${code}; keeping ${VERSION} and retrying after the cooldown.`);
           return;
+        }
+        if (code !== 0) {
+          console.error(`remcp update was terminated (${code}) after installing ${installedNow}; applying it.`);
         }
         void restartToApplyUpdate(cli, stop, () => { stopping = true; }, async () => {
           // The packages are installed now: clear the failure, reset the backoff and start again.

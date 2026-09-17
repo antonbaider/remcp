@@ -255,9 +255,25 @@ function ensureServiceIfRecorded(config) {
   try {
     const cliPath = globalCliPath();
     const platform = servicePlatform();
-    if (platform === 'linux') { if (!fs.existsSync(linuxServiceFile)) installLinuxService(cliPath); }
-    else if (platform === 'darwin') { if (!fs.existsSync(macServiceFile)) installMacService(cliPath); }
-    else if (platform === 'win32') installWindowsService(cliPath);
+    if (platform === 'linux') {
+      if (!fs.existsSync(linuxServiceFile)) {
+        installLinuxService(cliPath);
+      } else {
+        // Node managers can move the global npm prefix between updates (nvm -> Hermes was observed in
+        // production). An existing systemd unit then keeps launching the old CLI forever even though
+        // npm successfully installed the new one. Repair the launcher in place before restarting it.
+        const unit = fs.readFileSync(linuxServiceFile, 'utf8');
+        const expected = `ExecStart=${quoteSystemd(cliPath)} start`;
+        if (!unit.includes(expected)) {
+          const repaired = unit.replace(/^ExecStart=.*$/m, expected);
+          if (repaired === unit) throw new Error('remcp-agent.service has no ExecStart line to repair');
+          fs.writeFileSync(linuxServiceFile, repaired);
+          run('systemctl', ['--user', 'daemon-reload']);
+        }
+      }
+    } else if (platform === 'darwin') {
+      if (!fs.existsSync(macServiceFile)) installMacService(cliPath);
+    } else if (platform === 'win32') installWindowsService(cliPath);
     return true;
   } catch (error) {
     console.error(`Could not ensure the background service: ${error instanceof Error ? error.message : String(error)}`);
@@ -646,9 +662,11 @@ export async function main(argv = process.argv.slice(2)) {
       return;
     }
     const before = { cli: VERSION, runtime: installedVersion(cfg.runtime.packageName) };
-    ensureServiceIfRecorded(cfg);
     console.log(`Updating ReMCP to the latest published version (${runtimeSpec})…`);
     npmGlobalInstall(`${PACKAGE_NAME}@latest`, runtimeSpec);
+    // The npm prefix can change across Node-manager upgrades. Repair an existing persistent-service
+    // launcher only after the install, when globalCliPath() points at the CLI we just installed.
+    ensureServiceIfRecorded(cfg);
     // Only a validated spec is persisted, so a failed update cannot leave the install unable to start.
     if (requested && runtimeSpec !== cfg.runtime.packageSpec) saveConfig({ ...cfg, runtime: { ...cfg.runtime, packageSpec: runtimeSpec } });
     const after = { cli: installedVersion(PACKAGE_NAME), runtime: installedVersion(cfg.runtime.packageName) };
