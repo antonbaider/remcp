@@ -936,6 +936,13 @@ function screenshotAdvice(attempts, { platform = process.platform, env = process
   if (!env.DISPLAY && !wayland) {
     return `This computer has no graphical session (no DISPLAY and no Wayland display), so there is nothing to capture — servers and containers usually have none.`;
   }
+  // GNOME on Wayland is its own case: Mutter does not expose wlr-screencopy, so grim cannot capture
+  // it at all, and the shell's own D-Bus method answers `Screenshot is not allowed` to anything that
+  // is not the screenshot portal. The tool that does work is gnome-screenshot (it goes through the
+  // portal and asks the person once), so the message names that instead of sending people to grim.
+  if (wayland && /gnome/i.test(String(env.XDG_CURRENT_DESKTOP || ''))) {
+    return `Could not capture the screen on GNOME Wayland (${attempts.join('; ') || 'no capture command ran'}). Install the screenshot helper once — \`sudo apt install gnome-screenshot\` (or the equivalent for this distribution) — and approve the permission dialog it shows; GNOME blocks the shell's own screenshot API for background processes, and grim cannot read a GNOME session.`;
+  }
   if (wayland) {
     return `Could not capture the screen on Wayland (${attempts.join('; ') || 'no capture command ran'}). Install \`grim\` (Wayland's capture tool) — X11 tools such as scrot or ImageMagick import cannot read a Wayland session.`;
   }
