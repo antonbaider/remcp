@@ -17,7 +17,7 @@ export async function getRuntimeInfoTool() {
       // Reported first because it changes how everything below should be read.
       unrestricted: runtimeConfig.unrestricted,
       ...(runtimeConfig.unrestricted
-        ? { unrestrictedNote: 'Unrestricted mode is on for this computer: any path and any command is allowed, and commands run as the user the agent runs as. Turn it off with `remcp godmode off` (or REMCP_RUNTIME_UNRESTRICTED=0) and restart the agent.' }
+        ? { unrestrictedNote: 'Unrestricted mode is on for this computer: any path and any command is allowed, and commands still run as the user the agent runs as, so sudo needs your own sudoers rules. Turn it off with `remcp godmode off` (or REMCP_RUNTIME_UNRESTRICTED=0) and restart the agent.' }
         : {}),
       allowedRoots: [...runtimeConfig.allowedRoots],
       blockedCommands: [...runtimeConfig.blockedCommands],
