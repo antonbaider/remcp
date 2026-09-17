@@ -84,21 +84,36 @@ jobs:
       # involved. Configure it once per package on npmjs.com:
       #   Package settings -> Trusted Publisher -> GitHub Actions
       #   organization/user: antonbaider, repository: remcp, workflow: ci.yml
+      # Re-running a failed release must be safe: an already published version is skipped
+      # instead of failing the workflow with "cannot publish over the previously published
+      # versions".
       - name: Publish @remcp/runtime
-        run: npm publish --workspace packages/runtime --access public --provenance
+        run: |
+          version="$(node -p "require('./packages/runtime/package.json').version")"
+          if npm view "@remcp/runtime@$version" version >/dev/null 2>&1; then
+            echo "@remcp/runtime@$version is already published"
+          else
+            npm publish --workspace packages/runtime --access public --provenance
+          fi
       - name: Publish @remcp/remcp
-        run: npm publish --workspace packages/client --access public --provenance
+        run: |
+          version="$(node -p "require('./packages/client/package.json').version")"
+          if npm view "@remcp/remcp@$version" version >/dev/null 2>&1; then
+            echo "@remcp/remcp@$version is already published"
+          else
+            npm publish --workspace packages/client --access public --provenance
+          fi
       - name: Verify the published versions resolve
         shell: bash
         run: |
           set -Eeuo pipefail
           version="$(node -p "require('./package.json').version")"
-          for attempt in {1..10}; do
+          for attempt in {1..24}; do
             if npm view "@remcp/runtime@$version" version >/dev/null 2>&1 && npm view "@remcp/remcp@$version" version >/dev/null 2>&1; then
               echo "published @remcp/runtime@$version and @remcp/remcp@$version"
               exit 0
             fi
-            sleep 6
+            sleep 10
           done
           echo "published packages did not resolve from the registry" >&2
           exit 1
