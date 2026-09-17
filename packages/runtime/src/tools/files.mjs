@@ -3,7 +3,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { access, chmod, chown, copyFile, cp, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, chown, copyFile, cp, lstat, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { runtimeConfig } from '../config.mjs';
 import { diffStats, unifiedDiff } from '../diff.mjs';
@@ -12,7 +12,10 @@ import { countEvent, recordEvent } from '../telemetry.mjs';
 import { clampInteger, decodeText, displayPath, fail, globToRegExp, image, looksBinary, multi, pageLines, resolveSafePath, splitLines, text } from '../util.mjs';
 
 const MAX_INLINE_FILE_BYTES = 20 * 1024 * 1024;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+// An image travels base64-encoded, which costs a third more bytes, and the MCP stdio client drops
+// the connection above 10 MB. 4 MiB of image is ~5.4 MiB on the wire, which leaves room for the
+// summary text and the frame overhead; anything larger goes through read_binary in chunks instead.
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_BINARY_CHUNK_BYTES = 1024 * 1024;
 const IMAGE_TYPES = new Map([
   ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'], ['.gif', 'image/gif'],
@@ -23,6 +26,40 @@ function detectEol(content) {
   const crlf = (content.match(/\r\n/g) || []).length;
   const lf = (content.match(/(?<!\r)\n/g) || []).length;
   return crlf > lf ? '\r\n' : '\n';
+}
+
+// Traversal helper for every multi-file tool. A symbolic link inside an allowed root can point
+// anywhere, so links are never followed and each collected path is resolved through
+// resolveSafePath again before a tool reads or writes it. `stat` follows links, which is exactly
+// how a symlinked directory inside a root used to expose files outside it.
+async function collectTree(root, { maxFiles = 500, skip = [] } = {}) {
+  const found = [];
+  const skipName = name => skip.some(entry => (entry.endsWith('*') ? name.startsWith(entry.slice(0, -1)) : name === entry));
+  async function visit(target) {
+    if (found.length >= maxFiles) return;
+    const info = await lstat(target).catch(() => null);
+    if (!info || info.isSymbolicLink()) return;
+    if (info.isFile()) { found.push(target); return; }
+    if (!info.isDirectory()) return;
+    const entries = await readdir(target, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (found.length >= maxFiles) return;
+      if (entry.isSymbolicLink() || skipName(entry.name)) continue;
+      await visit(path.join(target, entry.name));
+    }
+  }
+  await visit(root);
+  return found;
+}
+
+// Every path a multi-file tool is about to touch passes through the same confinement check as a
+// single-file call, so dropping the traversal shortcut cannot widen what is reachable.
+async function confineAll(paths) {
+  const safe = [];
+  for (const target of paths) {
+    try { safe.push(await resolveSafePath(target)); } catch { /* outside the allowed roots: skip it */ }
+  }
+  return safe;
 }
 
 async function readTextFile(absolute) {
@@ -366,22 +403,7 @@ export async function replaceInFilesTool(args) {
     }
   }
   const info = await stat(root).catch(() => fail(`Path not found: ${displayPath(root)}`));
-  const files = [];
-  async function collect(target) {
-    if (files.length > maxFiles) return;
-    const entryInfo = await stat(target).catch(() => null);
-    if (!entryInfo) return;
-    if (entryInfo.isFile()) { files.push(target); return; }
-    if (!entryInfo.isDirectory()) return;
-    const entries = await readdir(target, { withFileTypes: true }).catch(() => []);
-    for (const entry of entries) {
-      if (files.length > maxFiles) return;
-      if (entry.name === '.git' || entry.name === 'node_modules' || entry.name.startsWith('.remcp-trash')) continue;
-      await collect(path.join(target, entry.name));
-    }
-  }
-  if (info.isFile()) files.push(root);
-  else await collect(root);
+  const files = await confineAll(info.isFile() ? [root] : await collectTree(root, { maxFiles, skip: ['.git', 'node_modules', '.remcp-trash*'] }));
   const glob = filePattern ? globToRegExp(filePattern) : null;
   const changed = [];
   let scanned = 0;
@@ -471,30 +493,18 @@ export async function readFilesTool(args) {
   const maxLinesPerFile = clampInteger(args.max_lines_per_file, runtimeConfig.maxReadLines, 1, 20000);
   const includeIgnored = args.include_ignored === true;
   const matcher = globToRegExp(pattern);
-  const files = [];
-  async function collect(target) {
-    if (files.length > maxFiles) return;
-    const info = await stat(target).catch(() => null);
-    if (!info) return;
-    if (info.isFile()) {
-      const relative = path.relative(root, target) || path.basename(target);
-      if (matcher.test(relative.split(path.sep).join('/')) || matcher.test(path.basename(target))) files.push(target);
-      return;
-    }
-    if (!info.isDirectory()) return;
-    const entries = await readdir(target, { withFileTypes: true }).catch(() => []);
-    for (const entry of entries) {
-      if (files.length > maxFiles) return;
-      if (entry.name.startsWith('.remcp-trash')) continue;
-      if (!includeIgnored && (entry.name === 'node_modules' || entry.name === '.git')) continue;
-      await collect(path.join(target, entry.name));
-    }
-  }
-  if ((await stat(root).catch(() => null))?.isFile()) {
-    files.push(root);
-  } else {
-    await collect(root);
-  }
+  const rootInfo = await stat(root).catch(() => null);
+  // A file path is matched directly; a directory is walked without following links.
+  const candidates = rootInfo?.isFile()
+    ? [root]
+    : await confineAll(await collectTree(root, {
+      maxFiles: maxFiles + 1,
+      skip: includeIgnored ? ['.remcp-trash*'] : ['node_modules', '.git', '.remcp-trash*'],
+    }));
+  const files = candidates.filter(target => {
+    const relative = path.relative(root, target) || path.basename(target);
+    return matcher.test(relative.split(path.sep).join('/')) || matcher.test(path.basename(target));
+  }).slice(0, maxFiles);
   if (!files.length) return text(`No files matched ${pattern} under ${displayPath(root)}.`);
   const sections = [];
   let skipped = 0;
@@ -696,16 +706,24 @@ export async function setPermissionsTool(args) {
   const recursive = args.recursive === true;
   const uid = Number.isInteger(Number(args.uid)) ? Number(args.uid) : null;
   const gid = Number.isInteger(Number(args.gid)) ? Number(args.gid) : null;
-  const targets = [];
-  async function collect(target) {
-    targets.push(target);
-    const entry = await stat(target).catch(() => null);
-    if (!entry?.isDirectory() || !recursive) return;
-    for (const child of await readdir(target).catch(() => [])) await collect(path.join(target, child));
+  const targets = [absolute];
+  if (recursive) {
+    // Directories are included, links are not: chmod follows a link and would change a target
+    // outside the allowed roots.
+    const walk = async target => {
+      const entries = await readdir(target, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        if (entry.isSymbolicLink()) continue;
+        const child = path.join(target, entry.name);
+        targets.push(child);
+        if (entry.isDirectory()) await walk(child);
+      }
+    };
+    await walk(absolute);
   }
-  await collect(absolute);
+  const confined = await confineAll(targets);
   let changed = 0;
-  for (const target of targets) {
+  for (const target of confined) {
     try {
       await chmod(target, mode);
       if (uid !== null || gid !== null) await chown(target, uid ?? -1, gid ?? -1);

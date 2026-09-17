@@ -12,11 +12,16 @@ import { VERSION } from './version.mjs';
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_CHECK_TIMEOUT_MS = 5000;
+// A version that failed to install is retried after this cooldown instead of on every reconnect.
+const UPDATE_RETRY_COOLDOWN_MS = 30 * 60 * 1000;
 const METRICS_INTERVAL_MS = 60_000;
 const TELEMETRY_QUEUE_LIMIT = 500;
 const TELEMETRY_BATCH_LIMIT = 100;
 const TELEMETRY_SEND_INTERVAL_MS = 5_000;
 const RECONNECT_BASE_MS = 2_000;
+// Must stay above the runtime's own output ceiling (8 MiB), otherwise a large but legal tool result
+// closes the stdio connection and restarts the runtime mid-call.
+const RUNTIME_STDIO_BUFFER_BYTES = 24 * 1024 * 1024;
 const RECONNECT_MAX_MS = 60_000;
 const RUNTIME_RESTART_BASE_MS = 1_000;
 const RUNTIME_RESTART_MAX_MS = 30_000;
@@ -38,8 +43,10 @@ function localRuntimeEntry(runtimeValue) {
 }
 
 function parseVersion(value) {
-  const match = String(value || '').match(/(\d+)\.(\d+)\.(\d+)/);
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+  // Prerelease and build metadata are kept, because comparing only the numeric core made
+  // 1.0.0 look newer than 1.0.0-beta.2 and left a machine stuck on the prerelease forever.
+  const match = String(value || '').match(/(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/);
+  return match ? { parts: [Number(match[1]), Number(match[2]), Number(match[3])], prerelease: match[4] || '' } : null;
 }
 
 function isNewer(candidate, current) {
@@ -47,8 +54,27 @@ function isNewer(candidate, current) {
   const b = parseVersion(current);
   if (!a || !b) return false;
   for (let index = 0; index < 3; index += 1) {
-    if (a[index] > b[index]) return true;
-    if (a[index] < b[index]) return false;
+    if (a.parts[index] > b.parts[index]) return true;
+    if (a.parts[index] < b.parts[index]) return false;
+  }
+  // Same numeric core: a release is newer than a prerelease, and two prereleases compare by
+  // identifier (numeric identifiers order numerically, as semver requires).
+  if (!a.prerelease && b.prerelease) return true;
+  if (a.prerelease && !b.prerelease) return false;
+  if (!a.prerelease && !b.prerelease) return false;
+  const left = a.prerelease.split('.');
+  const right = b.prerelease.split('.');
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const one = left[index];
+    const two = right[index];
+    if (one === undefined) return false;
+    if (two === undefined) return true;
+    if (one === two) continue;
+    const oneNumeric = /^\d+$/.test(one);
+    const twoNumeric = /^\d+$/.test(two);
+    if (oneNumeric && twoNumeric) return Number(one) > Number(two);
+    if (oneNumeric !== twoNumeric) return oneNumeric;
+    return one > two;
   }
   return false;
 }
@@ -95,6 +121,8 @@ export async function runAgent(options) {
   const telemetryEnabled = options.telemetryEnabled !== false;
   const persistState = typeof options.persistState === 'function' ? options.persistState : () => {};
   let stopping = false;
+  let revoked = false;
+  const inFlight = new Map();
   let activeSocket;
   let reconnects = 0;
   let pendingRequests = 0;
@@ -126,7 +154,7 @@ export async function runAgent(options) {
     if (stopping) return;
     runtimeDown = false;
     const client = new Client({ name: 'remcp-agent', version: VERSION });
-    const stdio = new StdioClientTransport({ command: process.execPath, args: [runtimeEntry], env: runtimeEnv() });
+    const stdio = new StdioClientTransport({ command: process.execPath, args: [runtimeEntry], env: runtimeEnv(), maxBufferSize: RUNTIME_STDIO_BUFFER_BYTES });
     mcp = client;
     transport = stdio;
     client.fallbackNotificationHandler = async notification => {
@@ -206,21 +234,28 @@ export async function runAgent(options) {
 
   async function respond(ws, message) {
     pendingRequests += 1;
+    // The relay forwards a cancel when the MCP client goes away. Without it a cancelled tool call
+    // kept running on the machine (a delete still deleted), because nothing told the runtime.
+    const controller = new AbortController();
+    inFlight.set(message.id, controller);
     try {
       let result;
       if (message.method === 'ping') {
         result = { ok: true, hostname: os.hostname(), platform: process.platform, arch: process.arch, uptimeSeconds: Math.floor(os.uptime()), agentVersion: VERSION, runtimeVersion, runtimeRestarts };
       } else if (!runtimeDown && mcp) {
-        if (message.method === 'tools/list') result = await mcp.listTools(undefined, { timeout: callTimeoutMs });
-        else if (message.method === 'tools/call') result = await mcp.callTool(message.params, undefined, { timeout: callTimeoutMs });
+        const options = { timeout: callTimeoutMs, signal: controller.signal };
+        if (message.method === 'tools/list') result = await mcp.listTools(undefined, options);
+        else if (message.method === 'tools/call') result = await mcp.callTool(message.params, undefined, options);
         else throw new Error(`Unsupported relay method: ${message.method}`);
       } else {
         throw new Error('The ReMCP local runtime is restarting. Retry in a few seconds.');
       }
       ws.send(JSON.stringify({ type: 'response', id: message.id, result }));
     } catch (error) {
-      ws.send(JSON.stringify({ type: 'response', id: message.id, error: { message: error instanceof Error ? error.message : String(error) } }));
+      const cancelled = controller.signal.aborted;
+      ws.send(JSON.stringify({ type: 'response', id: message.id, error: { message: cancelled ? 'Cancelled: the client stopped waiting for this call.' : error instanceof Error ? error.message : String(error) } }));
     } finally {
+      inFlight.delete(message.id);
       pendingRequests = Math.max(0, pendingRequests - 1);
     }
   }
@@ -228,6 +263,13 @@ export async function runAgent(options) {
   function connect() {
     if (stopping) return;
     const ws = new WebSocket(agentUrl, { headers: { Authorization: `Bearer ${deviceToken}` } });
+    // A revoked device is refused during the handshake with a 401 and this header, because a bare
+    // rejection looked like a network problem (close 1006) and the agent retried it forever.
+    ws.on('unexpected-response', (_request, response) => {
+      if (String(response.headers['x-remcp-revoked'] || '') === '1') revoked = true;
+      console.error(`ReMCP relay refused the connection (HTTP ${response.statusCode})${revoked ? ': this device was revoked' : ''}.`);
+      response.resume();
+    });
     activeSocket = ws;
     ws.on('open', () => {
       reconnects = 0;
@@ -253,13 +295,24 @@ export async function runAgent(options) {
       let message;
       try { message = JSON.parse(raw.toString()); } catch { return; }
       if (message?.type === 'request') void respond(ws, message);
+      if (message?.type === 'cancel' && message.id) {
+        const controller = inFlight.get(message.id);
+        if (controller) controller.abort();
+      }
     });
     ws.on('close', code => {
       if (stopping) return;
-      if (code === 1008) {
+      if (code === 1008 || revoked) {
         // The relay closes with 1008 when the device was revoked. Retrying forever would
         // hide that from the person at the computer.
         console.error('ReMCP access for this device was revoked. Pair the machine again from the ReMCP workspace: remcp connect --server <url> --code <code> --install');
+        return;
+      }
+      if (code === 1012) {
+        // 1012 ('service restart') is what the relay sends when another agent process took over
+        // this device. Reconnecting immediately produced two agents evicting each other in a loop,
+        // so back off and let the surviving process keep the connection.
+        console.error('Another ReMCP agent connected for this device; this process will stop. Run one agent per machine (systemd service or `remcp start`).');
         return;
       }
       reconnects += 1;
@@ -272,8 +325,16 @@ export async function runAgent(options) {
   // Auto-update: the server publishes the versions an agent should be running. A newer
   // release is installed in the background and the service restart picks it up; a failed
   // or skipped update leaves the current version running, so an old agent keeps working.
+  //
+  // The update must be idempotent across reconnects: a flapping relay used to start one
+  // `npm install -g` per reconnect, so a machine could run several installers (and service
+  // restarts) at once. One attempt per advertised version, and never two at the same time.
+  let updateInFlight = false;
+  let lastAttemptedVersion = '';
+  let lastAttemptAt = 0;
   async function checkForUpdate() {
     if (options.autoUpdate === false) return;
+    if (updateInFlight) return;
     try {
       const response = await fetch(`${serverUrl}/api/agent/version`, { signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS) });
       if (!response.ok) return;
@@ -283,18 +344,27 @@ export async function runAgent(options) {
         console.error(`ReMCP ${VERSION} is older than the minimum supported agent ${minimum}; update with: remcp update`);
       }
       if (!isNewer(advertised.cli, VERSION)) return;
-      queueEvent({ event: 'agent_update', at: Date.now(), reason: String(advertised.cli).slice(0, 32), success: true });
+      const target = String(advertised.cli);
+      queueEvent({ event: 'agent_update', at: Date.now(), reason: target.slice(0, 32), success: true });
       const cli = globalCliEntry();
       if (!cli || !existsSync(cli)) {
-        console.error(`ReMCP ${advertised.cli} is available; run: remcp update`);
+        console.error(`ReMCP ${target} is available; run: remcp update`);
         return;
       }
-      console.log(`Updating ReMCP to ${advertised.cli}${advertised.runtime ? ` with ${advertised.runtime}` : ''}…`);
-      const child = spawn(process.execPath, [cli, 'update', ...(advertised.runtime ? ['--runtime', advertised.runtime] : [])], {
+      // A version that already failed to install is retried only after a cooldown, so a broken
+      // release cannot turn into an install loop.
+      if (target === lastAttemptedVersion && Date.now() - lastAttemptAt < UPDATE_RETRY_COOLDOWN_MS) return;
+      lastAttemptedVersion = target;
+      lastAttemptAt = Date.now();
+      updateInFlight = true;
+      console.log(`Updating ReMCP to ${target}${advertised.runtime ? ` with ${advertised.runtime}` : ''}…`);
+      const child = spawn(process.execPath, [cli, 'update', '--trust-runtime', ...(advertised.runtime ? ['--runtime', advertised.runtime] : [])], {
         detached: true,
         stdio: 'ignore',
         env: { ...process.env },
       });
+      child.on('exit', () => { updateInFlight = false; });
+      child.on('error', () => { updateInFlight = false; });
       child.unref();
     } catch {
       // Offline, DNS failure, older server without the endpoint: keep running as-is.

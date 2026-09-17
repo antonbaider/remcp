@@ -53,7 +53,9 @@ function loadConfig(required = true) {
     throw new Error(`ReMCP is not paired. Generate a pairing command at ${officialOrigin}/app/connect`);
   }
   const value = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-  value.runtime = normalizeRuntime(value.runtime);
+  // A configuration that only carries preferences (for example after `remcp auto-update off`
+  // before pairing) has no runtime yet; it must not fail as if it were corrupt.
+  if (value.runtime !== undefined) value.runtime = normalizeRuntime(value.runtime);
   return value;
 }
 
@@ -331,17 +333,29 @@ export async function main(argv = process.argv.slice(2)) {
     // The server advertises which runtime version it expects; an agent that is updating
     // itself passes it through so client and runtime move together.
     const requested = typeof flags.runtime === 'string' ? flags.runtime.trim() : '';
-    if (requested && (!/^@?[a-z0-9._-]+(\/[a-z0-9._-]+)?@\S+$/i.test(requested) || requested.includes(' '))) {
-      throw new Error('--runtime must look like @scope/package@1.2.3');
+    // Whatever the server advertises is installed globally, so it is validated exactly like the
+    // metadata from a pairing response: same package as the configured runtime, a spec that
+    // parses, and an explicit --trust-runtime before a custom server may change it.
+    let runtimeSpec = cfg.runtime.packageSpec;
+    if (requested) {
+      const parsed = requested.match(/^(@?[a-z0-9._-]+(?:\/[a-z0-9._-]+)?)@(\S+)$/i);
+      if (!parsed) throw new Error('--runtime must look like @scope/package@1.2.3');
+      if (parsed[1] !== cfg.runtime.packageName) {
+        throw new Error(`--runtime must stay on ${cfg.runtime.packageName}; refusing to install ${parsed[1]}`);
+      }
+      if (!flags['trust-runtime'] && !flags['yes']) {
+        throw new Error('Installing a runtime version from the server requires --trust-runtime.');
+      }
+      runtimeSpec = normalizeRuntime({ kind: 'npm', packageName: parsed[1], packageSpec: requested, entry: cfg.runtime.entry }).packageSpec;
     }
-    const runtimeSpec = requested || cfg.runtime.packageSpec;
     if (flags.check) {
       console.log(JSON.stringify({ current: VERSION, runtime: cfg.runtime.packageSpec, available: `${PACKAGE_NAME}@latest` }, null, 2));
       return;
     }
     console.log(`Updating ReMCP to the latest published version (${runtimeSpec})…`);
     npmGlobalInstall(`${PACKAGE_NAME}@latest`, runtimeSpec);
-    if (requested) saveConfig({ ...cfg, runtime: { ...cfg.runtime, packageSpec: requested } });
+    // Only a validated spec is persisted, so a failed update cannot leave the install unable to start.
+    if (requested && runtimeSpec !== cfg.runtime.packageSpec) saveConfig({ ...cfg, runtime: { ...cfg.runtime, packageSpec: runtimeSpec } });
     restartPersistentServiceIfInstalled();
     console.log('ReMCP updated. Run `remcp --version` or `remcp status` to verify.');
     return;

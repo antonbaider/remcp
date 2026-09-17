@@ -368,3 +368,20 @@ test('set_permissions makes a written script executable', async () => {
   assert.equal(isError(await invokeTool('set_permissions', { path: dir, mode: '750', recursive: true })), false);
   assert.equal(statSync(join(dir, 'nested', 'file.txt')).mode & 0o777, 0o750);
 });
+
+test('apply_patch inserts a zero-context hunk at the position the diff names', async () => {
+  const target = join(root, 'insert-position.txt');
+  writeFileSync(target, 'a\nb\nc\n');
+  // `@@ -2,0 +3,1 @@` means "insert after line 2", not "replace line 2": the previous index
+  // calculation put the new line one position early while still reporting success.
+  const diff = ['--- a/insert-position.txt', '+++ b/insert-position.txt', '@@ -2,0 +3,1 @@', '+INSERTED', ''].join('\n');
+  const result = await invokeTool('apply_patch', { patch: diff, path: target });
+  assert.equal(isError(result), false, body(result));
+  assert.equal(readFileSync(target, 'utf8'), 'a\nb\nINSERTED\nc\n');
+
+  // Appending after the last line, the common "add to the end of the file" shape.
+  const tailDiff = ['--- a/insert-position.txt', '+++ b/insert-position.txt', '@@ -4,0 +5,1 @@', '+LAST', ''].join('\n');
+  const tailResult = await invokeTool('apply_patch', { patch: tailDiff, path: target });
+  assert.equal(isError(tailResult), false, body(tailResult));
+  assert.equal(readFileSync(target, 'utf8'), 'a\nb\nINSERTED\nc\nLAST\n');
+});

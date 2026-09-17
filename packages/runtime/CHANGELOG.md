@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.7
+
+Security and correctness fixes for the device runtime.
+
+- **Symlink confinement fixed.** `read_files`, `replace_in_files` and `set_permissions` walked a
+  tree with `stat`, which follows symbolic links, and never re-checked the children they collected.
+  A directory symlink inside an allowed root could therefore be read *and rewritten* outside it.
+  Traversal now uses `lstat`, never follows a link, and re-resolves every collected path through
+  the same confinement check a single-file call uses.
+- **Large results no longer kill the runtime.** The inline image limit is 4 MiB instead of 8 MiB:
+  base64 costs a third more bytes and the MCP stdio client drops the connection above 10 MB, which
+  used to restart the runtime in the middle of a call. The text budget is shared between `content`
+  and `structuredContent`, which carry the same string.
+- **`apply_patch` inserts zero-context hunks at the right line**: `@@ -N,0 +M,K @@` inserts *after*
+  line N, and the previous calculation applied every such hunk one line early while reporting
+  success.
+- **Glob patterns honour `[abc]`, `{a,b}` and `?`**: character classes and brace alternatives were
+  escaped into literal text and matched nothing, and `?` could match a directory separator.
+
 ## 0.2.3
 
 Full surface and review-aligned annotations. (0.2.0 was published from an earlier snapshot that

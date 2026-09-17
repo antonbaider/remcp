@@ -112,11 +112,19 @@ export function truncate(text, maxBytes) {
   return `${head}\n… output truncated (${buffer.length} bytes, limit ${limit}) …\n${tail}`;
 }
 
+// structuredContent mirrors the text so a client can rely on the declared outputSchema, but the
+// same string twice doubles the message: above this size the mirror becomes a summary and the full
+// result stays in content, which is the primary channel every client reads.
+const STRUCTURED_MIRROR_LIMIT_BYTES = 256 * 1024;
+
 export function text(value, isError = false) {
   const body = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   const rendered = truncate(body);
-  // structuredContent mirrors the text so a client can rely on the declared outputSchema.
-  return { content: [{ type: 'text', text: rendered }], structuredContent: { text: rendered }, ...(isError ? { isError: true } : {}) };
+  const size = Buffer.byteLength(rendered, 'utf8');
+  const mirror = size <= STRUCTURED_MIRROR_LIMIT_BYTES
+    ? rendered
+    : `${rendered.slice(0, 512)}… (${size} bytes total; the full result is in the text content)`;
+  return { content: [{ type: 'text', text: rendered }], structuredContent: { text: mirror }, ...(isError ? { isError: true } : {}) };
 }
 
 export function image(data, mimeType) {
@@ -169,14 +177,49 @@ export function pageLines(lines, offset, length) {
   return { start, end, slice: lines.slice(start, end) };
 }
 
+// Glob translation for the file tools. `?` never crosses a directory separator, `[abc]` and
+// `{a,b}` are honoured, and `**/` may match no directory at all so `**/*` also matches a file in
+// the root. The previous version escaped class and brace syntax, so those patterns silently
+// matched nothing.
 export function globToRegExp(pattern) {
-  // `**/` may match no directory at all, so `**/*` also matches a file in the root.
-  const escaped = String(pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*\//g, '\u0001')
-    .replace(/\*\*/g, '\u0000')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\?/g, '.')
-    .replace(/\u0000/g, '.*')
-    .replace(/\u0001/g, '(?:.*/)?');
-  return new RegExp(`^${escaped}$`);
+  const source = String(pattern);
+  let out = '';
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '*') {
+      if (source[index + 1] === '*') {
+        if (source[index + 2] === '/') { out += '(?:.*/)?'; index += 2; }
+        else { out += '.*'; index += 1; }
+      } else out += '[^/]*';
+      continue;
+    }
+    if (char === '?') { out += '[^/]'; continue; }
+    if (char === '[') {
+      const close = source.indexOf(']', index + 1);
+      if (close > index + 1) {
+        let body = source.slice(index + 1, close);
+        const negated = body.startsWith('!') || body.startsWith('^');
+        if (negated) body = body.slice(1);
+        body = body.replace(/\\/g, '\\\\').replace(/\]/g, '\\]').replace(/\^/g, '\\^');
+        out += `[${negated ? '^/' : ''}${body}]`;
+        index = close;
+        continue;
+      }
+      out += '\\[';
+      continue;
+    }
+    if (char === '{') {
+      const close = source.indexOf('}', index + 1);
+      if (close > index + 1) {
+        const alternatives = source.slice(index + 1, close).split(',').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        out += `(?:${alternatives.join('|')})`;
+        index = close;
+        continue;
+      }
+      out += '\\{';
+      continue;
+    }
+    out += /[.+^${}()|[\]\\]/.test(char) ? `\\${char}` : char;
+  }
+  return new RegExp(`^${out}$`);
 }

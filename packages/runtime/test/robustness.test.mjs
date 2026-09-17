@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { body, freshWorkspace, isError } from './helpers.mjs';
+import { globToRegExp } from '../src/util.mjs';
 
 const run = promisify(execFile);
 const entry = path.resolve('src/index.mjs');
@@ -101,4 +102,25 @@ test('a cancelled call does not start work', async () => {
   assert.equal(isError(result), true);
   assert.match(body(result), /cancelled/);
   void workspace;
+});
+
+test('glob translation honours classes, braces and single-character wildcards', () => {
+  const match = (pattern, value) => globToRegExp(pattern).test(value);
+  // A class and a brace set used to be escaped into literal text, so these patterns matched
+  // nothing at all and looked like "no files found".
+  assert.equal(match('*.{js,ts}', 'index.js'), true);
+  assert.equal(match('*.{js,ts}', 'index.ts'), true);
+  assert.equal(match('*.{js,ts}', 'index.md'), false);
+  assert.equal(match('file[0-9].txt', 'file7.txt'), true);
+  assert.equal(match('file[0-9].txt', 'filex.txt'), false);
+  assert.equal(match('file[!0-9].txt', 'filex.txt'), true);
+  // `?` matches exactly one character and never a separator.
+  assert.equal(match('a?c', 'abc'), true);
+  assert.equal(match('a?c', 'ac'), false);
+  assert.equal(match('a?c', 'a/c'), false);
+  // The recursive forms still work as before.
+  assert.equal(match('**/*', 'top.txt'), true);
+  assert.equal(match('**/*', 'deep/nested/top.txt'), true);
+  assert.equal(match('src/*', 'src/a.txt'), true);
+  assert.equal(match('src/*', 'src/deep/a.txt'), false);
 });
