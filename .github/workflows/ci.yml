@@ -144,7 +144,7 @@ jobs:
             echo "npm install --global @remcp/remcp@$version"
             echo '```'
             echo
-            echo "Pairing commands are generated at https://remcp.delio24.com/app/connect."
+            echo "Pairing commands are generated at https://remcp.site/app/connect."
             echo
             echo "## Tool surface"
             echo

@@ -16,10 +16,10 @@
 </p>
 
 <p align="center">
-  <a href="https://remcp.delio24.com">Website</a> ·
-  <a href="https://remcp.delio24.com/docs">Docs</a> ·
-  <a href="https://remcp.delio24.com/security">Security</a> ·
-  <a href="https://remcp.delio24.com/support">Support</a>
+  <a href="https://remcp.site">Website</a> ·
+  <a href="https://remcp.site/docs">Docs</a> ·
+  <a href="https://remcp.site/security">Security</a> ·
+  <a href="https://remcp.site/support">Support</a>
 </p>
 
 ReMCP connects a computer you own or administer to ChatGPT, Codex, or any other MCP client. The
@@ -42,7 +42,7 @@ runtime.
 npm install --global @remcp/remcp@latest
 ```
 
-Then open **[ReMCP → Connect a machine](https://remcp.delio24.com/app/connect)** and generate a
+Then open **[ReMCP → Connect a machine](https://remcp.site/app/connect)** and generate a
 one-time pairing command. Run that exact command on the computer you want to connect; it installs the
 runtime and registers the background service.
 
@@ -73,7 +73,7 @@ Use the matching release's `remcp-plugin.zip` for a portal upload. It includes e
 and presentation asset. `chatgpt-app-submission.json` contains the tool review metadata. Public CI
 checks that the ZIP matches the source tree before publishing either npm package.
 
-The hosted OAuth issuer is `https://remcp.delio24.com`; it advertises `openid` and `email`, OIDC
+The hosted OAuth issuer is `https://remcp.site`; it advertises `openid` and `email`, OIDC
 discovery at `/.well-known/openid-configuration`, and UserInfo at `/oauth/userinfo`. Enterprise
 restrictions require the linked account's verified email and workspace domain verification.
 The front end, backend and database are deployed from the separate `remcp-full` repository.

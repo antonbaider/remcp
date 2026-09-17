@@ -9,7 +9,7 @@ remcp --version
 remcp status
 ```
 
-Pairing commands are generated in the workspace at <https://remcp.delio24.com/app/connect>. The
+Pairing commands are generated in the workspace at <https://remcp.site/app/connect>. The
 generated command runs `remcp connect --server … --code … --install`, which stores a per-device
 credential under `~/.config/remcp/`, installs the runtime from npm, and registers a user service
 (systemd on Linux, LaunchAgent on macOS, Scheduled Task on Windows).
@@ -34,7 +34,7 @@ and the current usage-metrics state, so a support request can be answered with o
 ## What runs on your computer
 
 - the agent (`remcp start`), which holds the device credential and dials
-  `wss://remcp.delio24.com/agent`;
+  `wss://remcp.site/agent`;
 - [`@remcp/runtime`](https://www.npmjs.com/package/@remcp/runtime), spawned by the agent as an MCP
   stdio server. The runtime executes the tools, opens no network connection, and is supervised: if it
   exits, the agent restarts it with backoff and reports the restart instead of failing silently.

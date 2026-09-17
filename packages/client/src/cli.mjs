@@ -22,7 +22,7 @@ const windowsTaskName = 'ReMCP Agent';
 // How npm is invoked is resolved from the running node when possible: a background service has a
 // minimal PATH, which is why auto-update used to find no npm on macOS. See src/npm.mjs.
 const npm = resolveNpm();
-const officialOrigin = 'https://remcp.delio24.com';
+const officialOrigin = 'https://remcp.site';
 
 function parse(argv) {
   const [command = 'help', ...rest] = argv;
