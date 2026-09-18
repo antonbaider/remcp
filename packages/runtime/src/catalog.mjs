@@ -725,7 +725,7 @@ export const toolDefinitions = [
   {
     name: 'get_runtime_info',
     title: 'Get runtime info',
-    description: 'Report this device runtime: version, configuration, allowed roots, command policy, output limits, and whether usage metrics are enabled. Read-only; configuration cannot be changed through MCP.',
+    description: 'Report this device runtime: version, allowed roots, command policy, output limits, settable preferences, and whether usage metrics are enabled. Read-only; use set_config_value only for telemetryEnabled, maxReadLines, maxBufferedLines, or maxOutputBytes. Access roots and command security stay local to the computer.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: readOnly,
     handler: statsToolHandlers.get_runtime_info,
