@@ -88,7 +88,10 @@ not with an unsupported `cwd` parameter. Verify the final exit status for builds
 
 ## Troubleshooting a device
 
-- `get_runtime_info` reports the device runtime version, allowed roots, command policy, and limits. It is read-only; device configuration cannot be changed through MCP.
+- `get_runtime_info` reports the device runtime version, allowed roots, command policy, limits, and
+  settable preferences. It is read-only. `set_config_value` may change only `telemetryEnabled`,
+  `maxReadLines`, `maxBufferedLines`, or `maxOutputBytes`; access roots, blocked commands, the
+  command guardrail, shell, write limit, runtime name, and unrestricted mode stay local to the computer.
 - `get_runtime_stats` reports local counters for the current runtime session, which is useful when a tool keeps failing.
 - If a device reports that its runtime is restarting, wait a few seconds and retry once.
 

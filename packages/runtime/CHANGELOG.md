@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.36 — 2026-09-18
+
+- Documentation and runtime introspection now describe the current 44-tool local surface instead of
+  older 35/43-tool snapshots.
+- `get_runtime_info` explicitly distinguishes its read-only report from the four preferences that
+  `set_config_value` may change. Access roots, blocked commands, the command guardrail, shell,
+  write limit, runtime name and unrestricted mode remain local to the computer.
+- Package/review documentation now matches the published runtime dependencies and the current
+  trusted-publishing release flow.
+
 ## 0.2.34 — 2026-09-18
 
 - Lockstep security release with the ReMCP client. Runtime behavior is unchanged from 0.2.33.

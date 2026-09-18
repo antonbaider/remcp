@@ -27,27 +27,32 @@ npx @remcp/runtime              # MCP server over stdio
 
 ## Tools
 
-35 tools, all implemented in this repository. Nothing is gated behind an approval step: a tool call
+44 tools, all implemented in this repository. Nothing is gated behind an approval step: a tool call
 executes.
 
 | Area | Tools |
 | --- | --- |
-| Read | `read_file`, `read_multiple_files`, `read_image`, `read_binary`, `list_directory` (glob filter), `get_file_info`, `hash_file`, `diff_files` |
-| Write | `write_file`, `write_binary`, `edit_block` (whitespace-tolerant fallback, optional `dry_run`), `replace_lines`, `replace_in_files` |
-| Organise | `create_directory`, `move_file`, `copy_file`, `move_to_trash`, `create_archive`, `extract_archive` |
+| Read | `read_file`, `read_files`, `read_multiple_files`, `read_image`, `read_binary`, `list_directory`, `get_file_info`, `hash_file`, `diff_files` |
+| Write / edit | `write_file`, `write_files`, `write_binary`, `apply_patch`, `set_permissions`, `edit_block`, `replace_lines`, `replace_in_files` |
+| Organise | `create_directory`, `move_file`, `copy_file`, `copy_paths`, `move_paths`, `move_to_trash`, `create_archive`, `extract_archive` |
+| Delete | `delete_path`, `delete_paths` |
 | Transfer | `read_binary` / `write_binary` stream any file as base64 chunks in both directions; `create_archive` / `extract_archive` move whole trees |
 | Screen | `take_screenshot` returns the desktop as an image on Linux, macOS, and Windows |
 | Search | `start_search`, `get_more_search_results`, `stop_search`, `list_searches` |
 | Processes | `start_process`, `read_process_output`, `wait_for_process_output`, `interact_with_process`, `force_terminate`, `list_sessions`, `list_processes`, `kill_process` |
-| Introspection | `get_system_info`, `get_runtime_info`, `get_runtime_stats` |
+| Runtime | `get_system_info`, `get_runtime_info`, `get_runtime_stats`, `set_config_value` |
 
-The hosted ReMCP endpoint adds `list_devices` so a model can pick a machine. Everything else the
-agent may need — service management, package installs, git, docker, `sudo` — runs through
-`start_process`, which is an unrestricted shell for the account running the agent.
+The hosted ReMCP endpoint adds eight account/relay tools — `list_devices`, `ping_device`,
+`who_am_i`, `create_pairing_command`, `get_recent_tool_calls`, `get_usage_statistics`,
+`get_configuration`, and `rename_device` — for a 52-tool public surface. Everything else the
+agent may need, including service management, package installs, git and docker, runs through
+`start_process` with the permissions of the account running the agent.
 
-There is deliberately no `set_config_value` (a model must not rewrite its own device limits; use the
-file) and no `write_pdf`/spreadsheet/DOCX tooling (that is what drags Puppeteer, `sharp`, and
-`exceljs` onto your computer — use `start_process` with whatever tool you already have).
+`set_config_value` is deliberately narrow: it can change only `telemetryEnabled`,
+`maxReadLines`, `maxBufferedLines`, and `maxOutputBytes`. Access roots, blocked commands,
+the command guardrail, shell, write limit, runtime name, and unrestricted mode stay with the person
+at the computer. There is no `write_pdf`/spreadsheet/DOCX tooling; use `start_process` with the
+document tools already installed on your machine.
 
 `--print-tools` prints the exact JSON contract (schemas and annotations) the runtime advertises, and
 `src/catalog.mjs` is the single source of truth for it.
@@ -187,13 +192,13 @@ This runtime is an independent implementation written for ReMCP. It is not a for
 code with, [DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) or any other
 MCP server.
 
-| | Desktop Commander 0.2.50 | ReMCP runtime 0.2.0 |
+| | Desktop Commander 0.2.50 | ReMCP runtime |
 | --- | --- | --- |
-| Tools | 26, including config mutators and document tooling | 35, including binary transfer, archives, screenshots, and diffs |
+| Tools | 26, including config mutators and document tooling | 44, including binary transfer, bulk file operations, archives, screenshots, search, process control, and narrowly scoped runtime preferences |
 | Runtime dependencies | 34 (Supabase, Puppeteer/md-to-pdf, `sharp`, `exceljs`, Tiptap, ripgrep download) | 2 direct (`@modelcontextprotocol/sdk`, `@jellybrick/dbus-next`) |
 | Install scripts | `postinstall` posts an install payload that ignores the telemetry setting | none |
 | Telemetry | opt-out, 51 event names, remote feature flags, A/B assignment, third-party processor | opt-out, whitelisted event schema, no endpoint, no flags |
-| Install size | 3.78 MB unpacked, 249 files | ~110 kB unpacked, 20 files |
+| Package footprint | 3.78 MB unpacked, 249 files | small first-party runtime package; no bundled browser or document-rendering stack |
 | `read_file` | also fetches arbitrary URLs (SSRF surface) | local files only; `read_binary` transfers any file as base64 |
 | Command guardrails | always on, 32 substring-blocked commands, advisory; also refuses read-only mentions | `warn` by default (never blocks), `allow`/`block` opt-in, command-word matching |
 | Confinement | always on, checked against the lexical path | opt-in, checked against the resolved real path |
@@ -202,10 +207,11 @@ MCP server.
 | Termination | session kill only | whole process group, plus runtime supervision and restart |
 
 What ReMCP deliberately does not implement, and why: document rendering (`write_pdf`) and spreadsheet
-handling would put Puppeteer, `sharp`, and `exceljs` on your computer; `get_config`/`set_config_value`
-would let the model change its own limits; local usage history would write your arguments to disk;
-URL reads in `read_file` would add an SSRF surface. Everything else the upstream server can do has an
-equivalent here, and the tool count is higher.
+handling would put Puppeteer, `sharp`, and `exceljs` on your computer; unrestricted configuration
+mutation is intentionally absent — `set_config_value` is limited to four non-security preferences,
+while access roots and command security remain local; local usage history would write your arguments
+to disk; URL reads in `read_file` would add an SSRF surface. Everything else the upstream server can
+do has an equivalent here, and the tool count is higher.
 
 ## License
 

@@ -6,8 +6,9 @@ import { telemetryStatus } from '../telemetry.mjs';
 import { VERSION } from '../version.mjs';
 import { text } from '../util.mjs';
 
-// Read-only introspection. Unlike the upstream Desktop Commander there is deliberately
-// no set_config_value: a model must not be able to rewrite its own device limits.
+// Read-only introspection. Mutating configuration is a separate, deliberately narrow tool:
+// set_config_value can change only telemetry and context/output preferences; access roots,
+// command security, the shell, write limit, name, and unrestricted mode remain local-only.
 export async function getRuntimeInfoTool() {
   const telemetry = telemetryStatus();
   return text(JSON.stringify({

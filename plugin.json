@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "remcp",
-  "version": "0.2.35",
+  "version": "0.2.36",
   "description": "Work with files, images, searches, terminal sessions, and processes on computers you have explicitly paired with ReMCP.",
   "author": {
     "name": "Anton Baider",
@@ -30,8 +30,8 @@
         "termsOfServiceURL": "https://remcp.site/terms",
         "defaultPrompt": [
           "Show my paired ReMCP computers and tell me which ones are online.",
-          "On my laptop, list the files in my project folder and summarize what is there without changing anything.",
-          "On my server, list the running processes and help me identify the one using the most memory."
+          "Read a README file from one of my ReMCP computers and summarize it without changing anything.",
+          "Take a screenshot from one of my ReMCP computers and show it to me."
         ],
         "brandColor": "#4C50D8",
         "composerIcon": "./assets/remcp-icon.png",
