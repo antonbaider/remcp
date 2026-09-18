@@ -605,7 +605,7 @@
       "justifications": {
         "read_only_justification": "Read only: it reads the ReMCP runtime configuration on the paired computer and returns the result without writing anything.",
         "open_world_justification": "Not open world: reads local runtime state only.",
-        "destructive_justification": "Not destructive: read only; configuration cannot be changed through MCP."
+        "destructive_justification": "Not destructive: read only; this tool does not change configuration, while set_config_value handles only the runtime preferences it explicitly allows."
       }
     },
     "get_runtime_stats": {
