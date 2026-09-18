@@ -13,7 +13,8 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "check": "node scripts/check-plugin.mjs && npm run check --workspaces --if-present",
+    "check": "node scripts/check-plugin.mjs && node scripts/check-claude-plugin.mjs && npm run check --workspaces --if-present",
+    "claude:check": "node scripts/check-claude-plugin.mjs",
     "test": "npm run test --workspaces --if-present"
   },
   "repository": {
