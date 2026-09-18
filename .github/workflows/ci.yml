@@ -115,14 +115,26 @@ jobs:
         run: |
           set -Eeuo pipefail
           version="$(node -p "require('./package.json').version")"
-          for attempt in {1..24}; do
-            if npm view "@remcp/runtime@$version" version >/dev/null 2>&1 && npm view "@remcp/remcp@$version" version >/dev/null 2>&1; then
+          registry_has() {
+            local encoded="$1"
+            curl --fail --silent --show-error \
+              --header 'Cache-Control: no-cache' \
+              "https://registry.npmjs.org/$encoded/$version" >/dev/null 2>&1
+          }
+          # npm trusted publishing can accept a version and then keep it in processing for several
+          # minutes. Give the registry ten minutes to expose both exact versions, and bypass caches
+          # so a stale 404 cannot consume the whole readiness window.
+          for attempt in {1..60}; do
+            if registry_has '@remcp%2Fruntime' && registry_has '@remcp%2Fremcp'; then
               echo "published @remcp/runtime@$version and @remcp/remcp@$version"
               exit 0
             fi
+            if (( attempt == 1 || attempt % 6 == 0 )); then
+              echo "registry is still processing $version release artifacts (attempt $attempt/60)"
+            fi
             sleep 10
           done
-          echo "published packages did not resolve from the registry" >&2
+          echo "published packages did not resolve from the registry after ten minutes" >&2
           exit 1
       - name: Open the GitHub release
         shell: bash
