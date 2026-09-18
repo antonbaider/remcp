@@ -1,6 +1,15 @@
-# Claude Code plugin
+# Claude Code plugin — Anthropic
 
-ReMCP ships a Claude Code plugin alongside the existing OpenAI/Agent Plugins package. The two integrations share the same public skills and production MCP endpoint, but use separate manifests so changes for one ecosystem cannot silently change the other.
+ReMCP ships a native Claude Code plugin alongside the separate OpenAI Plugins package. The two
+integrations share the same public skills, production MCP endpoint, OAuth service, and paired-device
+model, but use different manifests and validation paths so a change for one ecosystem cannot silently
+break the other.
+
+> **Directory status — September 18, 2026:** submitted through Claude Platform and accepted by the
+> submission API. Anthropic Console currently shows **Submitted and pending review**. This document
+> does not claim community-marketplace availability until Anthropic marks the listing approved.
+
+See [`PLUGINS.md`](PLUGINS.md) for the side-by-side OpenAI / Anthropic overview.
 
 ## Files
 
@@ -56,27 +65,23 @@ claude --plugin-dir .
 
 Then verify that the five ReMCP skills appear under the `remcp:` namespace and that the `remcp` MCP server is listed. Complete the OAuth browser flow when prompted and run a read-only check first, for example listing paired computers.
 
-## Submission
+## Submission status
 
-Anthropic accepts third-party Claude Code plugins through the community marketplace review flow:
-
-- Console (individual authors): <https://platform.claude.com/plugins/submit>
-- claude.ai organization form (Team/Enterprise): <https://claude.ai/admin-settings/directory/submissions/plugins/new>
-
-Submit the public repository:
+The public repository was submitted through Claude Platform on **September 18, 2026**:
 
 ```text
 https://github.com/antonbaider/remcp
 ```
 
-The plugin root is the repository root. Anthropic's review pipeline runs the same `claude plugin validate` check plus automated safety screening. Approved third-party plugins are pinned to a commit in the `anthropics/claude-plugins-community` catalog.
+Anthropic accepted the submission and currently reports **Submitted and pending review**. The plugin
+root is the repository root. The candidate passed both the repository-owned contract check and
+`claude plugin validate . --strict` before submission.
 
-After approval, users can add the community marketplace and install ReMCP:
+Until Anthropic marks the directory entry approved, use the local `--plugin-dir` flow documented
+above for testing. Do not advertise a community-marketplace install command as live before approval.
 
-```bash
-claude plugin marketplace add anthropics/claude-plugins-community
-claude plugin install remcp@claude-community
-```
+When approval is visible in Anthropic's directory, update this section with the exact marketplace
+installation command shown by the platform.
 
 ## Release safety
 
