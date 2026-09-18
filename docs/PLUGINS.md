@@ -95,6 +95,20 @@ This early-access route uses Claude Code's supported marketplace mechanism; it d
 `git clone`, `--plugin-dir`, or a manual MCP endpoint. Once the directory listing is live, the
 regular Install button is the preferred path.
 
+## Cursor, Gemini CLI, GitHub Copilot and VS Code
+
+The same public ReMCP repository is prepared for the other major coding harnesses.
+
+- **Cursor:** ReMCP uses the portable Agent Plugins 1.0 format. Users install the ReMCP catalog entry; the MCP server and five skills come with it.
+- **Gemini CLI:** ReMCP publishes a native `gemini-extension.json`. The Extension Gallery can index the public repository and OAuth is discovered automatically.
+- **GitHub Copilot CLI:** ReMCP publishes a Copilot marketplace plus the same portable Agent Plugin. Users can install the default-marketplace listing once approved.
+- **VS Code Agent Plugins:** VS Code consumes the same Agent Plugins 1.0 package and marketplace metadata.
+- **Official MCP Registry:** ReMCP publishes a remote server record for registry-aware MCP clients.
+
+For normal users, none of these paths require copying the underlying MCP URL. Find **ReMCP**, install it, authenticate, and use your paired computers.
+
+See [DISTRIBUTION.md](DISTRIBUTION.md) for marketplace manifests, validation, and submission status.
+
 ## What the plugin carries for you
 
 Both host packages already contain the information needed to connect to ReMCP. The end-user install

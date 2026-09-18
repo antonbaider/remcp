@@ -117,6 +117,22 @@ That optional fallback uses Claude Code's supported marketplace mechanism. Users
 
 Start with [**Plugin overview →**](docs/PLUGINS.md).
 
+### Cursor, Gemini CLI, GitHub Copilot and VS Code
+
+ReMCP also publishes host-native discovery metadata for the other major coding harnesses:
+
+| Host | User path |
+| --- | --- |
+| **Cursor** | Find **ReMCP** in Cursor Marketplace and install it; the plugin already carries its MCP + skills configuration. |
+| **Gemini CLI** | Find **ReMCP** in the Gemini CLI Extension Gallery and install the extension; OAuth discovery is automatic. |
+| **GitHub Copilot CLI** | Install **ReMCP** from the default marketplace after review, or add the ReMCP marketplace while the listing is pending. |
+| **VS Code Agent Plugins** | Install the same Agent Plugins 1.0 package from the plugin UI/default marketplace. |
+| **Official MCP Registry** | ReMCP publishes its hosted server to the official MCP Registry for registry-aware MCP clients. |
+
+The same rule applies on every host: **install the catalog item, sign in to ReMCP, use your paired computers**. Ordinary users do not copy an MCP URL from this repository.
+
+Distribution manifests and submission status are documented in [**DISTRIBUTION.md →**](docs/DISTRIBUTION.md).
+
 ### Developer / reviewer internals
 
 Host-specific manifests, MCP configuration, validation commands, submission artifacts, and local

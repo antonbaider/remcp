@@ -1,0 +1,40 @@
+{
+  "name": "remcp",
+  "owner": {
+    "name": "Anton Baider"
+  },
+  "metadata": {
+    "description": "ReMCP plugin marketplace for GitHub Copilot CLI and VS Code Agent Plugins.",
+    "version": "0.2.42"
+  },
+  "plugins": [
+    {
+      "name": "remcp",
+      "source": "./",
+      "description": "Securely work with files, terminals, screenshots, search, and processes on computers you explicitly pair with ReMCP.",
+      "version": "0.2.42",
+      "author": {
+        "name": "Anton Baider",
+        "url": "https://remcp.site"
+      },
+      "homepage": "https://remcp.site/plugins",
+      "repository": "https://github.com/antonbaider/remcp",
+      "license": "MIT",
+      "keywords": [
+        "mcp",
+        "remote-computer",
+        "developer-tools",
+        "files",
+        "terminal"
+      ],
+      "category": "Developer Tools",
+      "tags": [
+        "mcp",
+        "remote-computer",
+        "terminal",
+        "files",
+        "screenshots"
+      ]
+    }
+  ]
+}
