@@ -14,6 +14,7 @@ const pkg = readJson('package.json');
 const openAiPlugin = readJson('plugin.json');
 const openAiMcp = readJson('mcp.json');
 const claudePlugin = readJson('.claude-plugin/plugin.json');
+const claudeMarketplace = readJson('.claude-plugin/marketplace.json');
 const claudeMcp = readJson('.mcp.json');
 
 requireValue(claudePlugin.name === 'remcp', 'Claude plugin name must be remcp');
@@ -23,6 +24,17 @@ requireValue(openAiPlugin.version === pkg.version, 'OpenAI plugin version must s
 requireValue(claudePlugin.repository === 'https://github.com/antonbaider/remcp', 'Claude repository must point at the public repository');
 requireValue(claudePlugin.homepage === 'https://remcp.site', 'Claude homepage must point at remcp.site');
 requireValue(claudePlugin.license === 'MIT', 'Claude plugin license must be MIT');
+
+requireValue(claudeMarketplace.name === 'remcp', 'Claude marketplace name must be remcp');
+requireValue(claudeMarketplace.owner?.name === claudePlugin.author?.name, 'Claude marketplace owner must match plugin author');
+requireValue(Array.isArray(claudeMarketplace.plugins) && claudeMarketplace.plugins.length === 1, 'Claude marketplace must contain exactly one plugin');
+const marketplacePlugin = claudeMarketplace.plugins?.[0];
+requireValue(marketplacePlugin?.name === claudePlugin.name, 'Claude marketplace plugin name must match plugin.json');
+requireValue(marketplacePlugin?.displayName === claudePlugin.displayName, 'Claude marketplace displayName must match plugin.json');
+requireValue(marketplacePlugin?.source === './', 'Claude marketplace must install the plugin from repository root');
+requireValue(marketplacePlugin?.repository === claudePlugin.repository, 'Claude marketplace repository must match plugin.json');
+requireValue(marketplacePlugin?.homepage === 'https://remcp.site/install/claude', 'Claude marketplace homepage must point at the Claude install guide');
+requireValue(marketplacePlugin?.license === claudePlugin.license, 'Claude marketplace license must match plugin.json');
 
 const claudeServer = claudeMcp?.mcpServers?.remcp;
 const openAiServer = openAiMcp?.mcpServers?.remcp;

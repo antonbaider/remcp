@@ -1,0 +1,26 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "remcp",
+  "description": "ReMCP plugins for Claude Code.",
+  "owner": {
+    "name": "Anton Baider",
+    "url": "https://remcp.site"
+  },
+  "plugins": [
+    {
+      "name": "remcp",
+      "displayName": "ReMCP",
+      "source": "./",
+      "description": "Securely work with files, terminals, screenshots, search, and processes on computers you explicitly pair.",
+      "author": {
+        "name": "Anton Baider",
+        "url": "https://remcp.site"
+      },
+      "homepage": "https://remcp.site/install/claude",
+      "repository": "https://github.com/antonbaider/remcp",
+      "license": "MIT",
+      "keywords": ["mcp","remote-computer","developer-tools","files","terminal"],
+      "tags": ["mcp","remote-computer","terminal","files","screenshots"]
+    }
+  ]
+}

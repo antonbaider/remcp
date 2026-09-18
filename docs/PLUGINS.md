@@ -43,36 +43,52 @@ OpenAI assigns published plugin cards an opaque detail URL such as
 should not be guessed from the plugin name. Once the ReMCP public listing exposes its final connector
 URL, the website can link directly to that card.
 
-### Codex CLI
+### Codex
 
-Run Codex, then open the plugin browser:
+In a supported Codex task view:
 
-```text
-/plugins
-```
+1. Open **Sources**.
+2. Choose **Use plugins**.
+3. Search for and select the installed **ReMCP** plugin.
 
-Search for **ReMCP**, open its details, and install it. ChatGPT and Codex use the same public plugin
-directory, so there is no separate ReMCP package to configure for Codex.
+ChatGPT and Codex use the same public plugin directory, so there is no separate ReMCP package or MCP
+endpoint for users to configure.
 
 ## Claude Code
 
 ReMCP was submitted to Anthropic on **September 18, 2026** and currently shows **Submitted and
 pending review**.
 
-Anthropic publishes accepted third-party plugins through the community marketplace. After ReMCP is
-approved, the official Claude Code flow is:
+After approval, the preferred user flow is:
 
-```text
-/plugin marketplace add anthropics/claude-plugins-community
-/plugin install remcp@claude-community
+1. Open <https://claude.com/plugins>.
+2. Filter for **Claude Code** if needed.
+3. Search for **ReMCP**.
+4. Choose **Install**.
+5. Complete ReMCP authentication when Claude Code asks you to connect.
+
+Users do not clone the ReMCP repository or edit MCP configuration files.
+
+### Early access while directory review is pending
+
+Claude Code supports developer-hosted marketplaces. ReMCP publishes a validated public marketplace
+for users who need access before Anthropic publishes the directory listing:
+
+```bash
+claude plugin marketplace add antonbaider/remcp
+claude plugin install remcp@remcp --scope user
 ```
 
-The first command adds Anthropic's community marketplace once. The second installs ReMCP by name.
-This is Claude Code's plugin manager flow; users do not clone the ReMCP repository or edit MCP
-configuration files.
+Inside an already-open Claude Code session:
 
-After installation, complete ReMCP authentication when Claude Code asks you to connect, then use your
-paired computers normally.
+```text
+/plugin marketplace add antonbaider/remcp
+/plugin install remcp@remcp
+```
+
+This early-access route uses Claude Code's supported marketplace mechanism; it does not require
+`git clone`, `--plugin-dir`, or a manual MCP endpoint. Once the directory listing is live, the
+regular Install button is the preferred path.
 
 ## What the plugin carries for you
 
