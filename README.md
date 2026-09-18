@@ -84,7 +84,7 @@ Shareable install guides:
 ChatGPT and Codex share OpenAI's public plugin directory.
 
 - ChatGPT: open <https://chatgpt.com/plugins>, search **ReMCP**, open the plugin card, and install it.
-- Codex CLI: run `/plugins`, search **ReMCP**, and install it from the plugin browser.
+- Codex: in a supported task view open **Sources → Use plugins**, then search for and select the installed **ReMCP** plugin.
 - When prompted, complete ReMCP OAuth. After that, use the computers already paired to your account.
 
 OpenAI direct plugin detail URLs contain a platform-generated opaque connector ID. The final ReMCP
@@ -95,15 +95,18 @@ direct link should therefore be copied from the published directory card, not gu
 ReMCP was submitted through Claude Platform on **September 18, 2026** and currently shows
 **Submitted and pending review**.
 
-After approval, Anthropic's documented community-marketplace install path is:
+After approval, the preferred user path is **https://claude.com/plugins** → search **ReMCP** →
+**Install** → complete ReMCP authorization.
 
-```text
-/plugin marketplace add anthropics/claude-plugins-community
-/plugin install remcp@claude-community
+Until the directory listing is approved, ReMCP also publishes a validated early-access marketplace:
+
+```bash
+claude plugin marketplace add antonbaider/remcp
+claude plugin install remcp@remcp --scope user
 ```
 
-That is Claude Code's plugin-manager flow. Users do not need `git clone`, `--plugin-dir`, or MCP
-configuration for normal catalog installation.
+That optional fallback uses Claude Code's supported marketplace mechanism. Users still do not need
+`git clone`, `--plugin-dir`, or a manual MCP endpoint.
 
 Start with [**Plugin overview →**](docs/PLUGINS.md).
 

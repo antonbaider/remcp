@@ -2,18 +2,38 @@
 
 ## User install path
 
-ReMCP is currently **Submitted and pending review** in Anthropic's community marketplace.
+ReMCP is currently **Submitted and pending review** in Anthropic's plugin directory.
 
-After approval, normal users install it through Claude Code's plugin manager:
+After approval, the preferred user flow is:
 
-```text
-/plugin marketplace add anthropics/claude-plugins-community
-/plugin install remcp@claude-community
+1. Open <https://claude.com/plugins>.
+2. Filter for **Claude Code** if needed.
+3. Search for **ReMCP**.
+4. Choose **Install**.
+5. Complete ReMCP OAuth when Claude requests authorization.
+
+Users do **not** need to clone the repository, run `--plugin-dir`, paste an MCP endpoint, or edit
+`.mcp.json` for normal catalog installation.
+
+### Early access while review is pending
+
+ReMCP also publishes a validated public marketplace for users who need Claude Code access before the
+directory listing is approved:
+
+```bash
+claude plugin marketplace add antonbaider/remcp
+claude plugin install remcp@remcp --scope user
 ```
 
-The community marketplace is added once. ReMCP is then installed by name. Users do **not** need to
-clone the repository, run `--plugin-dir`, paste an MCP endpoint, or edit `.mcp.json` for normal
-catalog installation.
+Inside an already-open Claude Code session:
+
+```text
+/plugin marketplace add antonbaider/remcp
+/plugin install remcp@remcp
+```
+
+This early-access route uses Claude Code's supported marketplace mechanism. It does not require a
+repository clone or a manual MCP endpoint.
 
 The rest of this document is for **developers and reviewers**.
 
@@ -94,11 +114,11 @@ Anthropic accepted the submission and currently reports **Submitted and pending 
 root is the repository root. The candidate passed both the repository-owned contract check and
 `claude plugin validate . --strict` before submission.
 
-Until Anthropic marks the directory entry approved, use the local `--plugin-dir` flow documented
-above for testing. Do not advertise a community-marketplace install command as live before approval.
+Until Anthropic marks the directory entry approved, the public ReMCP marketplace above is the supported
+user early-access path. The local `--plugin-dir` flow is for development and smoke testing only.
 
-When approval is visible in Anthropic's directory, update this section with the exact marketplace
-installation command shown by the platform.
+When the directory listing is live, promote the directory Install button as the primary user path and
+keep the ReMCP marketplace as an optional advanced fallback.
 
 ## Release safety
 
