@@ -24,24 +24,22 @@ ChatGPT and Codex share OpenAI's unified public plugin directory.
 
 ### ChatGPT
 
-Open:
+Open the directory with the ReMCP search prefilled:
 
 ```text
-https://chatgpt.com/plugins
+https://chatgpt.com/plugins?q=ReMCP
 ```
 
 Then:
 
-1. Search for **ReMCP**.
-2. Open the ReMCP plugin card.
-3. Choose the add/install action.
-4. Complete ReMCP OAuth when prompted.
+1. Open the ReMCP plugin card when it is available for your account.
+2. Choose **Install plugin**.
+3. Choose **Connect** if ReMCP authorization is requested.
+4. Complete ReMCP OAuth.
 5. Start a new chat and ask ChatGPT to use ReMCP on a paired computer.
 
-OpenAI assigns published plugin cards an opaque detail URL such as
-`https://chatgpt.com/plugins/plugin_connector_<id>`. That identifier is created by the platform; it
-should not be guessed from the plugin name. Once the ReMCP public listing exposes its final connector
-URL, the website can link directly to that card.
+If ReMCP is not visible yet, the listing or rollout is not available to that account. Do not paste an
+MCP endpoint or create a manual connection as a substitute for the catalog plugin.
 
 ### Codex
 
@@ -68,6 +66,13 @@ After approval, the preferred user flow is:
 5. Complete ReMCP authentication when Claude Code asks you to connect.
 
 Users do not clone the ReMCP repository or edit MCP configuration files.
+
+For Claude Code users who prefer the terminal after approval, Anthropic's community marketplace uses:
+
+```text
+/plugin marketplace add anthropics/claude-plugins-community
+/plugin install remcp@claude-community
+```
 
 ### Early access while directory review is pending
 
