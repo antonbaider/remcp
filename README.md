@@ -17,15 +17,16 @@
 
 <p align="center">
   <a href="https://remcp.site">Website</a> ·
+  <a href="https://remcp.site/plugins">Plugins</a> ·
   <a href="https://remcp.site/docs">Docs</a> ·
   <a href="https://remcp.site/security">Security</a> ·
   <a href="https://remcp.site/support">Support</a>
 </p>
 
-ReMCP connects a computer you own or administer to ChatGPT, Codex, or any other MCP client. The
-device agent makes an **outbound connection only** — no inbound port, no tunnel, no third-party
-relay. This repository is everything that runs on your machine: the client and the local device
-runtime.
+ReMCP connects a computer you own or administer to **ChatGPT, Codex, Claude Code, or another MCP
+client**. The device agent makes an **outbound connection only** — no inbound port, no tunnel, no
+third-party desktop relay. This repository contains the public device client/runtime plus the
+host-specific OpenAI and Anthropic plugin packaging.
 
 ## Packages
 
@@ -64,31 +65,54 @@ runtime and registers the background service.
 | `remcp godmode [status\|on\|off]` | Show or change this computer's local unrestricted mode |
 | `remcp --version` | Print the installed client version |
 
-## ChatGPT and Codex plugin
+## Plugins
 
-The repository root is a portable Agent Plugins package: `plugin.json`, `mcp.json`, icons, and
-five workflows in `skills/`. Each skill declares its ReMCP MCP dependency. npm installation pairs
-a device; it does not install ChatGPT skills or submit a plugin to OpenAI.
+ReMCP ships **two independent plugin packages** from the same repository. They share the production
+MCP endpoint, OAuth service, paired-device model, and five operational skills, but keep host-specific
+manifests and release checks separate.
 
-Use the matching release's `remcp-plugin.zip` for a portal upload. It includes every skill reference
-and presentation asset. `chatgpt-app-submission.json` contains the tool review metadata. Public CI
-checks that the ZIP matches the source tree before publishing either npm package.
+| | ChatGPT & Codex | Claude Code |
+| --- | --- | --- |
+| Ecosystem | OpenAI Plugins | Anthropic Plugins |
+| Manifest | `plugin.json` | `.claude-plugin/plugin.json` |
+| MCP config | `mcp.json` | `.mcp.json` |
+| Skills | five shared skills | the same five skills under `remcp:` |
+| Rich UI | file + image MCP Apps | host-native tool results |
+| Current state | production package + submission artifacts | **submitted Sep 18, 2026 · pending review** |
 
-The hosted OAuth issuer is `https://remcp.site`; it advertises `openid` and `email`, OIDC
-discovery at `/.well-known/openid-configuration`, and UserInfo at `/oauth/userinfo`. Enterprise
-restrictions require the linked account's verified email and workspace domain verification.
-The front end, backend and database are deployed from the separate `remcp-full` repository.
+Start with [**Plugin overview →**](docs/PLUGINS.md).
 
-## Claude Code plugin
+### ChatGPT & Codex / OpenAI
 
-The same repository root is also a native Claude Code plugin. Claude-specific packaging is additive: `.claude-plugin/plugin.json` and `.mcp.json` sit beside, and do not replace, the existing OpenAI `plugin.json` and `mcp.json`.
+The OpenAI package contains `plugin.json`, `mcp.json`, five workflows in `skills/`,
+`chatgpt-app-submission.json`, and release-checked portal archives. ReMCP also serves two
+self-contained MCP App resources so file edits and screenshots can render as rich previews in
+ChatGPT.
+
+The hosted OAuth issuer is `https://remcp.site`; it publishes protected-resource metadata, OAuth
+authorization-server metadata, OIDC discovery, and UserInfo. Reviewer credentials are never stored
+in this public repository.
+
+Read [**ChatGPT & Codex plugin guide →**](docs/OPENAI_PLUGIN.md).
+
+### Claude Code / Anthropic
+
+Claude Code uses its own additive manifest and remote HTTP MCP configuration. It loads the shared
+skills under the `remcp:` namespace and discovers ReMCP OAuth from the production server.
+
+The plugin was submitted through Claude Platform on **September 18, 2026**. Anthropic accepted the
+submission and the Console currently shows **Submitted and pending review**. Until the directory
+listing is approved, load the public repository directly for development/testing:
 
 ```bash
 claude plugin validate . --strict
 claude --plugin-dir .
 ```
 
-Claude Code loads the five skills under the `remcp:` namespace and connects to `https://remcp.site/mcp` over the recommended remote HTTP transport. OAuth is discovered from the server; no access token or client secret is stored in this repository. See [`docs/CLAUDE_CODE_PLUGIN.md`](docs/CLAUDE_CODE_PLUGIN.md) for validation and Anthropic community submission.
+Read [**Claude Code plugin guide →**](docs/CLAUDE_CODE_PLUGIN.md).
+
+> The OpenAI files and Claude files deliberately do not overwrite each other. Release checks fail if
+> either host-specific contract drifts from the shared ReMCP version or production endpoint.
 
 ## The local runtime
 
