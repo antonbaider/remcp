@@ -13,6 +13,7 @@ import {
   restartToApplyUpdate,
   supervisorRestart,
   updateDecision,
+  updateInvocationArgs,
 } from './agent-update.mjs';
 
 export { localRuntimeEntry, supervisorRestart, updateDecision } from './agent-update.mjs';
@@ -369,10 +370,10 @@ export async function runAgent(options) {
       lastAttemptAt = Date.now();
       updateInFlight = true;
       console.log(`Updating ReMCP to ${target}${decision.runtime ? ` with ${decision.runtime}` : ''} (${decision.reason})…`);
-      // The trust flag is only forwarded when this machine's owner trusted the server at pairing
-      // time; otherwise the update stops at the server's own version and asks the user.
-      const trustFlag = options.trustRuntime === true ? ['--trust-runtime'] : [];
-      const child = spawn(process.execPath, [cli, 'update', ...trustFlag, ...(decision.runtime ? ['--runtime', decision.runtime] : [])], {
+      // Keep the updater pinned to the exact release pair this trusted server advertised. That
+      // prevents a newer public npm tag from getting ahead of production during a public-first rollout.
+      const updateArgs = updateInvocationArgs(decision, options.trustRuntime === true);
+      const child = spawn(process.execPath, [cli, ...updateArgs], {
         detached: true,
         // The updater's own output is the only record of why an install failed, so it is piped back
         // into this agent's log instead of being discarded.

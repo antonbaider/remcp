@@ -1,6 +1,6 @@
-// `remcp update`: install what the server advertises, then let whoever supervises the agent restart
-// it. Only a spec the configured package can satisfy is installed, so a pairing response from a
-// custom server cannot point this machine at a different package or run a git/URL spec.
+// `remcp update`: install the release pair advertised by the paired server, then let whoever
+// supervises the agent restart it. Only exact versions of the configured first-party packages are
+// installable, so a server cannot point this machine at a different package or a git/URL/tag spec.
 import fs from 'node:fs';
 import process from 'node:process';
 
@@ -13,51 +13,192 @@ import { installedVersion } from './doctor.mjs';
 import { linuxServiceFile, macServiceFile, officialOrigin } from './env.mjs';
 import { ensureServiceIfRecorded, npmGlobalInstall, restartPersistentServiceIfInstalled } from './service.mjs';
 
-export async function updateCommand(flags) {
-  const cfg = loadConfig();
-  // The server advertises which runtime version it expects; an agent that is updating
-  // itself passes it through so client and runtime move together.
-  const requested = typeof flags.runtime === 'string' ? flags.runtime.trim() : '';
-  // Whatever the server advertises is installed globally, so it is validated exactly like the
-  // metadata from a pairing response: same package as the configured runtime, a spec that
-  // parses, and an explicit --trust-runtime before a custom server may change it.
-  let runtimeSpec = cfg.runtime.packageSpec;
-  if (requested) {
+const UPDATE_DISCOVERY_TIMEOUT_MS = 5000;
+
+function runtimeTrustAllowed(cfg, flags, env = process.env) {
+  return cfg.trustRuntime === true
+    || Boolean(flags['trust-runtime'])
+    || env.REMCP_TRUST_RUNTIME === '1'
+    // A configuration written before the field existed paired with the official server, which is
+    // trusted by definition; refusing it would silently stop every existing device updating.
+    || new URL(cfg.serverUrl).origin === officialOrigin;
+}
+
+function exactClientSpec(value) {
+  const spec = String(value || '').trim();
+  return isRuntimeSpecFor(PACKAGE_NAME, spec) ? spec : '';
+}
+
+function specVersion(packageName, spec) {
+  const value = String(spec || '');
+  return isRuntimeSpecFor(packageName, value) ? value.slice(`${packageName}@`.length) : '';
+}
+
+function releasePairMatches(clientSpec, runtimePackageName, runtimeSpec) {
+  if (!isRuntimeSpecFor(PACKAGE_NAME, clientSpec) || !isRuntimeSpecFor(runtimePackageName, runtimeSpec)) return false;
+  // First-party client/runtime releases are one contract and intentionally share a version. Custom
+  // runtimes can version independently because their package is controlled by the operator.
+  if (runtimePackageName !== '@remcp/runtime') return true;
+  return specVersion(PACKAGE_NAME, clientSpec) === specVersion(runtimePackageName, runtimeSpec);
+}
+
+export async function resolveUpdateTargets({
+  cfg,
+  flags = {},
+  env = process.env,
+  fetchImpl = globalThis.fetch,
+}) {
+  const requestedRuntime = typeof flags.runtime === 'string' ? flags.runtime.trim() : '';
+  const requestedClient = typeof flags.client === 'string' ? flags.client.trim() : '';
+  const latestClient = `${PACKAGE_NAME}@latest`;
+  const currentClient = `${PACKAGE_NAME}@${VERSION}`;
+  const trusted = runtimeTrustAllowed(cfg, flags, env);
+
+  let clientSpec = latestClient;
+  if (requestedClient) {
+    clientSpec = exactClientSpec(requestedClient);
+    if (!clientSpec) throw new Error(`--client must be ${PACKAGE_NAME}@<version>`);
+  }
+
+  if (requestedRuntime) {
     // Only `<configured package>@<semver>` is installable: an alias, a git/URL/file spec, a tag or
     // a range would run code the user never agreed to.
-    if (!isRuntimeSpecFor(cfg.runtime.packageName, requested)) {
+    if (!isRuntimeSpecFor(cfg.runtime.packageName, requestedRuntime)) {
       throw new Error(`--runtime must be ${cfg.runtime.packageName}@<version>`);
     }
-    const trusted = cfg.trustRuntime === true
-      || Boolean(flags['trust-runtime'])
-      || process.env.REMCP_TRUST_RUNTIME === '1'
-      // A configuration written before the field existed paired with the official server, which is
-      // trusted by definition; refusing it would silently stop every existing device updating.
-      || new URL(cfg.serverUrl).origin === officialOrigin;
     if (!trusted) {
       throw new Error(`This machine was paired without trusting ${cfg.serverUrl} to choose a runtime version. Re-run with --trust-runtime if you trust that server.`);
     }
-    runtimeSpec = normalizeRuntime({ kind: 'npm', packageName: cfg.runtime.packageName, packageSpec: requested, entry: cfg.runtime.entry }).packageSpec;
+    const runtimeSpec = normalizeRuntime({
+      kind: 'npm',
+      packageName: cfg.runtime.packageName,
+      packageSpec: requestedRuntime,
+      entry: cfg.runtime.entry,
+    }).packageSpec;
+    if (requestedClient && !releasePairMatches(clientSpec, cfg.runtime.packageName, runtimeSpec)) {
+      throw new Error('The client and first-party runtime must use the same exact release version.');
+    }
+    if (!requestedClient && cfg.runtime.packageName === '@remcp/runtime' && specVersion(cfg.runtime.packageName, runtimeSpec) !== VERSION) {
+      throw new Error(`--runtime without --client must match the running client version ${VERSION}`);
+    }
+    return {
+      clientSpec: requestedClient ? clientSpec : currentClient,
+      runtimeSpec,
+      persistRuntime: runtimeSpec !== cfg.runtime.packageSpec,
+      installable: true,
+      source: requestedClient ? 'explicit-pair' : 'explicit-runtime',
+      warning: '',
+    };
   }
+
+  // A manual `remcp update` has to move the client and the first-party runtime in lockstep too.
+  // Older versions reused the runtime pin stored at pairing time, so a manual client update could
+  // install a newer client while deliberately reinstalling an older runtime. Resolve the exact
+  // release pair from the same public endpoint the running agent already trusts. During a public-
+  // first rollout this also prevents `@latest` from getting ahead of the version production
+  // actually advertises.
+  if (!trusted) {
+    return {
+      clientSpec,
+      runtimeSpec: cfg.runtime.packageSpec,
+      persistRuntime: false,
+      installable: true,
+      source: 'configured',
+      warning: '',
+    };
+  }
+
+  try {
+    const versionUrl = new URL('/api/agent/version', cfg.serverUrl).toString();
+    const response = await fetchImpl(versionUrl, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(UPDATE_DISCOVERY_TIMEOUT_MS),
+    });
+    if (!response?.ok) {
+      return {
+        clientSpec: currentClient,
+        runtimeSpec: cfg.runtime.packageSpec,
+        persistRuntime: false,
+        installable: false,
+        source: 'configured',
+        warning: `Could not resolve the server release pair (HTTP ${response?.status ?? 'unknown'}); refusing a partial update.`,
+      };
+    }
+
+    const advertised = await response.json();
+    const runtimeCandidate = String(advertised?.runtime || '').trim();
+    const advertisedClient = exactClientSpec(advertised?.cli);
+    const clientCandidate = requestedClient || advertisedClient;
+    if (!advertisedClient
+      || !releasePairMatches(advertisedClient, cfg.runtime.packageName, runtimeCandidate)
+      || (requestedClient && requestedClient !== advertisedClient)) {
+      return {
+        clientSpec: currentClient,
+        runtimeSpec: cfg.runtime.packageSpec,
+        persistRuntime: false,
+        installable: false,
+        source: 'configured',
+        warning: 'Could not resolve a valid server release pair; refusing a partial update.',
+      };
+    }
+
+    const runtimeSpec = normalizeRuntime({
+      kind: 'npm',
+      packageName: cfg.runtime.packageName,
+      packageSpec: runtimeCandidate,
+      entry: cfg.runtime.entry,
+    }).packageSpec;
+    return {
+      clientSpec: clientCandidate,
+      runtimeSpec,
+      persistRuntime: runtimeSpec !== cfg.runtime.packageSpec,
+      installable: true,
+      source: 'server',
+      warning: '',
+    };
+  } catch (error) {
+    return {
+      clientSpec: currentClient,
+      runtimeSpec: cfg.runtime.packageSpec,
+      persistRuntime: false,
+      installable: false,
+      source: 'configured',
+      warning: `Could not resolve the server release pair (${error instanceof Error ? error.message : String(error)}); refusing a partial update.`,
+    };
+  }
+}
+
+export async function updateCommand(flags) {
+  const cfg = loadConfig();
+  const targets = await resolveUpdateTargets({ cfg, flags });
+  if (targets.warning) console.error(`ReMCP update: ${targets.warning}`);
+
   if (flags.check) {
     console.log(JSON.stringify({
       current: VERSION,
       installedRuntime: installedVersion(cfg.runtime.packageName),
-      runtimeSpec: runtimeSpec,
-      available: `${PACKAGE_NAME}@latest`,
+      clientSpec: targets.clientSpec,
+      runtimeSpec: targets.runtimeSpec,
+      updateSource: targets.source,
+      installable: targets.installable,
       managedService: fs.existsSync(linuxServiceFile) || fs.existsSync(macServiceFile),
       supervisor: supervisorRestart() ?? 'none',
     }, null, 2));
     return;
   }
+
+  if (!targets.installable) {
+    throw new Error(targets.warning || 'Could not resolve a complete client/runtime release pair.');
+  }
+
   const before = { cli: VERSION, runtime: installedVersion(cfg.runtime.packageName) };
-  console.log(`Updating ReMCP to the latest published version (${runtimeSpec})…`);
-  npmGlobalInstall(`${PACKAGE_NAME}@latest`, runtimeSpec);
+  console.log(`Updating ReMCP to ${targets.clientSpec} with ${targets.runtimeSpec}…`);
+  npmGlobalInstall(targets.clientSpec, targets.runtimeSpec);
   // The npm prefix can change across Node-manager upgrades. Repair an existing persistent-service
   // launcher only after the install, when globalCliPath() points at the CLI we just installed.
   ensureServiceIfRecorded(cfg);
   // Only a validated spec is persisted, so a failed update cannot leave the install unable to start.
-  if (requested && runtimeSpec !== cfg.runtime.packageSpec) saveConfig({ ...cfg, runtime: { ...cfg.runtime, packageSpec: runtimeSpec } });
+  if (targets.persistRuntime) saveConfig({ ...cfg, runtime: { ...cfg.runtime, packageSpec: targets.runtimeSpec } });
   const after = { cli: installedVersion(PACKAGE_NAME), runtime: installedVersion(cfg.runtime.packageName) };
   const restarted = restartPersistentServiceIfInstalled();
   if (restarted) {
