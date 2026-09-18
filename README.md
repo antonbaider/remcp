@@ -32,7 +32,7 @@ runtime.
 | Package | What it is |
 | --- | --- |
 | [`@remcp/remcp`](packages/client) | The device client: pairing, the outbound agent, the background service, and the usage-metrics switch. |
-| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **44 MCP tools** for files, images, binary transfer, archives, screenshots, search, terminal sessions, processes, and narrowly scoped runtime preferences, with **two direct dependencies**. |
+| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **43 MCP tools** for files, images, binary transfer, archives, screenshots, search, terminal sessions, and processes, with **one dependency**. |
 
 ## Install
 
@@ -61,7 +61,6 @@ runtime and registers the background service.
 | `remcp uninstall` | Stop and remove the user service |
 | `remcp uninstall --purge` | Remove the service and the global packages |
 | `remcp telemetry [status\|on\|off]` | Show or change usage metrics for the client **and** the runtime |
-| `remcp godmode [status\|on\|off]` | Show or change this computer's local unrestricted mode |
 | `remcp --version` | Print the installed client version |
 
 ## ChatGPT and Codex plugin
@@ -85,30 +84,28 @@ The front end, backend and database are deployed from the separate `remcp-full` 
 with, [DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) or any other MCP
 server.
 
-**44 tools:**
+**43 tools, seven areas:**
 
 | Area | Tools |
 | --- | --- |
 | Read | `read_file`, `read_files` (glob), `read_multiple_files`, `read_image`, `read_binary`, `list_directory`, `get_file_info`, `hash_file`, `diff_files` |
-| Write / edit | `write_file`, `write_files` (bulk), `write_binary`, `apply_patch`, `set_permissions`, `edit_block`, `replace_lines`, `replace_in_files` |
+| Write | `write_file`, `write_files` (bulk), `write_binary`, `edit_block`, `replace_lines`, `replace_in_files` |
 | Organise | `create_directory` (bulk), `move_file`, `copy_file`, `copy_paths`, `move_paths`, `move_to_trash`, `create_archive`, `extract_archive` |
 | Delete | `delete_path`, `delete_paths` |
 | Transfer | `read_binary` and `write_binary` move any file in base64 chunks both ways; `create_archive` and `extract_archive` move whole trees |
 | Screen | `take_screenshot` returns the desktop as an image |
 | Search | `start_search`, `get_more_search_results`, `stop_search`, `list_searches` |
 | Processes | `start_process`, `read_process_output`, `wait_for_process_output`, `interact_with_process`, `force_terminate`, `list_sessions`, `list_processes`, `kill_process` |
-| Runtime | `get_system_info`, `get_runtime_info`, `get_runtime_stats`, `set_config_value` |
+| Introspect | `get_system_info`, `get_runtime_info`, `get_runtime_stats` |
 
-The hosted ReMCP endpoint adds eight account/relay tools, so ChatGPT currently scans **52 tools**.
-
-**Why the tool list looks different from other computer-control servers.** Security-sensitive
-configuration remains deliberately narrow, and everything else the alternatives can do has an
-equivalent here — usually more than one:
+**Why the tool list looks different from other computer-control servers.** Three capabilities are
+deliberately absent, and everything else the alternatives can do has an equivalent here — usually more
+than one:
 
 | Not included | Why |
 | --- | --- |
-| `write_pdf`, spreadsheet and DOCX editing | These are the reason other servers ship Puppeteer, `sharp`, and `exceljs` — ReMCP does not bundle that browser/document-rendering stack. |
-| Broad configuration mutation | `set_config_value` can change only telemetry and context/output preferences. Access roots, blocked commands, command policy, shell, write limit and unrestricted mode stay local to the computer. |
+| `write_pdf`, spreadsheet and DOCX editing | These are the reason other servers ship Puppeteer, `sharp`, and `exceljs` — hundreds of megabytes and three install scripts on your computer. ReMCP keeps one dependency instead. |
+| `get_config` / `set_config_value` | A model must not be able to rewrite its own device limits. Configuration is yours, on disk. `get_runtime_info` shows the effective policy read-only. |
 | URL fetching in `read_file` | It is a server-side request forgery surface. The runtime reads your computer, not the internet. |
 
 **What ReMCP adds beyond the usual set:** image reads and screenshots that any MCP client can
@@ -118,25 +115,23 @@ deletion, and host resource reporting.
 
 **Nothing is gated.** There is no approval prompt, no "are you sure", and no mandatory dry run: a tool
 call executes with the full rights of the account running the agent — the same trust model as SSH.
-Writes replace by default and moves/copies replace the destination. The catastrophic-command
-guardrail defaults to `warn` (advisory, not blocking); an operator may choose `allow` or `block`.
-Files are never written to a local history log, so tool arguments and output are not recorded there.
+Writes replace by default, moves and copies replace the destination, and the catastrophic-command
+guardrail is off unless an operator opts into `warn` or `block`. Files are never written to a local
+history log, so nothing about your work is recorded on the machine.
 
 ## Unrestricted by design
 
-- **No per-call approval contour.** ReMCP does not add a confirmation dialog before each tool call.
-  The local runtime's configured roots, command blocklist and command policy still apply, as do the
-  operating-system permissions of the account running the agent. Within those boundaries,
-  `start_process` can operate services, packages, databases, containers, `sudo`, git, and other local tools.
+- **No approval contour.** Nothing in the client, the runtime, or the relay asks for confirmation, and
+  no policy stands between the agent and the machine. What the account can do, the agent can do:
+  services, packages, databases, containers, `sudo`, git — all through `start_process`.
 - **Full transfer in both directions.** `read_binary`/`write_binary` move any file, `create_archive`
   and `extract_archive` move whole trees, and `take_screenshot` shows the desktop.
-- **Optional hardening, explicit security boundaries.** `remcp godmode on` lifts the roots, the
-  blocklist and the command guardrail for one computer — and only a person at that computer can turn
-  it on; no MCP tool accepts it. `allowedRoots` and `blockedCommands` are empty until an operator
-  configures them. `dangerousCommands` defaults to `warn`: matching catastrophic commands still
-  run, but the result carries an advisory note; `allow` silences it and `block` refuses it. The
-  runtime refuses to start — loudly — if `runtime.json` cannot be parsed, so configured safety
-  boundaries are never silently dropped.
+- **Optional hardening, not defaults.** `remcp godmode on` lifts the roots, the blocklist and the
+  guardrail for one computer — and only a person at that computer can turn it on; no MCP tool
+  accepts it. `allowedRoots` confines the device when an operator sets it,
+  `dangerousCommands` can warn or refuse catastrophic commands, and `blockedCommands` adds a deny
+  list. All three are off unless configured, and the runtime refuses to start — loudly — if its
+  `runtime.json` cannot be parsed, so a limit can never be dropped silently.
 - **Crash-resistant.** A bad shell, a closed stdin, or a 40 MB line cannot take the runtime down; the
   agent restarts it if it exits, so a device recovers instead of going quietly offline.
 - **Outbound-only.** Per-device revocable credential, hashed server-side, stored locally with

@@ -1,6 +1,6 @@
 ---
 name: remcp-operator
-description: Safely operate computers paired through ReMCP. Use when the user asks to inspect or change files, directories, images, local processes, terminal sessions, or ReMCP device state on one of their paired computers.
+description: Safely operate computers paired through ReMCP. Use when the user asks to inspect or change files, directories, images, screenshots, rendered UI, local processes, terminal sessions, or ReMCP device state on one of their paired computers. For visible software work, screenshots are evidence to inspect with vision, not just files to capture.
 ---
 
 # ReMCP Operator
@@ -65,6 +65,8 @@ change, listing the destination directory after a move, or reading process outpu
 command. When you rewrite a project area with `apply_patch` or `replace_in_files`, run the project's
 own test or build command once at the end instead of re-reading every file.
 
+For visible software changes, verification has two required layers: functional evidence plus visual evidence. Open the real affected state, capture a fresh screenshot with `take_screenshot`, inspect the returned image with vision, fix any visible clipping/overflow/alignment/icon/theme/content issue, and capture again after the last relevant edit. A successful build, test, DOM inspection, or HTTP status does not by itself prove that the rendered result is correct. If the screenshot cannot be obtained, report that visual verification is incomplete rather than guessing.
+
 ## Moving files and data
 
 - Off the computer: `read_file` for text (20 MiB inline, paged by lines), `read_files` for a whole
@@ -74,8 +76,7 @@ own test or build command once at the end instead of re-reading every file.
   bytes with `mode: "append"` to send a large file as consecutive chunks.
 - Whole trees: `create_archive` packs a directory into tar/tar.gz/zip before a transfer, and
   `extract_archive` unpacks one on the other side.
-- `take_screenshot` captures the screen when the task involves a GUI, a rendered page, or anything the
-  user would otherwise have to describe.
+- `take_screenshot` captures the real screen when the task involves a GUI, rendered page, browser bug, responsive layout, or anything the user would otherwise have to describe. For software work with a visible result, do not stop at capture: return/show the image when supported, inspect it with vision, use visible defects to drive the next fix, and recapture after the final relevant change.
 - `hash_file` proves a transfer arrived intact, and `diff_files` shows what changed between two files.
 
 ## Long-running processes
@@ -88,10 +89,7 @@ not with an unsupported `cwd` parameter. Verify the final exit status for builds
 
 ## Troubleshooting a device
 
-- `get_runtime_info` reports the device runtime version, allowed roots, command policy, limits, and
-  settable preferences. It is read-only. `set_config_value` may change only `telemetryEnabled`,
-  `maxReadLines`, `maxBufferedLines`, or `maxOutputBytes`; access roots, blocked commands, the
-  command guardrail, shell, write limit, runtime name, and unrestricted mode stay local to the computer.
+- `get_runtime_info` reports the device runtime version, allowed roots, command policy, and limits. It is read-only; device configuration cannot be changed through MCP.
 - `get_runtime_stats` reports local counters for the current runtime session, which is useful when a tool keeps failing.
 - If a device reports that its runtime is restarting, wait a few seconds and retry once.
 
