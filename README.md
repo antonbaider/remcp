@@ -67,52 +67,56 @@ runtime and registers the background service.
 
 ## Plugins
 
-ReMCP ships **two independent plugin packages** from the same repository. They share the production
-MCP endpoint, OAuth service, paired-device model, and five operational skills, but keep host-specific
-manifests and release checks separate.
+For users, ReMCP is **catalog-first**:
 
-| | ChatGPT & Codex | Claude Code |
-| --- | --- | --- |
-| Ecosystem | OpenAI Plugins | Anthropic Plugins |
-| Manifest | `plugin.json` | `.claude-plugin/plugin.json` |
-| MCP config | `mcp.json` | `.mcp.json` |
-| Skills | five shared skills | the same five skills under `remcp:` |
-| Rich UI | file + image MCP Apps | host-native tool results |
-| Current state | production package + submission artifacts | **submitted Sep 18, 2026 · pending review** |
+**Install from your AI host → sign in to ReMCP → use your paired computers.**
 
-Start with [**Plugin overview →**](docs/PLUGINS.md).
+You do not need to paste an MCP server URL, edit a manifest, clone this repository, or configure a
+local path just to use the published plugin.
+
+Shareable install guides:
+
+- ChatGPT & Codex: <https://remcp.site/install/chatgpt>
+- Claude Code: <https://remcp.site/install/claude>
 
 ### ChatGPT & Codex / OpenAI
 
-The OpenAI package contains `plugin.json`, `mcp.json`, five workflows in `skills/`,
-`chatgpt-app-submission.json`, and release-checked portal archives. ReMCP also serves two
-self-contained MCP App resources so file edits and screenshots can render as rich previews in
-ChatGPT.
+ChatGPT and Codex share OpenAI's public plugin directory.
 
-The hosted OAuth issuer is `https://remcp.site`; it publishes protected-resource metadata, OAuth
-authorization-server metadata, OIDC discovery, and UserInfo. Reviewer credentials are never stored
-in this public repository.
+- ChatGPT: open <https://chatgpt.com/plugins>, search **ReMCP**, open the plugin card, and install it.
+- Codex CLI: run `/plugins`, search **ReMCP**, and install it from the plugin browser.
+- When prompted, complete ReMCP OAuth. After that, use the computers already paired to your account.
 
-Read [**ChatGPT & Codex plugin guide →**](docs/OPENAI_PLUGIN.md).
+OpenAI direct plugin detail URLs contain a platform-generated opaque connector ID. The final ReMCP
+direct link should therefore be copied from the published directory card, not guessed from the name.
 
 ### Claude Code / Anthropic
 
-Claude Code uses its own additive manifest and remote HTTP MCP configuration. It loads the shared
-skills under the `remcp:` namespace and discovers ReMCP OAuth from the production server.
+ReMCP was submitted through Claude Platform on **September 18, 2026** and currently shows
+**Submitted and pending review**.
 
-The plugin was submitted through Claude Platform on **September 18, 2026**. Anthropic accepted the
-submission and the Console currently shows **Submitted and pending review**. Until the directory
-listing is approved, load the public repository directly for development/testing:
+After approval, Anthropic's documented community-marketplace install path is:
 
-```bash
-claude plugin validate . --strict
-claude --plugin-dir .
+```text
+/plugin marketplace add anthropics/claude-plugins-community
+/plugin install remcp@claude-community
 ```
 
-Read [**Claude Code plugin guide →**](docs/CLAUDE_CODE_PLUGIN.md).
+That is Claude Code's plugin-manager flow. Users do not need `git clone`, `--plugin-dir`, or MCP
+configuration for normal catalog installation.
 
-> The OpenAI files and Claude files deliberately do not overwrite each other. Release checks fail if
-> either host-specific contract drifts from the shared ReMCP version or production endpoint.
+Start with [**Plugin overview →**](docs/PLUGINS.md).
+
+### Developer / reviewer internals
+
+Host-specific manifests, MCP configuration, validation commands, submission artifacts, and local
+development workflows remain documented separately:
+
+- [**ChatGPT & Codex developer guide →**](docs/OPENAI_PLUGIN.md)
+- [**Claude Code developer guide →**](docs/CLAUDE_CODE_PLUGIN.md)
+
+The OpenAI files and Claude files deliberately do not overwrite each other. Release checks fail if
+either host-specific contract drifts from the shared ReMCP version or production endpoint.
 
 ## The local runtime
 

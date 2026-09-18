@@ -1,5 +1,22 @@
 # Claude Code plugin — Anthropic
 
+## User install path
+
+ReMCP is currently **Submitted and pending review** in Anthropic's community marketplace.
+
+After approval, normal users install it through Claude Code's plugin manager:
+
+```text
+/plugin marketplace add anthropics/claude-plugins-community
+/plugin install remcp@claude-community
+```
+
+The community marketplace is added once. ReMCP is then installed by name. Users do **not** need to
+clone the repository, run `--plugin-dir`, paste an MCP endpoint, or edit `.mcp.json` for normal
+catalog installation.
+
+The rest of this document is for **developers and reviewers**.
+
 ReMCP ships a native Claude Code plugin alongside the separate OpenAI Plugins package. The two
 integrations share the same public skills, production MCP endpoint, OAuth service, and paired-device
 model, but use different manifests and validation paths so a change for one ecosystem cannot silently

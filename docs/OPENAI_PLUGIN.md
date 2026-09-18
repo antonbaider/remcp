@@ -1,5 +1,23 @@
 # ChatGPT & Codex plugin — OpenAI
 
+## User install path
+
+Normal users should **not** configure the MCP endpoint or edit plugin files.
+
+1. Open <https://chatgpt.com/plugins>.
+2. Search for **ReMCP**.
+3. Open the ReMCP card and choose the add/install action.
+4. Complete ReMCP OAuth when prompted.
+5. Start a new chat and ask ChatGPT or Codex to use ReMCP on a paired computer.
+
+In Codex CLI, run `/plugins`, search **ReMCP**, and install it from the same shared directory.
+
+OpenAI direct plugin detail URLs contain a platform-generated opaque connector identifier, so the
+final ReMCP direct URL must be copied from the published directory card rather than guessed from the
+plugin name.
+
+The rest of this document is for **developers and reviewers**.
+
 ReMCP ships a production OpenAI Plugins package for ChatGPT and Codex. It combines the hosted remote
 MCP server with five shared operational skills, review metadata, and two self-contained MCP App
 resources for file and image previews.
