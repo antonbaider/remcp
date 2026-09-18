@@ -4,7 +4,7 @@ import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
 import { resolveNpm } from './npm.mjs';
 import { isRuntimeSpecFor, normalizeRuntime } from './runtime.mjs';
-import { VERSION } from './version.mjs';
+import { PACKAGE_NAME, VERSION } from './version.mjs';
 
 const npm = resolveNpm();
 // How long a handing-over agent waits for its replacement to take the device over before it keeps
@@ -61,15 +61,27 @@ function isNewer(candidate, current) {
   return false;
 }
 
+export function updateInvocationArgs({ target, runtime }, trustRuntime = false) {
+  return [
+    'update',
+    ...(trustRuntime ? ['--trust-runtime'] : []),
+    ...(target ? ['--client', target] : []),
+    ...(runtime ? ['--runtime', runtime] : []),
+  ];
+}
+
 // What the agent should install, if anything. The client version alone is not enough: a machine
 // that already runs the newest client but an older local runtime would otherwise never catch up,
 // because its runtime is what executes the tools.
 export function updateDecision({ advertised, cliVersion, runtimeVersion, runtimePackageName, runtimeDown = false }) {
-  const cliSpec = String(advertised?.cli || '');
+  const advertisedCli = String(advertised?.cli || '');
   const advertisedRuntime = String(advertised?.runtime || '');
-  // A spec that is not a plain version of the configured runtime package is ignored rather than
-  // installed: this is the only place a server-chosen string reaches npm.
-  const runtimeSpec = runtimePackageName && advertisedRuntime && !isRuntimeSpecFor(runtimePackageName, advertisedRuntime) ? '' : advertisedRuntime;
+  // Only exact versions of the first-party client and the configured runtime package may cross
+  // from server metadata into the updater. Invalid specs are ignored instead of being handed to npm.
+  const cliSpec = advertisedCli && isRuntimeSpecFor(PACKAGE_NAME, advertisedCli) ? advertisedCli : '';
+  const runtimeSpec = runtimePackageName && advertisedRuntime && isRuntimeSpecFor(runtimePackageName, advertisedRuntime)
+    ? advertisedRuntime
+    : '';
   const installedRuntime = String(runtimeVersion || '');
   const runtimeKnown = Boolean(installedRuntime) && !/^unknown$/i.test(installedRuntime);
   if (isNewer(cliSpec, cliVersion)) return { needed: true, target: cliSpec, runtime: runtimeSpec, reason: 'client' };
