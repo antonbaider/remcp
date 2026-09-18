@@ -15,6 +15,15 @@ After approval, the preferred user flow is:
 Users do **not** need to clone the repository, run `--plugin-dir`, paste an MCP endpoint, or edit
 `.mcp.json` for normal catalog installation.
 
+After approval, Claude Code terminal users can install from Anthropic's community marketplace with:
+
+```text
+/plugin marketplace add anthropics/claude-plugins-community
+/plugin install remcp@claude-community
+```
+
+The marketplace is added once per user. The normal Claude Plugins directory remains the preferred visual install path.
+
 ### Early access while review is pending
 
 ReMCP also publishes a validated public marketplace for users who need Claude Code access before the
