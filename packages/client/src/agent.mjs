@@ -77,6 +77,7 @@ export async function runAgent(options) {
   const inFlight = new Map();
   let activeSocket;
   let reconnects = 0;
+  let reconnectTimer = null;
   // Set when a replica asks this agent to move before it is replaced; the close handler reads it.
   let askedToReconnect = false;
   let pendingRequests = 0;
@@ -219,6 +220,26 @@ export async function runAgent(options) {
     }
   }
 
+  function scheduleReconnect(delay) {
+    if (stopping || revoked || reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, delay);
+    reconnectTimer.unref?.();
+  }
+
+  function scheduleBackoffReconnect() {
+    if (stopping || revoked || reconnectTimer) return;
+    reconnects += 1;
+    // The first retry after an unexpected drop is quick on purpose: a deploy blip, a proxy restart or
+    // a dropped packet should cost a fraction of a second, not the two seconds the backoff starts at.
+    const delay = reconnects === 1
+      ? jitter(RECONNECT_FIRST_MS)
+      : jitter(Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(reconnects, 5)));
+    scheduleReconnect(delay);
+  }
+
   async function respond(ws, message) {
     pendingRequests += 1;
     // The relay forwards a cancel when the MCP client goes away. Without it a cancelled tool call
@@ -250,15 +271,29 @@ export async function runAgent(options) {
   function connect() {
     if (stopping) return;
     const ws = new WebSocket(agentUrl, { headers: { Authorization: `Bearer ${deviceToken}` } });
-    // A revoked device is refused during the handshake with a 401 and this header, because a bare
-    // rejection looked like a network problem (close 1006) and the agent retried it forever.
-    ws.on('unexpected-response', (_request, response) => {
-      if (String(response.headers['x-remcp-revoked'] || '') === '1') revoked = true;
-      console.error(`ReMCP relay refused the connection (HTTP ${response.statusCode})${revoked ? ': this device was revoked' : ''}.`);
+    // The ws client leaves cleanup/retry to the caller when an unexpected-response listener exists.
+    // A temporary workspace pause therefore needs an explicit retry; otherwise the first 423 leaves
+    // this WebSocket stuck in CONNECTING forever and turning the device back on cannot recover it.
+    ws.on('unexpected-response', (request, response) => {
+      const handshakeRevoked = String(response.headers['x-remcp-revoked'] || '') === '1';
+      const handshakeDisabled = String(response.headers['x-remcp-disabled'] || '') === '1';
+      if (handshakeRevoked) revoked = true;
+      console.error(`ReMCP relay refused the connection (HTTP ${response.statusCode})${handshakeRevoked ? ': this device was revoked' : handshakeDisabled ? ': this device is temporarily disabled' : ''}.`);
       response.resume();
+      request.destroy();
+      if (handshakeDisabled && !revoked) {
+        reconnects += 1;
+        // Service access is a user-controlled pause, not an outage. Poll slowly enough not to hammer
+        // the relay, but cap recovery so an enable action becomes effective within seconds.
+        scheduleReconnect(jitter(RECONNECT_BASE_MS));
+      }
     });
     activeSocket = ws;
     ws.on('open', () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       reconnects = 0;
       ws.send(JSON.stringify({
         type: 'hello',
@@ -303,7 +338,7 @@ export async function runAgent(options) {
         askedToReconnect = false;
         reconnects = 0;
         console.log('ReMCP relay is being redeployed; reconnecting now.');
-        setTimeout(connect, 150);
+        scheduleReconnect(150);
         return;
       }
       if (code === 1008 || revoked) {
@@ -321,13 +356,7 @@ export async function runAgent(options) {
         void stop().finally(() => setTimeout(() => process.exit(0), 100));
         return;
       }
-      reconnects += 1;
-      // The first retry after an unexpected drop is quick on purpose: a deploy blip, a proxy restart or
-      // a dropped packet should cost a fraction of a second, not the two seconds the backoff starts at.
-      const delay = reconnects === 1
-        ? jitter(RECONNECT_FIRST_MS)
-        : jitter(Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(reconnects, 5)));
-      setTimeout(connect, delay);
+      scheduleBackoffReconnect();
     });
     ws.on('error', error => console.error(`ReMCP relay: ${error.message}`));
   }
@@ -443,6 +472,8 @@ export async function runAgent(options) {
     if (stopPromise) return stopPromise;
     stopping = true;
     clearTimeout(runtimeRestartTimer);
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
     if (telemetryTimer) clearInterval(telemetryTimer);
     clearInterval(telemetryFlushTimer);
     clearInterval(updateTimer);

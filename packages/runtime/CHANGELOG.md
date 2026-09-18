@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.43 — 2026-09-19
+
+- Lockstep patch release with the ReMCP client. Runtime behavior is unchanged from 0.2.42; the release keeps client and runtime on the same immutable version while the client fixes automatic reconnect after a temporary device pause.
+
 ## 0.2.36 — 2026-09-18
 
 - Documentation and runtime introspection now describe the current 44-tool local surface instead of
