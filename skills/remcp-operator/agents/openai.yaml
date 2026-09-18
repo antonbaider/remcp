@@ -1,6 +1,6 @@
 interface:
   display_name: "ReMCP operator"
-  short_description: "Operate a paired computer safely: read, change, verify"
+  short_description: "Operate a paired computer safely, including screenshot-based visual verification"
   default_prompt: "Inspect my project on the paired laptop and tell me what changed."
 dependencies:
   tools:
