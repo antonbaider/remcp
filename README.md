@@ -79,6 +79,17 @@ discovery at `/.well-known/openid-configuration`, and UserInfo at `/oauth/userin
 restrictions require the linked account's verified email and workspace domain verification.
 The front end, backend and database are deployed from the separate `remcp-full` repository.
 
+## Claude Code plugin
+
+The same repository root is also a native Claude Code plugin. Claude-specific packaging is additive: `.claude-plugin/plugin.json` and `.mcp.json` sit beside, and do not replace, the existing OpenAI `plugin.json` and `mcp.json`.
+
+```bash
+claude plugin validate . --strict
+claude --plugin-dir .
+```
+
+Claude Code loads the five skills under the `remcp:` namespace and connects to `https://remcp.site/mcp` over the recommended remote HTTP transport. OAuth is discovered from the server; no access token or client secret is stored in this repository. See [`docs/CLAUDE_CODE_PLUGIN.md`](docs/CLAUDE_CODE_PLUGIN.md) for validation and Anthropic community submission.
+
 ## The local runtime
 
 `@remcp/runtime` is a clean-room MCP server written for ReMCP. It is not a fork of, and shares no code
