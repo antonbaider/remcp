@@ -1,0 +1,11 @@
+interface:
+  display_name: "Run and watch processes"
+  short_description: "Start a server or build on a paired machine and follow its output"
+  default_prompt: "Start my dev server on the paired machine and tell me when it is ready."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "remcp"
+      description: "Tools for computers explicitly paired with ReMCP"
+      transport: "streamable_http"
+      url: "https://remcp.site/mcp"

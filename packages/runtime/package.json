@@ -1,0 +1,50 @@
+{
+  "name": "@remcp/runtime",
+  "version": "0.2.42",
+  "description": "First-party ReMCP local device runtime: file, search, terminal and process tools over MCP for computers paired with ReMCP.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://remcp.site",
+  "author": "Anton Baider",
+  "bin": {
+    "remcp-runtime": "src/index.mjs"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@jellybrick/dbus-next": "^0.11.3",
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antonbaider/remcp.git",
+    "directory": "packages/runtime"
+  },
+  "bugs": {
+    "url": "https://github.com/antonbaider/remcp/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "remcp",
+    "remote",
+    "terminal",
+    "filesystem",
+    "self-hosted"
+  ]
+}

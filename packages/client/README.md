@@ -1,0 +1,130 @@
+# Device client
+
+`@remcp/remcp` is the ReMCP device client. It pairs a computer with ReMCP, installs the first-party
+local runtime, and runs the outbound-only agent that serves your MCP client's tool calls.
+
+```bash
+npm install --global @remcp/remcp@latest
+remcp --version
+remcp status
+```
+
+Pairing commands are generated in the workspace at <https://remcp.site/app/connect>. The
+generated command runs `remcp connect --server … --code … --install`, which stores a per-device
+credential under `~/.config/remcp/`, installs the runtime from npm, and registers a user service
+(systemd on Linux, LaunchAgent on macOS, Scheduled Task on Windows).
+
+## Commands
+
+```text
+remcp start                  Run the device agent in the foreground
+remcp status                 Show version, pairing, runtime, telemetry and server health as JSON
+remcp doctor                 Same report plus a real tool handshake with the local runtime, and which
+                             macOS privacy folders (Desktop, Documents, Downloads, iCloud Drive) this
+                             computer currently lets ReMCP use
+remcp update                 Update the client and runtime, then restart the user service
+remcp install                Install or repair the user service
+remcp uninstall              Remove the user service
+remcp uninstall --purge      Remove the service and the global packages
+remcp telemetry [status|on|off]
+remcp godmode [status|on|off]
+remcp --version
+```
+
+`remcp status` reports the runtime the device would install, whether the agent service is running,
+and the current usage-metrics state, so a support request can be answered with one paste.
+
+## Unrestricted mode
+
+`remcp godmode on` removes the runtime's own safety rails on **this** computer: file access is no
+longer confined to the allowed roots, the configured command blocklist is ignored, and the
+catastrophic-command guardrail is set to allow. `remcp godmode off` puts them back; `remcp godmode
+status` says which state you are in and where it comes from.
+
+Two things it deliberately does not do:
+
+- **It is not reachable from a model.** `set_config_value` lists the settings a model may change and
+  this is not one of them; only a person at the computer (this command, `REMCP_RUNTIME_UNRESTRICTED=1`,
+  or `unrestricted: true` in `~/.config/remcp/runtime.json`) can turn it on. That is what keeps a
+  prompt injection from becoming root.
+- **It does not make the agent root.** Commands run as the user the agent runs as. `sudo` is no longer
+  blocked, but the operating system still asks for a password unless your sudoers rules say otherwise;
+  a non-interactive command cannot type one. Nothing in this mode grants root by itself.
+
+While it is on, `get_runtime_info` reports `policy.unrestricted: true`, so the model can see it and
+say so instead of assuming the guardrails are still there.
+
+## macOS folder permissions
+
+macOS protects Desktop, Documents, Downloads and iCloud Drive. Until it is granted access, ReMCP
+answers those writes with the errno the kernel returns:
+`EACCES: permission denied, mkdir '/Users/you/Desktop/…'` — on a Mac this is not a ReMCP setting and
+not an access-root problem. The tools cannot prompt for it either, because the agent runs as a
+background service: open **System Settings → Privacy & Security → Full Disk Access**, add the `node`
+binary that `remcp doctor` prints, and run `remcp start`. Folders outside those four need no new
+permission, and `remcp doctor` reports the state of each one.
+
+## Updates
+
+The agent asks the server which versions it should run when it connects and every six hours, installs
+a newer client and runtime in the background, and restarts the service so they take effect. A failed
+install is retried no more often than every thirty minutes, so a broken release cannot turn into an
+install loop. `remcp update` does the same immediately; `remcp auto-update off` turns the automatic
+check off for a machine that must not change on its own.
+
+## Screenshots
+
+`take_screenshot` returns the screen of this computer as an image, and each desktop keeps its own
+gate — ReMCP names the one that refused instead of printing a generic error:
+
+- **macOS** wants Screen Recording for the binary that runs the tools (`remcp doctor` prints its
+  path), then `remcp start`.
+- **Windows** needs an unlocked interactive session; a locked or signed-out machine cannot be
+  captured.
+- **Linux on Wayland** needs a capture backend: `grim` on wlroots desktops (sway, hyprland), and
+  `gnome-screenshot` on GNOME — GNOME refuses the shell's own screenshot API to background processes
+  and `grim` cannot read a GNOME session. On X11, `scrot`, ImageMagick `import` or `gnome-screenshot`
+  all work.
+- A machine with no graphical session (a server, a container) says so: there is nothing to capture.
+
+A screenshot larger than the inline limit is saved on the computer, and the result says where it is
+and how to fetch it in chunks.
+
+## What runs on your computer
+
+- the agent (`remcp start`), which holds the device credential and dials
+  `wss://remcp.site/agent`;
+- [`@remcp/runtime`](https://www.npmjs.com/package/@remcp/runtime), spawned by the agent as an MCP
+  stdio server. The runtime executes the tools, opens no network connection, and is supervised: if it
+  exits, the agent restarts it with backoff and reports the restart instead of failing silently.
+
+Configuration lives in `~/.config/remcp/config.json` (client) and `~/.config/remcp/runtime.json`
+(runtime: allowed roots, blocked commands, output and write limits, and the usage-metrics switch).
+Run `npx @remcp/runtime --describe` to print the runtime's effective configuration.
+
+## Usage metrics
+
+Opt-out, self-hosted, and limited to tool names, timings, outcomes, error classes, and device health
+samples. No paths, no commands, no arguments, no output, no third-party endpoint, no install ping.
+Disable with `remcp telemetry off` or `REMCP_RUNTIME_DISABLE_TELEMETRY=1`; the switch applies to both
+the client and the runtime, and restarts the service so it takes effect immediately.
+
+## Security
+
+- Outbound-only connection; the machine never listens.
+- One revocable credential per paired device, stored with restrictive permissions.
+- Runtime metadata from a custom server is only accepted with an explicit `--trust-runtime`.
+- Revoking a device in the workspace closes the connection; the agent then stops retrying and says so
+  instead of reconnecting forever.
+
+## Development
+
+```bash
+npm install
+npm run check
+npm test
+```
+
+## License
+
+MIT.

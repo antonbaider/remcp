@@ -1,0 +1,23 @@
+{
+  "name": "remcp",
+  "version": "0.2.42",
+  "private": true,
+  "description": "ReMCP: secure remote MCP bridge. Device client and first-party local runtime.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://remcp.site",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "check": "node scripts/check-plugin.mjs && npm run check --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antonbaider/remcp.git"
+  }
+}

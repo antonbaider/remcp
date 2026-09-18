@@ -1,0 +1,11 @@
+interface:
+  display_name: "Change code and verify"
+  short_description: "Edit code, run checks, and visually verify rendered results"
+  default_prompt: "Fix my project on the paired machine, run its own checks, and if the result is visible capture and inspect a fresh screenshot before reporting completion."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "remcp"
+      description: "Tools for computers explicitly paired with ReMCP"
+      transport: "streamable_http"
+      url: "https://remcp.site/mcp"
