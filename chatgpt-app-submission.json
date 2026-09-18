@@ -635,43 +635,43 @@
   },
   "test_cases": [
     {
-      "description": "List the computers available to the signed-in ReMCP account.",
+      "description": "Fixture: use the dedicated reviewer OAuth account; no paired computer is required. List the account computers and verify the hosted review fixture is not exposed as a real device.",
       "user_prompt": "List my ReMCP devices and tell me which ones are online.",
       "file_attachment_urls": null,
       "tools_triggered": "list_devices",
-      "expected_output": "Returns the computers paired to the authenticated account with their online state. The hosted ReMCP Review Sandbox is not one of the account’s computers and is therefore not listed; it stays addressable by device id review-sandbox for the tool-practice cases below.",
+      "expected_output": "Returns a device list with user-facing machine identity and online state; an empty real-device list is valid. The fixed review-sandbox fixture is intentionally absent.",
       "expected_output_url": null
     },
     {
-      "description": "Browse a directory on a paired review computer.",
+      "description": "Fixture: use the dedicated reviewer OAuth account and fixed device id review-sandbox. Its seeded workspace contains README.txt. Browse the sandbox workspace without changing it.",
       "user_prompt": "Using ReMCP device id review-sandbox, list the files in /workspace.",
       "file_attachment_urls": null,
       "tools_triggered": "list_directory",
-      "expected_output": "Returns the isolated sandbox directory entries without changing them.",
+      "expected_output": "Returns the sandbox directory entries, including the seeded README fixture, without modifying the workspace.",
       "expected_output_url": null
     },
     {
-      "description": "Read a text file from a paired review computer.",
+      "description": "Fixture: use the dedicated reviewer OAuth account and fixed device id review-sandbox with the seeded README.txt fixture. Read and summarize the seeded text file.",
       "user_prompt": "Using ReMCP device id review-sandbox, read /workspace/README.txt and summarize it.",
       "file_attachment_urls": null,
       "tools_triggered": "read_file",
-      "expected_output": "Returns the seeded review-sandbox README content so it can be summarized.",
+      "expected_output": "Returns the seeded review README as text so ChatGPT can summarize it; no real computer data is read.",
       "expected_output_url": null
     },
     {
-      "description": "Render the screenshot preview safely with the hosted review fixture.",
+      "description": "Fixture: use the dedicated reviewer OAuth account and fixed device id review-sandbox. Its screenshot action returns a labelled synthetic PNG. Exercise the image preview end to end.",
       "user_prompt": "Using ReMCP device id review-sandbox, take a screenshot and show it.",
       "file_attachment_urls": null,
       "tools_triggered": "take_screenshot",
-      "expected_output": "Returns the clearly labelled synthetic Review Sandbox PNG as native image content and renders the image/screenshot preview component. No real computer or private screen is captured.",
+      "expected_output": "Returns the labelled synthetic Review Sandbox PNG as native image content and renders the image/screenshot preview component; no real screen is captured.",
       "expected_output_url": null
     },
     {
-      "description": "Create a new file on a paired review computer at the user request.",
+      "description": "Fixture: use the dedicated reviewer OAuth account and fixed device id review-sandbox with its writable sandbox workspace. Exercise the exact-content write case.",
       "user_prompt": "Using ReMCP device id review-sandbox, create /workspace/review-note.txt containing exactly: ReMCP submission test.",
       "file_attachment_urls": null,
       "tools_triggered": "write_file",
-      "expected_output": "Creates the requested file only inside the authenticated reviewer sandbox and reports the write result. write_file is annotated destructiveHint: true because it replaces file content, which is why the request names the exact path and content.",
+      "expected_output": "Creates or replaces only the requested sandbox review note with the exact text and returns the write result. No real computer is modified.",
       "expected_output_url": null
     }
   ],
