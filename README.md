@@ -20,6 +20,7 @@
   <a href="https://remcp.site/plugins">Plugins</a> ·
   <a href="https://remcp.site/docs">Docs</a> ·
   <a href="https://remcp.site/security">Security</a> ·
+  <a href="https://remcp.site/privacy">Privacy</a> ·
   <a href="https://remcp.site/support">Support</a>
 </p>
 
