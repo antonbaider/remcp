@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.46 — 2026-09-19
+
+- Lockstep release with the ReMCP client. Runtime behavior is unchanged from 0.2.45; the client makes all macOS service restarts use a detached launchd handoff so commands initiated from inside the agent cannot terminate their own updater or settings operation.
+
 ## 0.2.45 — 2026-09-19
 
 - Lockstep hotfix with the ReMCP client. Runtime behavior is unchanged from 0.2.44; the paired release fixes macOS self-update handoff so a client update launched from inside ReMCP cannot kill its own repair process.

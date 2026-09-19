@@ -65,23 +65,41 @@ function macJobLoaded(target) {
   return spawnSync('launchctl', ['print', target], { stdio: 'ignore' }).status === 0;
 }
 
-function scheduleMacServiceReload(domain, target) {
+function submitMacHelper(kind, lines) {
   fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
-  const helperFile = path.join(configDir, `launchd-reload-${process.pid}.sh`);
-  const helperLabel = `${macServiceLabel}.reload.${process.pid}`;
+  const nonce = `${process.pid}.${Date.now()}`;
+  const helperFile = path.join(configDir, `launchd-${kind}-${nonce}.sh`);
+  const helperLabel = `${macServiceLabel}.${kind}.${nonce}`;
   const script = [
     '#!/bin/sh',
     'sleep 1',
-    `launchctl bootout ${shellQuote(target)} >/dev/null 2>&1 || true`,
-    `launchctl bootstrap ${shellQuote(domain)} ${shellQuote(macServiceFile)}`,
-    `launchctl enable ${shellQuote(target)}`,
-    `launchctl kickstart -k ${shellQuote(target)}`,
+    'status=0',
+    ...lines.map(line => `${line} || status=$?`),
+    `if [ "$status" -ne 0 ]; then echo "ReMCP launchd ${kind} helper failed with status $status" >> ${shellQuote(macLogFile)}; fi`,
     `rm -f ${shellQuote(helperFile)}`,
+    `launchctl remove ${shellQuote(helperLabel)} >/dev/null 2>&1 || true`,
+    'exit 0',
     '',
   ].join('\n');
   fs.writeFileSync(helperFile, script, { mode: 0o700 });
   fs.chmodSync(helperFile, 0o700);
   run('launchctl', ['submit', '-l', helperLabel, '--', '/bin/sh', helperFile]);
+  return helperLabel;
+}
+
+function scheduleMacServiceReload(domain, target) {
+  return submitMacHelper('reload', [
+    `launchctl bootout ${shellQuote(target)} >/dev/null 2>&1 || true`,
+    `launchctl bootstrap ${shellQuote(domain)} ${shellQuote(macServiceFile)}`,
+    `launchctl enable ${shellQuote(target)}`,
+    `launchctl kickstart -k ${shellQuote(target)}`,
+  ]);
+}
+
+function scheduleMacServiceRestart(target) {
+  return submitMacHelper('restart', [
+    `launchctl kickstart -k ${shellQuote(target)}`,
+  ]);
 }
 
 export function installMacService(cliPath = globalCliPath(), { restart = true } = {}) {
@@ -255,12 +273,14 @@ export function restartPersistentServiceIfInstalled(config) {
     return 'remcp-agent.service';
   }
   if (platform === 'darwin' && fs.existsSync(macServiceFile)) {
-    try {
-      run('launchctl', ['kickstart', '-k', `${macLaunchDomain()}/${macServiceLabel}`]);
-    } catch {
+    const target = `${macLaunchDomain()}/${macServiceLabel}`;
+    if (macJobLoaded(target)) {
+      // Never kill a loaded LaunchAgent inline: the caller may itself be a child of that job.
+      // A transient helper survives the handoff and performs the restart after this CLI returns.
+      scheduleMacServiceRestart(target);
+    } else {
       // A plist can survive while launchd has no loaded job (older installs, logout/login cleanup,
-      // manual bootout, or a failed previous update). Re-register the job instead of surfacing the
-      // opaque launchctl 113 error. installMacService is idempotent and rewrites stale Node paths too.
+      // manual bootout, or a failed previous update). Re-register it directly.
       installMacService(globalCliPath());
     }
     return macServiceLabel;

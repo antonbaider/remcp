@@ -173,7 +173,8 @@ test('a legacy macOS install re-bootstraps an unloaded LaunchAgent during update
   const calls = readFileSync(log, 'utf8');
   assert.doesNotMatch(calls, /launchctl bootout/, 'an already-unloaded job can be bootstrapped directly');
   assert.match(calls, /launchctl bootstrap/);
-  assert.match(calls, /launchctl kickstart -k/);
+  assert.match(calls, /launchctl submit -l com\.remcp\.agent\.restart\./,
+    'the post-update restart is handed to an independent launchd helper');
 });
 
 
@@ -355,5 +356,50 @@ test('an update of an already-loaded macOS service never boots out its own updat
   assert.match(calls, /launchctl print gui\/\d+\/com\.remcp\.agent/);
   assert.doesNotMatch(calls, /launchctl bootout/, 'an in-place update must not unload the job that owns the updater');
   assert.doesNotMatch(calls, /launchctl bootstrap/, 'an already-loaded unchanged job does not need re-bootstrap');
-  assert.match(calls, /launchctl kickstart -k gui\/\d+\/com\.remcp\.agent/);
+  assert.match(calls, /launchctl submit -l com\.remcp\.agent\.restart\./,
+    'the loaded service is restarted out-of-process after the updater returns');
+});
+
+
+test('macOS preference changes restart a loaded agent through the detached helper too', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'remcp-cli-'));
+  const home = path.join(root, 'home');
+  const fakeBin = path.join(root, 'bin');
+  const configDir = path.join(root, 'config');
+  const log = path.join(root, 'calls.log');
+  mkdirSync(home, { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
+    configSchemaVersion: 1,
+    serverUrl: 'https://example.invalid',
+    serviceInstalled: true,
+  }));
+  writeFileSync(path.join(configDir, 'runtime.json'), JSON.stringify({ telemetryEnabled: true }));
+  fakeExecutable(path.join(fakeBin, 'launchctl'), [
+    'echo "launchctl $@" >> "$REMCP_TEST_LOG"',
+    'if [ "$1" = "print" ]; then exit 0; fi',
+    'exit 0',
+  ].join('\n'));
+  const plistFile = path.join(home, 'Library', 'LaunchAgents', 'com.remcp.agent.plist');
+  mkdirSync(path.dirname(plistFile), { recursive: true });
+  writeFileSync(plistFile, '<plist><dict></dict></plist>\n');
+
+  const env = {
+    ...process.env,
+    HOME: home,
+    REMCP_CONFIG_DIR: configDir,
+    REMCP_TEST_LOG: log,
+    NODE_ENV: 'test',
+    REMCP_TEST_PLATFORM: 'darwin',
+    PATH: `${fakeBin}:${process.env.PATH}`,
+  };
+  const result = spawnSync(process.execPath, [bin, 'telemetry', 'off'], { env, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const calls = readFileSync(log, 'utf8');
+  assert.match(calls, /launchctl print gui\/\d+\/com\.remcp\.agent/);
+  assert.match(calls, /launchctl submit -l com\.remcp\.agent\.restart\./);
+  assert.doesNotMatch(calls, /launchctl bootout/);
+  assert.doesNotMatch(calls, /launchctl kickstart -k/, 'the caller must return before the helper performs the destructive restart');
 });
