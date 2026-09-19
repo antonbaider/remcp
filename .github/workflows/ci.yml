@@ -171,3 +171,35 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" submission/remcp-plugin.zip submission/remcp-skills-only.zip chatgpt-app-submission.json --title "ReMCP $version" --notes-file "$notes" --verify-tag
           fi
+
+
+  publish-mcp-registry:
+    name: publish to official MCP Registry
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install verified mcp-publisher 1.8.1
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --location \
+            --output /tmp/mcp-publisher.tar.gz \
+            https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz
+          echo 'a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc  /tmp/mcp-publisher.tar.gz' | sha256sum --check
+          tar -xzf /tmp/mcp-publisher.tar.gz -C /tmp mcp-publisher
+          chmod +x /tmp/mcp-publisher
+          /tmp/mcp-publisher --version
+      - name: Validate registry metadata
+        run: /tmp/mcp-publisher validate server.json
+      - name: Authenticate with GitHub Actions OIDC
+        run: /tmp/mcp-publisher login github-oidc
+      - name: Publish current ReMCP version
+        run: /tmp/mcp-publisher publish server.json
