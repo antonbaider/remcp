@@ -83,9 +83,11 @@ Shareable install guides:
 
 ChatGPT and Codex share OpenAI's public plugin directory.
 
-- ChatGPT: open <https://chatgpt.com/plugins?q=ReMCP>, open the ReMCP card when it is available, and choose **Install plugin**.
-- Codex: in a supported task view open **Sources → Use plugins**, then search for and select the installed **ReMCP** plugin.
-- When prompted, choose **Connect** and complete ReMCP OAuth. After that, use the computers already paired to your account.
+1. Open <https://chatgpt.com/plugins>.
+2. Search for **ReMCP** and open the ReMCP plugin card when it is available.
+3. Choose **Install plugin**.
+4. If prompted, choose **Connect** and complete ReMCP OAuth.
+5. In ChatGPT, use **@ReMCP** when you want to invoke it explicitly. In Codex, use **Sources → Use plugins → ReMCP**.
 
 If ReMCP is not visible yet, the listing or rollout is not available to that account. There is no
 manual MCP endpoint an ordinary plugin user needs to configure while waiting.
@@ -95,25 +97,16 @@ manual MCP endpoint an ordinary plugin user needs to configure while waiting.
 ReMCP was submitted through Claude Platform on **September 18, 2026** and currently shows
 **Submitted and pending review**.
 
-After approval, the preferred user path is **https://claude.com/plugins** → search **ReMCP** →
-**Install** → complete ReMCP authorization.
+After approval:
 
-Claude Code terminal users can also use Anthropic's community marketplace after approval:
+1. Open <https://claude.com/plugins>. In Claude or Claude Desktop, you can also use **Customize → Plugins → + → Browse plugins**.
+2. Search for **ReMCP** and confirm it supports Claude Code.
+3. Choose **Install**.
+4. Complete ReMCP authorization if Claude asks you to connect.
+5. Ask Claude Code to use ReMCP on a computer already paired to your account.
 
-```text
-/plugin marketplace add anthropics/claude-plugins-community
-/plugin install remcp@claude-community
-```
-
-Until the directory listing is approved, ReMCP also publishes a validated early-access marketplace:
-
-```bash
-claude plugin marketplace add antonbaider/remcp
-claude plugin install remcp@remcp --scope user
-```
-
-That optional fallback uses Claude Code's supported marketplace mechanism. Users still do not need
-`git clone`, `--plugin-dir`, or a manual MCP endpoint.
+While the listing is under review, ordinary users do not need to add a marketplace, clone this
+repository, or paste an MCP endpoint. Developer and reviewer workflows live in the technical guide.
 
 Start with [**Plugin overview →**](docs/PLUGINS.md).
 

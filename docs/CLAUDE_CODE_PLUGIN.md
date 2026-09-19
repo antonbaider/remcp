@@ -6,43 +6,18 @@ ReMCP is currently **Submitted and pending review** in Anthropic's plugin direct
 
 After approval, the preferred user flow is:
 
-1. Open <https://claude.com/plugins>.
+1. Open <https://claude.com/plugins> or, in Claude Desktop, use **+ → Plugins → Add plugin**.
 2. Filter for **Claude Code** if needed.
 3. Search for **ReMCP**.
 4. Choose **Install**.
-5. Complete ReMCP OAuth when Claude requests authorization.
+5. Complete ReMCP authorization if Claude asks you to connect.
+6. Ask Claude Code to use ReMCP on a computer already paired to your account.
 
-Users do **not** need to clone the repository, run `--plugin-dir`, paste an MCP endpoint, or edit
-`.mcp.json` for normal catalog installation.
+That is the complete normal-user setup. The plugin already carries the server connection and skills.
+Users do not need a repository clone, a local path, or manual MCP configuration.
 
-After approval, Claude Code terminal users can install from Anthropic's community marketplace with:
-
-```text
-/plugin marketplace add anthropics/claude-plugins-community
-/plugin install remcp@claude-community
-```
-
-The marketplace is added once per user. The normal Claude Plugins directory remains the preferred visual install path.
-
-### Early access while review is pending
-
-ReMCP also publishes a validated public marketplace for users who need Claude Code access before the
-directory listing is approved:
-
-```bash
-claude plugin marketplace add antonbaider/remcp
-claude plugin install remcp@remcp --scope user
-```
-
-Inside an already-open Claude Code session:
-
-```text
-/plugin marketplace add antonbaider/remcp
-/plugin install remcp@remcp
-```
-
-This early-access route uses Claude Code's supported marketplace mechanism. It does not require a
-repository clone or a manual MCP endpoint.
+While the public listing is still under review, ordinary users should wait for the directory entry
+rather than copy developer setup commands from this document.
 
 The rest of this document is for **developers and reviewers**.
 
@@ -123,11 +98,11 @@ Anthropic accepted the submission and currently reports **Submitted and pending 
 root is the repository root. The candidate passed both the repository-owned contract check and
 `claude plugin validate . --strict` before submission.
 
-Until Anthropic marks the directory entry approved, the public ReMCP marketplace above is the supported
-user early-access path. The local `--plugin-dir` flow is for development and smoke testing only.
+Until Anthropic marks the directory entry approved, the public install guide should continue to show
+the listing as pending. The local `--plugin-dir` flow is for development and smoke testing only.
 
-When the directory listing is live, promote the directory Install button as the primary user path and
-keep the ReMCP marketplace as an optional advanced fallback.
+When the directory listing is live, update the public install guide to link to the published ReMCP
+card and keep all developer-only commands in this technical document.
 
 ## Release safety
 

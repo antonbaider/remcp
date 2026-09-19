@@ -29,8 +29,8 @@ check(claudeMcp?.mcpServers?.remcp?.url === endpoint, 'Claude MCP config must po
 
 check(gemini.name === 'remcp', 'Gemini extension name must be remcp');
 check(gemini.version === version, 'Gemini extension version must match package.json');
-check(gemini?.mcpServers?.remcp?.url === endpoint, 'Gemini extension must point at the production MCP endpoint');
-check(gemini?.mcpServers?.remcp?.type === 'http', 'Gemini extension must use Streamable HTTP');
+check(gemini?.mcpServers?.remcp?.httpUrl === endpoint, 'Gemini extension must point at the production Streamable HTTP endpoint');
+check(!('url' in (gemini?.mcpServers?.remcp || {})), 'Gemini extension must not declare the Streamable HTTP endpoint as an SSE url');
 check(gemini?.mcpServers?.remcp?.authProviderType === 'dynamic_discovery', 'Gemini extension must use OAuth dynamic discovery');
 
 check(registry.name === 'io.github.antonbaider/remcp', 'MCP Registry name must stay in the GitHub-authenticated namespace');
