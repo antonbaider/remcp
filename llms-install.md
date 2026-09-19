@@ -37,3 +37,41 @@ After authorization and pairing:
 4. Use file or terminal tools only on the computer the user explicitly selected.
 
 If no computer is paired yet, `list_devices` returns the current connection instructions.
+
+
+## Host-specific install paths
+
+Use a catalog entry when the host already lists ReMCP. When a host supports direct remote-MCP
+configuration, these are the supported shortcuts.
+
+### Gemini CLI
+
+ReMCP ships a native Gemini CLI extension manifest:
+
+```bash
+gemini extensions install https://github.com/antonbaider/remcp
+```
+
+Restart the Gemini CLI session after installation, complete OAuth when prompted, then verify with
+`list_devices`.
+
+### Cline
+
+ReMCP's hosted endpoint can be registered directly with Cline:
+
+```bash
+cline mcp add remcp https://remcp.site/mcp --transport streamable-http --yes
+```
+
+Complete the browser authorization flow when Cline requests it. The Cline Marketplace submission is
+tracked at <https://github.com/cline/mcp-marketplace/issues/2573>.
+
+### Discovery directories
+
+The same production remote is published or indexed at:
+
+- Smithery: <https://smithery.ai/servers/antonbaider/remcp>
+- Glama: <https://glama.ai/mcp/servers/antonbaider/remcp>
+- Official MCP Registry name: `io.github.antonbaider/remcp`
+
+These directories do not create a second ReMCP account or a separate device fleet.

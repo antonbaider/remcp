@@ -9,10 +9,13 @@ ReMCP keeps one public source repository and publishes host-native discovery met
 | ChatGPT & Codex | OpenAI plugin directory | submitted / platform-controlled rollout |
 | Claude Code | Claude Plugins directory | submitted, pending review |
 | Cursor | Cursor Marketplace | published |
-| Gemini CLI | Gemini CLI Extension Gallery | auto-indexed after the public repository carries the `gemini-cli-extension` GitHub topic |
-| GitHub Copilot CLI | Awesome Copilot default marketplace + ReMCP marketplace fallback | external submission |
-| VS Code Agent Plugins | Awesome Copilot default marketplace + install from source | same Agent Plugin package |
-| Official MCP Registry | registry.modelcontextprotocol.io | remote Streamable HTTP server |
+| Gemini CLI | Gemini CLI Extension Gallery + direct GitHub install | gallery discovery enabled; native extension validated |
+| GitHub Copilot CLI | Awesome Copilot default marketplace | external submission under review |
+| VS Code Agent Plugins | Awesome Copilot / `@agentPlugins` | same external submission and Agent Plugins 1.0 package |
+| Cline | Cline MCP Marketplace | external submission under review |
+| Smithery | smithery.ai/servers/antonbaider/remcp | published |
+| Glama | glama.ai/mcp/servers/antonbaider/remcp | indexed / listed |
+| Official MCP Registry | registry.modelcontextprotocol.io | published remote Streamable HTTP server |
 
 For ordinary users, the product flow is always:
 

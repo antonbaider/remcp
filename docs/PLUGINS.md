@@ -13,10 +13,12 @@ You do **not** need to paste an MCP server URL, edit a manifest, clone the repos
 
 Shareable install guides:
 
+- All integrations and current status: <https://remcp.site/plugins>
 - ChatGPT & Codex: <https://remcp.site/install/chatgpt>
 - Claude Code: <https://remcp.site/install/claude>
+- Cursor Marketplace: <https://cursor.com/marketplace>
 
-These ReMCP URLs are stable user-facing guides. They can later point to the final catalog card without changing the link you already shared.
+The ReMCP-owned URLs are stable user-facing guides. They can later point to a more specific catalog card without changing the link you already shared.
 
 ## ChatGPT and Codex
 
@@ -80,15 +82,60 @@ ReMCP is published in the Cursor Marketplace. The normal install flow is:
 
 The Cursor package uses the portable Agent Plugins 1.0 format, so the MCP server and ReMCP skills are carried by the plugin. Users do not copy an MCP URL or edit `mcp.json` for the marketplace install.
 
-## Gemini CLI, GitHub Copilot and VS Code
+## Gemini CLI
 
-The same public ReMCP repository is prepared for the other major coding harnesses.
-- **Gemini CLI:** ReMCP publishes a native `gemini-extension.json`. The Extension Gallery can index the public repository and OAuth is discovered automatically.
-- **GitHub Copilot CLI:** ReMCP publishes a Copilot marketplace plus the same portable Agent Plugin. Users can install the default-marketplace listing once approved.
-- **VS Code Agent Plugins:** VS Code consumes the same Agent Plugins 1.0 package and marketplace metadata.
-- **Official MCP Registry:** ReMCP publishes a remote server record for registry-aware MCP clients.
+ReMCP ships a native `gemini-extension.json` in the public repository and the repository carries the
+`gemini-cli-extension` topic used by Gemini CLI gallery discovery.
 
-For normal users, none of these paths require copying the underlying MCP URL. Find **ReMCP**, install it, authenticate, and use your paired computers.
+Users can install directly from GitHub today:
+
+```bash
+gemini extensions install https://github.com/antonbaider/remcp
+```
+
+Gemini CLI copies the extension locally. ReMCP's remote MCP entry uses OAuth discovery, so there is
+no static ReMCP token to paste into the extension.
+
+## GitHub Copilot CLI and VS Code
+
+ReMCP uses the same portable Agent Plugins 1.0 package for GitHub Copilot CLI and VS Code. The public
+external-plugin submission is tracked at:
+
+<https://github.com/github/awesome-copilot/issues/3326>
+
+After the Awesome Copilot review is accepted:
+
+- **Copilot CLI:** browse the `awesome-copilot` marketplace and install **ReMCP** from the plugin catalog.
+- **VS Code:** open Extensions and search `@agentPlugins`, or run **Chat: Plugins** from the Command Palette, then install **ReMCP**.
+
+Until the external listing is accepted, the submission page is the source of truth for review status.
+
+## Cline
+
+ReMCP has been submitted to Cline's MCP Marketplace:
+
+<https://github.com/cline/mcp-marketplace/issues/2573>
+
+The submission includes the hosted Streamable HTTP server, OAuth flow, a 400×400 marketplace image,
+and `llms-install.md`. The direct CLI path that was smoke-tested during submission is:
+
+```bash
+cline mcp add remcp https://remcp.site/mcp --transport streamable-http --yes
+```
+
+After marketplace approval, users can find **ReMCP** in Cline's MCP Marketplace instead of entering
+the endpoint manually.
+
+## Smithery, Glama, and the Official MCP Registry
+
+ReMCP is also published or indexed in the main MCP discovery layers:
+
+- **Smithery:** <https://smithery.ai/servers/antonbaider/remcp>
+- **Glama:** <https://glama.ai/mcp/servers/antonbaider/remcp>
+- **Official MCP Registry:** published as `io.github.antonbaider/remcp` for registry-aware clients.
+
+These are discovery/catalog surfaces rather than separate ReMCP accounts. They point users back to
+the same production service, OAuth boundary, and paired computers.
 
 See [DISTRIBUTION.md](DISTRIBUTION.md) for marketplace manifests, validation, and submission status.
 
