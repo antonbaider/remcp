@@ -55,6 +55,18 @@ gemini extensions install https://github.com/antonbaider/remcp
 Restart the Gemini CLI session after installation, complete OAuth when prompted, then verify with
 `list_devices`.
 
+### Kiro Powers
+
+ReMCP uses the Agent Plugins 1.0 format supported by Kiro. Until the curated registry review is
+complete, install directly from the public repository:
+
+1. Open **Powers → Add Custom Power**.
+2. Choose **Import power from GitHub**.
+3. Enter `https://github.com/antonbaider/remcp`.
+4. Install, complete ReMCP authorization, then verify with `list_devices`.
+
+The curated Kiro Powers submission was received on September 19, 2026.
+
 ### Cline
 
 ReMCP's hosted endpoint can be registered directly with Cline:

@@ -110,6 +110,22 @@ After the Awesome Copilot review is accepted:
 
 Until the external listing is accepted, the submission page is the source of truth for review status.
 
+## Kiro Powers
+
+ReMCP was submitted to the curated Kiro Powers registry on **September 19, 2026** and is pending
+review. Kiro uses the same Agent Plugins 1.0 package that ReMCP already publishes, so there is no
+separate Kiro-only MCP wrapper to maintain.
+
+Users can install ReMCP from GitHub before registry approval:
+
+1. Open the **Powers** panel in Kiro.
+2. Choose **Add Custom Power**.
+3. Choose **Import power from GitHub**.
+4. Enter `https://github.com/antonbaider/remcp`.
+5. Install the power, complete ReMCP OAuth when prompted, and use a paired computer.
+
+After registry approval, users can discover ReMCP directly in <https://kiro.dev/powers/>.
+
 ## Cline
 
 ReMCP has been submitted to Cline's MCP Marketplace:

@@ -12,6 +12,7 @@ ReMCP keeps one public source repository and publishes host-native discovery met
 | Gemini CLI | Gemini CLI Extension Gallery + direct GitHub install | gallery discovery enabled; native extension validated |
 | GitHub Copilot CLI | Awesome Copilot default marketplace | external submission under review |
 | VS Code Agent Plugins | Awesome Copilot / `@agentPlugins` | same external submission and Agent Plugins 1.0 package |
+| Kiro Powers | Kiro Powers registry + direct GitHub import | submitted September 19, 2026; pending review |
 | Cline | Cline MCP Marketplace | external submission under review |
 | Smithery | smithery.ai/servers/antonbaider/remcp | published |
 | Glama | glama.ai/mcp/servers/antonbaider/remcp | indexed / listed |
@@ -25,7 +26,7 @@ The production MCP URL and host-specific manifests are implementation details, n
 
 ## Portable core
 
-The root `plugin.json` is Agent Plugins 1.0 and the root `mcp.json` contains the portable remote MCP definition. Cursor, GitHub Copilot, and VS Code can consume that package directly.
+The root `plugin.json` is Agent Plugins 1.0 and the root `mcp.json` contains the portable remote MCP definition. Cursor, GitHub Copilot, VS Code, and Kiro can consume that package directly.
 
 Gemini CLI requires `gemini-extension.json`. The extension uses `httpUrl` for the remote Streamable HTTP MCP endpoint with OAuth dynamic discovery, so users do not paste tokens or endpoint URLs. For gallery discovery, the public GitHub repository must also carry the `gemini-cli-extension` topic.
 
@@ -48,7 +49,7 @@ npx --yes @google/gemini-cli@latest extensions validate .
 mcp-publisher validate server.json
 ```
 
-Cursor, Copilot, and VS Code use the root Agent Plugins 1.0 package, which is covered by `npm run plugin:check` and the public marketplace review pipelines.
+Cursor, Copilot, VS Code, and Kiro use the root Agent Plugins 1.0 package, which is covered by `npm run plugin:check` and the public marketplace review pipelines.
 
 ## Release rule
 

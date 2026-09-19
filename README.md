@@ -25,7 +25,7 @@
 </p>
 
 ReMCP connects a computer you own or administer to **ChatGPT, Codex, Cursor, Claude Code, Gemini
-CLI, Cline, or another MCP client**. The device agent makes an **outbound connection only** — no
+CLI, Kiro, Cline, or another MCP client**. The device agent makes an **outbound connection only** — no
 inbound port, no tunnel, no third-party desktop relay. This repository contains the public device
 client/runtime, portable Agent Plugin metadata, the Gemini CLI extension manifest, official MCP
 Registry metadata, and the host-specific OpenAI and Anthropic plugin packaging.
@@ -122,6 +122,7 @@ ReMCP publishes host-native metadata for coding agents plus directory records fo
 | **Gemini CLI** | Install from the Extension Gallery when indexed, or run `gemini extensions install https://github.com/antonbaider/remcp`. | gallery discovery enabled |
 | **GitHub Copilot CLI** | Install from the `awesome-copilot` default marketplace after external-plugin review. | submitted |
 | **VS Code Agent Plugins** | Browse `@agentPlugins` / **Chat: Plugins** after the same Awesome Copilot listing is accepted. | submitted |
+| **Kiro Powers** | Import `https://github.com/antonbaider/remcp` from **Add Custom Power → Import power from GitHub** while the curated listing is reviewed. | submitted |
 | **Cline** | Use the Cline MCP Marketplace after review; the submission is tracked publicly. | submitted |
 | **Smithery** | Open <https://smithery.ai/servers/antonbaider/remcp>. | published |
 | **Glama** | Open <https://glama.ai/mcp/servers/antonbaider/remcp>. | listed |
