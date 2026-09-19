@@ -120,7 +120,10 @@ test('a macOS plist pointing at an old prefix is rewritten', () => {
   assert.doesNotMatch(plist, /old\/nvm/, 'the plist no longer launches the deleted CLI');
   assert.match(plist, new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp`));
   const calls = readFileSync(log, 'utf8');
-  assert.match(calls, /launchctl bootstrap/);
+  assert.match(calls, /launchctl print gui\/\d+\/com\.remcp\.agent/);
+  assert.match(calls, /launchctl submit -l com\.remcp\.agent\.reload\./,
+    'a loaded stale job is handed to an independent launchd repair helper');
+  assert.doesNotMatch(calls, /launchctl bootout/, 'the updater itself never boots out its owning job inline');
 });
 
 
@@ -143,6 +146,7 @@ test('a legacy macOS install re-bootstraps an unloaded LaunchAgent during update
   fakeExecutable(path.join(fakeBin, 'npm'), 'echo "npm $@" >> "$REMCP_TEST_LOG"\nif [ "$1" = "prefix" ]; then echo "$REMCP_TEST_PREFIX"; fi');
   fakeExecutable(path.join(fakeBin, 'launchctl'), [
     'echo "launchctl $@" >> "$REMCP_TEST_LOG"',
+    'if [ "$1" = "print" ]; then [ -f "$REMCP_LAUNCHD_LOADED" ]; exit $?; fi',
     'if [ "$1" = "bootout" ]; then rm -f "$REMCP_LAUNCHD_LOADED"; exit 0; fi',
     'if [ "$1" = "bootstrap" ]; then touch "$REMCP_LAUNCHD_LOADED"; exit 0; fi',
     'if [ "$1" = "kickstart" ] && [ ! -f "$REMCP_LAUNCHD_LOADED" ]; then echo "Could not find service com.remcp.agent" >&2; exit 113; fi',
@@ -167,7 +171,7 @@ test('a legacy macOS install re-bootstraps an unloaded LaunchAgent during update
   const update = spawnSync(process.execPath, [bin, 'update'], { env, encoding: 'utf8' });
   assert.equal(update.status, 0, update.stderr || update.stdout);
   const calls = readFileSync(log, 'utf8');
-  assert.match(calls, /launchctl bootout/);
+  assert.doesNotMatch(calls, /launchctl bootout/, 'an already-unloaded job can be bootstrapped directly');
   assert.match(calls, /launchctl bootstrap/);
   assert.match(calls, /launchctl kickstart -k/);
 });
@@ -297,4 +301,59 @@ test('a legacy Windows scheduled task is inferred and refreshed during update', 
   const saved = JSON.parse(readFileSync(path.join(configDir, 'config.json'), 'utf8'));
   assert.equal(saved.serviceInstalled, true);
   assert.equal(saved.configSchemaVersion, 1);
+});
+
+
+test('an update of an already-loaded macOS service never boots out its own updater', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'remcp-cli-'));
+  const home = path.join(root, 'home');
+  const fakeBin = path.join(root, 'bin');
+  const prefix = path.join(root, 'global');
+  const configDir = path.join(root, 'config');
+  const log = path.join(root, 'calls.log');
+  const loaded = path.join(root, 'launchd-loaded');
+  mkdirSync(home, { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
+    configSchemaVersion: 1,
+    serverUrl: 'https://example.invalid',
+    deviceId: 'test',
+    deviceToken: 'test',
+    deviceName: 'test',
+    serviceInstalled: true,
+    runtime: { kind: 'npm', packageName: '@example/local-runtime', packageSpec: '@example/local-runtime@1.2.3', entry: 'dist/index.js' },
+  }));
+  fakeExecutable(path.join(fakeBin, 'npm'), 'echo "npm $@" >> "$REMCP_TEST_LOG"\nif [ "$1" = "prefix" ]; then echo "$REMCP_TEST_PREFIX"; fi');
+  fakeExecutable(path.join(fakeBin, 'launchctl'), [
+    'echo "launchctl $@" >> "$REMCP_TEST_LOG"',
+    'if [ "$1" = "print" ]; then [ -f "$REMCP_LAUNCHD_LOADED" ]; exit $?; fi',
+    'if [ "$1" = "bootout" ]; then rm -f "$REMCP_LAUNCHD_LOADED"; exit 0; fi',
+    'if [ "$1" = "bootstrap" ]; then touch "$REMCP_LAUNCHD_LOADED"; exit 0; fi',
+    'exit 0',
+  ].join('\n'));
+  const env = {
+    ...process.env,
+    HOME: home,
+    REMCP_CONFIG_DIR: configDir,
+    REMCP_TEST_LOG: log,
+    REMCP_TEST_PREFIX: prefix,
+    REMCP_LAUNCHD_LOADED: loaded,
+    NODE_ENV: 'test',
+    REMCP_TEST_PLATFORM: 'darwin',
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    REMCP_NPM: path.join(fakeBin, 'npm'),
+  };
+
+  const install = spawnSync(process.execPath, [bin, 'install'], { env, encoding: 'utf8' });
+  assert.equal(install.status, 0, install.stderr || install.stdout);
+  writeFileSync(log, '');
+
+  const update = spawnSync(process.execPath, [bin, 'update'], { env, encoding: 'utf8' });
+  assert.equal(update.status, 0, update.stderr || update.stdout);
+  const calls = readFileSync(log, 'utf8');
+  assert.match(calls, /launchctl print gui\/\d+\/com\.remcp\.agent/);
+  assert.doesNotMatch(calls, /launchctl bootout/, 'an in-place update must not unload the job that owns the updater');
+  assert.doesNotMatch(calls, /launchctl bootstrap/, 'an already-loaded unchanged job does not need re-bootstrap');
+  assert.match(calls, /launchctl kickstart -k gui\/\d+\/com\.remcp\.agent/);
 });

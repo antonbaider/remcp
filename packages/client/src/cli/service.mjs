@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { PACKAGE_NAME, VERSION } from '../version.mjs';
 
 import { saveConfig } from './config.mjs';
-import { home, linuxServiceFile, macLogFile, macServiceFile, macServiceLabel, npm, windowsTaskName } from './env.mjs';
+import { configDir, home, linuxServiceFile, macLogFile, macServiceFile, macServiceLabel, npm, windowsTaskName } from './env.mjs';
 import { output, run } from './shell.mjs';
 
 export function servicePlatform() {
@@ -49,21 +49,72 @@ export function macLaunchDomain() {
   return `gui/${process.getuid()}`;
 }
 
-export function installMacService(cliPath = globalCliPath()) {
-  const domain = macLaunchDomain();
-  const target = `${domain}/${macServiceLabel}`;
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function macServicePlist(cliPath) {
   // launchd wants an absolute path; a symlinked prefix that npm has not materialised yet (or a path
   // that is about to be replaced by the next install) must not abort the repair — a stale plist is
   // exactly the loop this function exists to break.
   const cliScript = fs.existsSync(cliPath) ? fs.realpathSync(cliPath) : path.resolve(cliPath);
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${macServiceLabel}</string>\n<key>ProgramArguments</key><array><string>${xmlEscape(process.execPath)}</string><string>${xmlEscape(cliScript)}</string><string>start</string></array>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n<key>ProcessType</key><string>Background</string>\n<key>StandardOutPath</key><string>${xmlEscape(macLogFile)}</string>\n<key>StandardErrorPath</key><string>${xmlEscape(macLogFile)}</string>\n</dict></plist>\n`;
+}
+
+function macJobLoaded(target) {
+  return spawnSync('launchctl', ['print', target], { stdio: 'ignore' }).status === 0;
+}
+
+function scheduleMacServiceReload(domain, target) {
+  fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
+  const helperFile = path.join(configDir, `launchd-reload-${process.pid}.sh`);
+  const helperLabel = `${macServiceLabel}.reload.${process.pid}`;
+  const script = [
+    '#!/bin/sh',
+    'sleep 1',
+    `launchctl bootout ${shellQuote(target)} >/dev/null 2>&1 || true`,
+    `launchctl bootstrap ${shellQuote(domain)} ${shellQuote(macServiceFile)}`,
+    `launchctl enable ${shellQuote(target)}`,
+    `launchctl kickstart -k ${shellQuote(target)}`,
+    `rm -f ${shellQuote(helperFile)}`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(helperFile, script, { mode: 0o700 });
+  fs.chmodSync(helperFile, 0o700);
+  run('launchctl', ['submit', '-l', helperLabel, '--', '/bin/sh', helperFile]);
+}
+
+export function installMacService(cliPath = globalCliPath(), { restart = true } = {}) {
+  const domain = macLaunchDomain();
+  const target = `${domain}/${macServiceLabel}`;
+  const plist = macServicePlist(cliPath);
+  let previous = '';
+  try { previous = fs.readFileSync(macServiceFile, 'utf8'); } catch {}
+  const loaded = macJobLoaded(target);
+
   fs.mkdirSync(path.dirname(macServiceFile), { recursive: true });
   fs.mkdirSync(path.dirname(macLogFile), { recursive: true });
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${macServiceLabel}</string>\n<key>ProgramArguments</key><array><string>${xmlEscape(process.execPath)}</string><string>${xmlEscape(cliScript)}</string><string>start</string></array>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n<key>ProcessType</key><string>Background</string>\n<key>StandardOutPath</key><string>${xmlEscape(macLogFile)}</string>\n<key>StandardErrorPath</key><string>${xmlEscape(macLogFile)}</string>\n</dict></plist>\n`;
   fs.writeFileSync(macServiceFile, plist, { mode: 0o600 });
-  spawnSync('launchctl', ['bootout', domain, macServiceFile], { stdio: 'ignore' });
+
+  if (loaded && previous === plist) {
+    run('launchctl', ['enable', target]);
+    // Never boot out a healthy loaded job just to refresh an in-place npm install. The final
+    // kickstart keeps launchd responsible for bringing the replacement agent back.
+    if (restart) run('launchctl', ['kickstart', '-k', target]);
+    return 'loaded';
+  }
+
+  if (loaded) {
+    // A changed Node/npm prefix requires launchd to re-read ProgramArguments. A separate transient
+    // launchd job survives booting out com.remcp.agent even when the updater was launched by it.
+    scheduleMacServiceReload(domain, target);
+    return 'reload-scheduled';
+  }
+
   run('launchctl', ['bootstrap', domain, macServiceFile]);
   run('launchctl', ['enable', target]);
-  run('launchctl', ['kickstart', '-k', target]);
+  if (restart) run('launchctl', ['kickstart', '-k', target]);
+  return 'bootstrapped';
 }
 
 export function installWindowsService(cliPath = globalCliPath()) {
@@ -179,11 +230,11 @@ export function ensureServiceIfRecorded(config) {
         }
       }
     } else if (platform === 'darwin') {
-      // launchd bakes the interpreter and the CLI path into the plist, so a Node manager that moves
-      // its global prefix leaves the agent launching a file that no longer exists — the same loop the
-      // Linux unit above is repaired for. Reinstalling is idempotent (bootout, bootstrap, enable,
-      // kickstart) and is what the Windows task already does on every update.
-      installMacService(cliPath);
+      // launchd bakes the interpreter and CLI path into the plist. Repair the file first, but never
+      // boot out a loaded agent inline: this updater may itself be a descendant of that LaunchAgent.
+      // installMacService either leaves an unchanged loaded job alone, bootstraps an unloaded job, or
+      // hands a changed launcher to an independent transient launchd helper.
+      installMacService(cliPath, { restart: false });
     } else if (platform === 'win32') installWindowsService(cliPath);
     // Upgrade the legacy inferred state only after the supervisor repair succeeded. A failed repair
     // must not turn a stale artifact into a permanent "managed service" declaration.

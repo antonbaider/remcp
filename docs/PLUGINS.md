@@ -68,11 +68,21 @@ While the ReMCP listing is still under review, ordinary users do not need to add
 clone the repository, or paste an MCP endpoint. Developer and reviewer installation methods are kept
 in the technical Claude Code guide instead of the normal user flow.
 
-## Cursor, Gemini CLI, GitHub Copilot and VS Code
+## Cursor
+
+ReMCP is published in the Cursor Marketplace. The normal install flow is:
+
+1. Open <https://cursor.com/marketplace> or Cursor's **Customize** view.
+2. Search for **ReMCP**.
+3. Install the plugin.
+4. Authorize your ReMCP account when prompted.
+5. Ask Cursor Agent to use one of your paired computers.
+
+The Cursor package uses the portable Agent Plugins 1.0 format, so the MCP server and ReMCP skills are carried by the plugin. Users do not copy an MCP URL or edit `mcp.json` for the marketplace install.
+
+## Gemini CLI, GitHub Copilot and VS Code
 
 The same public ReMCP repository is prepared for the other major coding harnesses.
-
-- **Cursor:** ReMCP uses the portable Agent Plugins 1.0 format. Users install the ReMCP catalog entry; the MCP server and five skills come with it.
 - **Gemini CLI:** ReMCP publishes a native `gemini-extension.json`. The Extension Gallery can index the public repository and OAuth is discovered automatically.
 - **GitHub Copilot CLI:** ReMCP publishes a Copilot marketplace plus the same portable Agent Plugin. Users can install the default-marketplace listing once approved.
 - **VS Code Agent Plugins:** VS Code consumes the same Agent Plugins 1.0 package and marketplace metadata.

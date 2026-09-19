@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.45 — 2026-09-19
+
+- Lockstep hotfix with the ReMCP client. Runtime behavior is unchanged from 0.2.44; the paired release fixes macOS self-update handoff so a client update launched from inside ReMCP cannot kill its own repair process.
+
 ## 0.2.44 — 2026-09-19
 
 - Lockstep compatibility release with the ReMCP client. Runtime behavior is unchanged from 0.2.43; the pair stays on one immutable version while the client adds versioned config migrations and cross-platform background-service recovery for legacy installations.

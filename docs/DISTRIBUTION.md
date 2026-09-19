@@ -8,7 +8,7 @@ ReMCP keeps one public source repository and publishes host-native discovery met
 | --- | --- | --- |
 | ChatGPT & Codex | OpenAI plugin directory | submitted / platform-controlled rollout |
 | Claude Code | Claude Plugins directory | submitted, pending review |
-| Cursor | Cursor Marketplace | submission prepared from root Agent Plugin |
+| Cursor | Cursor Marketplace | published |
 | Gemini CLI | Gemini CLI Extension Gallery | auto-indexed after the public repository carries the `gemini-cli-extension` GitHub topic |
 | GitHub Copilot CLI | Awesome Copilot default marketplace + ReMCP marketplace fallback | external submission |
 | VS Code Agent Plugins | Awesome Copilot default marketplace + install from source | same Agent Plugin package |
