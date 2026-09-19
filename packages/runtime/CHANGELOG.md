@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.44 — 2026-09-19
+
+- Lockstep compatibility release with the ReMCP client. Runtime behavior is unchanged from 0.2.43; the pair stays on one immutable version while the client adds versioned config migrations and cross-platform background-service recovery for legacy installations.
+
 ## 0.2.43 — 2026-09-19
 
 - Lockstep patch release with the ReMCP client. Runtime behavior is unchanged from 0.2.42; the release keeps client and runtime on the same immutable version while the client fixes automatic reconnect after a temporary device pause.

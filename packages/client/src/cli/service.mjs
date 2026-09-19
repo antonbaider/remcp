@@ -72,6 +72,22 @@ export function installWindowsService(cliPath = globalCliPath()) {
   run('schtasks.exe', ['/Run', '/TN', windowsTaskName]);
 }
 
+// `serviceInstalled` was added after background services already existed in the wild. Treat an
+// explicit false as the user's opt-out, an explicit true as the current marker, and only infer the
+// old intent from an OS service artifact when the marker is absent. This keeps legacy installs
+// repairable without resurrecting a service that a newer client explicitly disabled.
+export function persistentServiceExpected(config) {
+  if (config?.serviceInstalled === false) return false;
+  if (config?.serviceInstalled === true) return true;
+  const platform = servicePlatform();
+  if (platform === 'linux') return fs.existsSync(linuxServiceFile);
+  if (platform === 'darwin') return fs.existsSync(macServiceFile);
+  if (platform === 'win32') {
+    return spawnSync('schtasks.exe', ['/Query', '/TN', windowsTaskName], { stdio: 'ignore' }).status === 0;
+  }
+  return false;
+}
+
 export function configurePostInstallAccess() {
   const platform = servicePlatform();
   try {
@@ -136,7 +152,7 @@ export function installPersistentAgent(config) {
 // (a failed install, a cleaned LaunchAgents directory, a re-imaged user), the next update recreates
 // it instead of leaving a hand-over to a process nobody supervises.
 export function ensureServiceIfRecorded(config) {
-  if (config?.serviceInstalled !== true) return false;
+  if (!persistentServiceExpected(config)) return false;
   try {
     const cliPath = globalCliPath();
     const platform = servicePlatform();
@@ -169,6 +185,9 @@ export function ensureServiceIfRecorded(config) {
       // kickstart) and is what the Windows task already does on every update.
       installMacService(cliPath);
     } else if (platform === 'win32') installWindowsService(cliPath);
+    // Upgrade the legacy inferred state only after the supervisor repair succeeded. A failed repair
+    // must not turn a stale artifact into a permanent "managed service" declaration.
+    if (config?.serviceInstalled !== true) saveConfig({ ...config, serviceInstalled: true });
     return true;
   } catch (error) {
     console.error(`Could not ensure the background service: ${error instanceof Error ? error.message : String(error)}`);
@@ -176,7 +195,8 @@ export function ensureServiceIfRecorded(config) {
   }
 }
 
-export function restartPersistentServiceIfInstalled() {
+export function restartPersistentServiceIfInstalled(config) {
+  if (!persistentServiceExpected(config)) return null;
   const platform = servicePlatform();
   if (platform === 'linux' && fs.existsSync(linuxServiceFile)) {
     run('systemctl', ['--user', 'daemon-reload']);
@@ -184,7 +204,14 @@ export function restartPersistentServiceIfInstalled() {
     return 'remcp-agent.service';
   }
   if (platform === 'darwin' && fs.existsSync(macServiceFile)) {
-    run('launchctl', ['kickstart', '-k', `${macLaunchDomain()}/${macServiceLabel}`]);
+    try {
+      run('launchctl', ['kickstart', '-k', `${macLaunchDomain()}/${macServiceLabel}`]);
+    } catch {
+      // A plist can survive while launchd has no loaded job (older installs, logout/login cleanup,
+      // manual bootout, or a failed previous update). Re-register the job instead of surfacing the
+      // opaque launchctl 113 error. installMacService is idempotent and rewrites stale Node paths too.
+      installMacService(globalCliPath());
+    }
     return macServiceLabel;
   }
   if (platform === 'win32') {

@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "ReMCP plugin marketplace for GitHub Copilot CLI and VS Code Agent Plugins.",
-    "version": "0.2.43"
+    "version": "0.2.44"
   },
   "plugins": [
     {
       "name": "remcp",
       "source": "./",
       "description": "Securely work with files, terminals, screenshots, search, and processes on computers you explicitly pair with ReMCP.",
-      "version": "0.2.43",
+      "version": "0.2.44",
       "author": {
         "name": "Anton Baider",
         "url": "https://remcp.site"

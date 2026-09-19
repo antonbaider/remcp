@@ -128,13 +128,13 @@ export async function main(argv = process.argv.slice(2)) {
     }
     if (action === 'on' || action === 'enable') {
       console.log(JSON.stringify(setTelemetry(true), null, 2));
-      restartPersistentServiceIfInstalled();
+      restartPersistentServiceIfInstalled(loadConfig(false));
       console.log('Usage metrics enabled and the agent restarted to apply it.');
       return;
     }
     if (action === 'off' || action === 'disable') {
       console.log(JSON.stringify(setTelemetry(false), null, 2));
-      restartPersistentServiceIfInstalled();
+      restartPersistentServiceIfInstalled(loadConfig(false));
       console.log('Usage metrics disabled and the agent restarted to apply it.');
       return;
     }
@@ -162,7 +162,7 @@ export async function main(argv = process.argv.slice(2)) {
     if (!['on', 'off', 'enable', 'disable'].includes(action)) throw new Error('Usage: remcp godmode [status|on|off]');
     const enabled = action === 'on' || action === 'enable';
     writeJsonFile(runtimeConfigFile, { ...readJsonFile(runtimeConfigFile), unrestricted: enabled });
-    const restarted = restartPersistentServiceIfInstalled();
+    const restarted = restartPersistentServiceIfInstalled(loadConfig(false));
     if (enabled) {
       console.error('Unrestricted mode is ON for this computer: every path and every command is allowed, including sudo. Anything the model is asked to do -- and anything a prompt injection asks it to do -- can now change this machine. Turn it off with `remcp godmode off` when you are done.');
     } else {
@@ -213,9 +213,12 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (command === 'uninstall') {
+    const cfg = loadConfig(false);
     uninstallPersistentService();
+    // Keep the pairing unless --purge was requested, but remember that the owner explicitly removed
+    // the supervisor. Future updates must not infer an old service artifact and recreate it.
+    if (cfg) saveConfig({ ...cfg, serviceInstalled: false });
     if (flags.purge) {
-      const cfg = loadConfig(false);
       const specs = [PACKAGE_NAME, ...(cfg?.runtime?.packageName ? [cfg.runtime.packageName] : [])];
       run(npm.command, [...npm.args, 'uninstall', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
     }

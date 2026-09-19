@@ -9,7 +9,7 @@ ReMCP keeps one public source repository and publishes host-native discovery met
 | ChatGPT & Codex | OpenAI plugin directory | submitted / platform-controlled rollout |
 | Claude Code | Claude Plugins directory | submitted, pending review |
 | Cursor | Cursor Marketplace | submission prepared from root Agent Plugin |
-| Gemini CLI | Gemini CLI Extension Gallery | auto-indexed from the public GitHub repository |
+| Gemini CLI | Gemini CLI Extension Gallery | auto-indexed after the public repository carries the `gemini-cli-extension` GitHub topic |
 | GitHub Copilot CLI | Awesome Copilot default marketplace + ReMCP marketplace fallback | external submission |
 | VS Code Agent Plugins | Awesome Copilot default marketplace + install from source | same Agent Plugin package |
 | Official MCP Registry | registry.modelcontextprotocol.io | remote Streamable HTTP server |
@@ -24,7 +24,7 @@ The production MCP URL and host-specific manifests are implementation details, n
 
 The root `plugin.json` is Agent Plugins 1.0 and the root `mcp.json` contains the portable remote MCP definition. Cursor, GitHub Copilot, and VS Code can consume that package directly.
 
-Gemini CLI requires `gemini-extension.json`. The extension uses a remote Streamable HTTP MCP definition with OAuth dynamic discovery, so users do not paste tokens or endpoint URLs.
+Gemini CLI requires `gemini-extension.json`. The extension uses `httpUrl` for the remote Streamable HTTP MCP endpoint with OAuth dynamic discovery, so users do not paste tokens or endpoint URLs. For gallery discovery, the public GitHub repository must also carry the `gemini-cli-extension` topic.
 
 The Official MCP Registry uses `server.json` with the GitHub-authenticated name `io.github.antonbaider/remcp` and the public production remote.
 

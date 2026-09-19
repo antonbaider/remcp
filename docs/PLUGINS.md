@@ -24,19 +24,14 @@ ChatGPT and Codex share OpenAI's unified public plugin directory.
 
 ### ChatGPT
 
-Open the directory with the ReMCP search prefilled:
-
-```text
-https://chatgpt.com/plugins?q=ReMCP
-```
+Open <https://chatgpt.com/plugins>, search for **ReMCP**, and open the ReMCP plugin card when it is available for your account.
 
 Then:
 
-1. Open the ReMCP plugin card when it is available for your account.
-2. Choose **Install plugin**.
-3. Choose **Connect** if ReMCP authorization is requested.
-4. Complete ReMCP OAuth.
-5. Start a new chat and ask ChatGPT to use ReMCP on a paired computer.
+1. Choose **Install plugin**.
+2. Choose **Connect** if ReMCP authorization is requested.
+3. Complete ReMCP OAuth.
+4. Start a new chat and use **@ReMCP** or **+ → More** when those controls are available.
 
 If ReMCP is not visible yet, the listing or rollout is not available to that account. Do not paste an
 MCP endpoint or create a manual connection as a substitute for the catalog plugin.
@@ -67,33 +62,11 @@ After approval, the preferred user flow is:
 
 Users do not clone the ReMCP repository or edit MCP configuration files.
 
-For Claude Code users who prefer the terminal after approval, Anthropic's community marketplace uses:
+In Claude Desktop, the same catalog can also be reached from **+ → Plugins → Add plugin**.
 
-```text
-/plugin marketplace add anthropics/claude-plugins-community
-/plugin install remcp@claude-community
-```
-
-### Early access while directory review is pending
-
-Claude Code supports developer-hosted marketplaces. ReMCP publishes a validated public marketplace
-for users who need access before Anthropic publishes the directory listing:
-
-```bash
-claude plugin marketplace add antonbaider/remcp
-claude plugin install remcp@remcp --scope user
-```
-
-Inside an already-open Claude Code session:
-
-```text
-/plugin marketplace add antonbaider/remcp
-/plugin install remcp@remcp
-```
-
-This early-access route uses Claude Code's supported marketplace mechanism; it does not require
-`git clone`, `--plugin-dir`, or a manual MCP endpoint. Once the directory listing is live, the
-regular Install button is the preferred path.
+While the ReMCP listing is still under review, ordinary users do not need to add a marketplace,
+clone the repository, or paste an MCP endpoint. Developer and reviewer installation methods are kept
+in the technical Claude Code guide instead of the normal user flow.
 
 ## Cursor, Gemini CLI, GitHub Copilot and VS Code
 

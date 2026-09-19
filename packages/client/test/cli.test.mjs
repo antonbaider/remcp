@@ -69,3 +69,69 @@ test('telemetry is opt-out through one switch that covers the client and the run
     rmSync(runtimeFile, { force: true });
   }
 });
+
+
+test('legacy client config migrates to the canonical service without dropping unknown fields', async () => {
+  const clientFile = path.join(configDir, 'config.json');
+  writeFileSync(clientFile, JSON.stringify({
+    serverUrl: 'https://remcp.delio24.com',
+    deviceId: 'legacy-device',
+    deviceToken: 'legacy-token',
+    deviceName: 'Legacy Mac',
+    runtime: { kind: 'npm', packageName: '@remcp/runtime', packageSpec: '@remcp/runtime@0.1.4', entry: 'src/index.mjs' },
+    preservedFutureField: { keep: true },
+  }) + '\n');
+
+  try {
+    await captureLog(() => main(['auto-update', 'status']));
+    const migrated = JSON.parse(readFileSync(clientFile, 'utf8'));
+    assert.equal(migrated.configSchemaVersion, 1);
+    assert.equal(migrated.serverUrl, 'https://remcp.site');
+    assert.equal(migrated.trustRuntime, true, 'the former official host remains trusted after canonicalization');
+    assert.deepEqual(migrated.preservedFutureField, { keep: true }, 'migrations are additive and preserve unknown data');
+  } finally {
+    rmSync(clientFile, { force: true });
+  }
+});
+
+test('uninstall records an explicit service opt-out so a later update cannot resurrect it', async () => {
+  const clientFile = path.join(configDir, 'config.json');
+  writeFileSync(clientFile, JSON.stringify({
+    configSchemaVersion: 1,
+    serverUrl: 'https://remcp.site',
+    deviceId: 'test',
+    deviceToken: 'test',
+    deviceName: 'test',
+    serviceInstalled: true,
+    runtime: { kind: 'npm', packageName: '@remcp/runtime', packageSpec: '@remcp/runtime@0.2.43', entry: 'src/index.mjs' },
+  }) + '\n');
+
+  try {
+    await captureLog(() => main(['uninstall']));
+    const saved = JSON.parse(readFileSync(clientFile, 'utf8'));
+    assert.equal(saved.serviceInstalled, false);
+    assert.equal(saved.configSchemaVersion, 1);
+  } finally {
+    rmSync(clientFile, { force: true });
+  }
+});
+
+
+test('a newer config schema is never downgraded and unknown fields survive local writes', async () => {
+  const clientFile = path.join(configDir, 'config.json');
+  writeFileSync(clientFile, JSON.stringify({
+    configSchemaVersion: 99,
+    serverUrl: 'https://future.example.invalid',
+    futureEnvelope: { generation: 7, opaque: ['keep', 'me'] },
+  }) + '\n');
+
+  try {
+    await captureLog(() => main(['auto-update', 'off']));
+    const saved = JSON.parse(readFileSync(clientFile, 'utf8'));
+    assert.equal(saved.configSchemaVersion, 99);
+    assert.deepEqual(saved.futureEnvelope, { generation: 7, opaque: ['keep', 'me'] });
+    assert.equal(saved.autoUpdate, false);
+  } finally {
+    rmSync(clientFile, { force: true });
+  }
+});

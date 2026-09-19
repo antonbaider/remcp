@@ -7,21 +7,64 @@ import { normalizeRuntime } from '../runtime.mjs';
 
 import { configDir, configFile, machineIdFile, officialOrigin, runtimeConfigFile } from './env.mjs';
 
+export const CONFIG_SCHEMA_VERSION = 1;
+const legacyOfficialOrigins = new Set(['https://remcp.delio24.com']);
+
+function migrateConfig(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('ReMCP config must be a JSON object');
+  const declared = Number(value.configSchemaVersion || 0);
+  // A newer client may have added fields this client does not understand. Preserve that document
+  // byte-for-meaning and only use the known fields below; never downgrade its schema marker.
+  if (Number.isSafeInteger(declared) && declared > CONFIG_SCHEMA_VERSION) return { value: { ...value }, changed: false };
+
+  let next = { ...value };
+  let changed = false;
+  if (declared < 1) {
+    try {
+      const server = new URL(String(next.serverUrl || ''));
+      if (legacyOfficialOrigins.has(server.origin)) {
+        next.serverUrl = officialOrigin;
+        if (next.trustRuntime === undefined) next.trustRuntime = true;
+        changed = true;
+      }
+    } catch {}
+    if (next.configSchemaVersion !== CONFIG_SCHEMA_VERSION) {
+      next.configSchemaVersion = CONFIG_SCHEMA_VERSION;
+      changed = true;
+    }
+  }
+  return { value: next, changed };
+}
+
+function configForWrite(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('ReMCP config must be a JSON object');
+  const declared = Number(value.configSchemaVersion || 0);
+  return {
+    ...value,
+    configSchemaVersion: Number.isSafeInteger(declared) && declared > CONFIG_SCHEMA_VERSION
+      ? declared
+      : CONFIG_SCHEMA_VERSION,
+  };
+}
+
 export function loadConfig(required = true) {
   if (!fs.existsSync(configFile)) {
     if (!required) return undefined;
     throw new Error(`ReMCP is not paired. Generate a pairing command at ${officialOrigin}/app/connect`);
   }
-  const value = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+  const migrated = migrateConfig(JSON.parse(fs.readFileSync(configFile, 'utf8')));
+  const value = migrated.value;
   // A configuration that only carries preferences (for example after `remcp auto-update off`
   // before pairing) has no runtime yet; it must not fail as if it were corrupt.
   if (value.runtime !== undefined) value.runtime = normalizeRuntime(value.runtime);
+  if (migrated.changed) saveConfig(value);
   return value;
 }
 
 export function saveConfig(value) {
+  const persisted = configForWrite(value);
   fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(configFile, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
+  fs.writeFileSync(configFile, JSON.stringify(persisted, null, 2) + '\n', { mode: 0o600 });
   fs.chmodSync(configFile, 0o600);
 }
 

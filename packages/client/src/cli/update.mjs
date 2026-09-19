@@ -200,7 +200,7 @@ export async function updateCommand(flags) {
   // Only a validated spec is persisted, so a failed update cannot leave the install unable to start.
   if (targets.persistRuntime) saveConfig({ ...cfg, runtime: { ...cfg.runtime, packageSpec: targets.runtimeSpec } });
   const after = { cli: installedVersion(PACKAGE_NAME), runtime: installedVersion(cfg.runtime.packageName) };
-  const restarted = restartPersistentServiceIfInstalled();
+  const restarted = restartPersistentServiceIfInstalled(cfg);
   if (restarted) {
     console.log(`ReMCP updated and ${restarted} restarted (client ${before.cli} → ${after.cli ?? '?'}, runtime ${before.runtime ?? '?'} → ${after.runtime ?? '?'}).`);
     return;
