@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.47 — 2026-09-19
+
+- Lockstep release with the ReMCP client. Runtime behavior is unchanged from 0.2.46; the client now recovers from transient HTTP handshake failures and migrates Linux systemd services to a stable launcher independent of nvm/Hermes prefixes.
+
 ## 0.2.46 — 2026-09-19
 
 - Lockstep release with the ReMCP client. Runtime behavior is unchanged from 0.2.45; the client makes all macOS service restarts use a detached launchd handoff so commands initiated from inside the agent cannot terminate their own updater or settings operation.

@@ -286,6 +286,15 @@ export async function runAgent(options) {
         // Service access is a user-controlled pause, not an outage. Poll slowly enough not to hammer
         // the relay, but cap recovery so an enable action becomes effective within seconds.
         scheduleReconnect(jitter(RECONNECT_BASE_MS));
+        return;
+      }
+      const status = Number(response.statusCode || 0);
+      const transientHandshakeFailure = status === 408 || status === 425 || status === 429 || (status >= 500 && status <= 599);
+      if (transientHandshakeFailure && !revoked) {
+        // A reverse proxy or relay deploy can refuse the HTTP upgrade before a WebSocket exists.
+        // With an unexpected-response listener the client does not reliably emit close afterwards,
+        // so this branch must schedule its own retry or a still-running agent can stay offline forever.
+        scheduleBackoffReconnect();
       }
     });
     activeSocket = ws;

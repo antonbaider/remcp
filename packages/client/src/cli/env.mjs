@@ -11,6 +11,7 @@ export const configFile = path.join(configDir, 'config.json');
 export const runtimeConfigFile = path.join(configDir, 'runtime.json');
 export const machineIdFile = path.join(configDir, 'machine-id');
 export const linuxServiceFile = path.join(home, '.config', 'systemd', 'user', 'remcp-agent.service');
+export const linuxServiceLauncherFile = path.join(configDir, 'remcp-agent-launcher');
 export const macServiceLabel = 'com.remcp.agent';
 export const macServiceFile = path.join(home, 'Library', 'LaunchAgents', `${macServiceLabel}.plist`);
 export const macLogFile = path.join(home, 'Library', 'Logs', 'remcp-agent.log');

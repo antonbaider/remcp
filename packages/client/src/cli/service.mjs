@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { PACKAGE_NAME, VERSION } from '../version.mjs';
 
 import { saveConfig } from './config.mjs';
-import { configDir, home, linuxServiceFile, macLogFile, macServiceFile, macServiceLabel, npm, windowsTaskName } from './env.mjs';
+import { configDir, home, linuxServiceFile, linuxServiceLauncherFile, macLogFile, macServiceFile, macServiceLabel, npm, windowsTaskName } from './env.mjs';
 import { output, run } from './shell.mjs';
 
 export function servicePlatform() {
@@ -32,12 +32,28 @@ export function quoteSystemd(value) {
   return `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
+function resolvedCliScript(cliPath) {
+  return fs.existsSync(cliPath) ? fs.realpathSync(cliPath) : path.resolve(cliPath);
+}
+
+function writeLinuxServiceLauncher(cliPath = globalCliPath()) {
+  const cliScript = resolvedCliScript(cliPath);
+  const launcher = `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(cliScript)} \"$@\"\n`;
+  fs.mkdirSync(path.dirname(linuxServiceLauncherFile), { recursive: true, mode: 0o700 });
+  const temporary = `${linuxServiceLauncherFile}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporary, launcher, { mode: 0o700 });
+  fs.chmodSync(temporary, 0o700);
+  fs.renameSync(temporary, linuxServiceLauncherFile);
+  return linuxServiceLauncherFile;
+}
+
 export function xmlEscape(value) {
   return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
 }
 
 export function installLinuxService(cliPath = globalCliPath()) {
-  const unit = `[Unit]\nDescription=ReMCP device agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=${quoteSystemd(cliPath)} start\nRestart=always\nRestartSec=3\nNoNewPrivileges=true\n\n[Install]\nWantedBy=default.target\n`;
+  const launcherFile = writeLinuxServiceLauncher(cliPath);
+  const unit = `[Unit]\nDescription=ReMCP device agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=${quoteSystemd(launcherFile)} start\nRestart=always\nRestartSec=3\nNoNewPrivileges=true\n\n[Install]\nWantedBy=default.target\n`;
   fs.mkdirSync(path.dirname(linuxServiceFile), { recursive: true });
   fs.writeFileSync(linuxServiceFile, unit);
   run('systemctl', ['--user', 'daemon-reload']);
@@ -229,17 +245,16 @@ export function ensureServiceIfRecorded(config) {
       if (!fs.existsSync(linuxServiceFile)) {
         installLinuxService(cliPath);
       } else {
-        // Node managers can move the global npm prefix between updates (nvm -> Hermes was observed in
-        // production). An existing systemd unit then keeps launching the old CLI forever even though
-        // npm successfully installed the new one. Repair the launcher in place before restarting it.
+        // Keep the systemd unit independent of nvm/Hermes/Homebrew prefixes. Only this small launcher
+        // changes when npm or Node moves, so every install converges on one supervisor entrypoint.
+        const launcherFile = writeLinuxServiceLauncher(cliPath);
         const unit = fs.readFileSync(linuxServiceFile, 'utf8');
-        const expected = `ExecStart=${quoteSystemd(cliPath)} start`;
+        const expected = `ExecStart=${quoteSystemd(launcherFile)} start`;
         if (!unit.includes(expected)) {
           const repaired = /^ExecStart=/m.test(unit) ? unit.replace(/^ExecStart=.*$/m, expected) : '';
           if (!repaired) {
-            // A unit that lost its ExecStart line (edited by hand, or written as `ExecStart = …`) cannot
-            // be patched by substitution. Rewriting the whole unit is what keeps the machine out of the
-            // "old CLI forever" loop, so fall back to a fresh install instead of giving up.
+            // A hand-edited unit with no launcher line is replaced wholesale; the stable launcher is
+            // still refreshed first so the replacement never points back at a retired Node manager.
             installLinuxService(cliPath);
           } else {
             fs.writeFileSync(linuxServiceFile, repaired);

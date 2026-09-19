@@ -30,24 +30,31 @@ test('install uses a stable global CLI path and update refreshes/restarts it', (
 
   const install = spawnSync(process.execPath, [bin, 'install'], { env, encoding: 'utf8' });
   assert.equal(install.status, 0, install.stderr || install.stdout);
-  const unit = readFileSync(path.join(home, '.config', 'systemd', 'user', 'remcp-agent.service'), 'utf8');
-  assert.match(unit, new RegExp(`ExecStart="${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp" start`));
+  const serviceFile = path.join(home, '.config', 'systemd', 'user', 'remcp-agent.service');
+  const launcherFile = path.join(configDir, 'remcp-agent-launcher');
+  const unit = readFileSync(serviceFile, 'utf8');
+  const escapedLauncher = launcherFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.match(unit, new RegExp(`ExecStart="${escapedLauncher}" start`));
+  assert.match(readFileSync(launcherFile, 'utf8'), new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp`));
   let calls = readFileSync(log, 'utf8');
   assert.match(calls, new RegExp(`npm install --global @remcp/remcp@${VERSION.replaceAll('.', '\\.')}`));
   assert.match(calls, /@example\/local-runtime@1\.2\.3/);
   assert.match(calls, /systemctl --user enable --now remcp-agent\.service/);
 
-  // Reproduce a real upgrade from one Node manager to another: the service still points at a CLI in
-  // an old nvm prefix while npm now installs to the current global prefix. Update must repair the unit
-  // before it restarts it, otherwise the old agent reconnects and starts the same update again.
-  const serviceFile = path.join(home, '.config', 'systemd', 'user', 'remcp-agent.service');
-  writeFileSync(serviceFile, readFileSync(serviceFile, 'utf8').replace(`${prefix}/bin/remcp`, '/old/nvm/bin/remcp'));
+  // Reproduce a real upgrade from one Node manager to another: an old unit points directly at the
+  // previous manager and the stable launcher is stale too. Update must migrate the unit to the fixed
+  // launcher path and refresh only the launcher target for the current Node/npm installation.
+  writeFileSync(serviceFile, readFileSync(serviceFile, 'utf8').replace(launcherFile, '/old/nvm/bin/remcp'));
+  writeFileSync(launcherFile, '#!/bin/sh\nexec "/old/node" "/old/nvm/bin/remcp" "$@"\n');
 
   const update = spawnSync(process.execPath, [bin, 'update'], { env, encoding: 'utf8' });
   assert.equal(update.status, 0, update.stderr || update.stdout);
   const repairedUnit = readFileSync(serviceFile, 'utf8');
-  assert.match(repairedUnit, new RegExp(`ExecStart=\"${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp\" start`));
+  const repairedLauncher = readFileSync(launcherFile, 'utf8');
+  assert.match(repairedUnit, new RegExp(`ExecStart="${escapedLauncher}" start`));
   assert.doesNotMatch(repairedUnit, /old\/nvm/);
+  assert.match(repairedLauncher, new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp`));
+  assert.doesNotMatch(repairedLauncher, /old\/nvm/);
   calls = readFileSync(log, 'utf8');
   assert.match(calls, /npm install --global @remcp\/remcp@latest/);
   assert.match(calls, /systemctl --user daemon-reload/);
@@ -78,7 +85,9 @@ test('a systemd unit without ExecStart is rewritten instead of leaving the old C
   const update = spawnSync(process.execPath, [bin, 'update'], { env, encoding: 'utf8' });
   assert.equal(update.status, 0, update.stderr || update.stdout);
   const unit = readFileSync(unitFile, 'utf8');
-  assert.match(unit, new RegExp(`ExecStart="${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp" start`), 'the unit is rewritten for the prefix npm installed into');
+  const launcherFile = path.join(configDir, 'remcp-agent-launcher');
+  assert.match(unit, new RegExp(`ExecStart="${launcherFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" start`), 'the unit is rewritten to the stable launcher');
+  assert.match(readFileSync(launcherFile, 'utf8'), new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp`), 'the launcher targets the prefix npm installed into');
   assert.doesNotMatch(unit, /hand-edited/);
 });
 
@@ -257,7 +266,9 @@ test('a legacy Linux user service is inferred, repaired, and recorded during upd
 
   const update = spawnSync(process.execPath, [bin, 'update'], { env, encoding: 'utf8' });
   assert.equal(update.status, 0, update.stderr || update.stdout);
-  assert.match(readFileSync(serviceFile, 'utf8'), new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp`));
+  const launcherFile = path.join(configDir, 'remcp-agent-launcher');
+  assert.match(readFileSync(serviceFile, 'utf8'), new RegExp(launcherFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(readFileSync(launcherFile, 'utf8'), new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp`));
   const saved = JSON.parse(readFileSync(path.join(configDir, 'config.json'), 'utf8'));
   assert.equal(saved.serviceInstalled, true);
   assert.equal(saved.configSchemaVersion, 1);
