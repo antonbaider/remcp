@@ -16,6 +16,21 @@
 </p>
 
 <p align="center">
+  <a href="https://remcp.site/install/chatgpt"><img alt="ChatGPT plugin" src="https://img.shields.io/badge/ChatGPT-plugin-1f2328?style=flat-square"></a>
+  <a href="https://remcp.site/install/chatgpt"><img alt="Codex plugin" src="https://img.shields.io/badge/Codex-plugin-1f2328?style=flat-square"></a>
+  <a href="https://remcp.site/install/claude"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-1f2328?style=flat-square"></a>
+  <a href="https://cursor.com/marketplace"><img alt="Cursor Marketplace" src="https://img.shields.io/badge/Cursor-marketplace-1f2328?style=flat-square"></a>
+  <a href="docs/PLUGINS.md#gemini-cli"><img alt="Gemini CLI extension" src="https://img.shields.io/badge/Gemini%20CLI-extension-1f2328?style=flat-square"></a>
+  <a href="https://github.com/github/awesome-copilot/issues/3326"><img alt="GitHub Copilot CLI plugin" src="https://img.shields.io/badge/Copilot%20CLI-plugin-1f2328?style=flat-square"></a>
+  <a href="https://github.com/github/awesome-copilot/issues/3326"><img alt="VS Code Agent Plugin" src="https://img.shields.io/badge/VS%20Code-agent%20plugin-1f2328?style=flat-square"></a>
+  <a href="https://kiro.dev/powers/"><img alt="Kiro Power" src="https://img.shields.io/badge/Kiro-power-1f2328?style=flat-square"></a>
+  <a href="https://github.com/cline/mcp-marketplace/issues/2573"><img alt="Cline MCP Marketplace" src="https://img.shields.io/badge/Cline-MCP-1f2328?style=flat-square"></a>
+  <a href="https://smithery.ai/servers/antonbaider/remcp"><img alt="Smithery directory" src="https://img.shields.io/badge/Smithery-directory-1f2328?style=flat-square"></a>
+  <a href="https://glama.ai/mcp/servers/antonbaider/remcp"><img alt="Glama quality score" src="https://glama.ai/mcp/servers/antonbaider/remcp/badges/score.svg"></a>
+  <a href="docs/PLUGINS.md#smithery-glama-and-the-official-mcp-registry"><img alt="Official MCP Registry" src="https://img.shields.io/badge/MCP%20Registry-published-1f2328?style=flat-square"></a>
+</p>
+
+<p align="center">
   <a href="https://remcp.site">Website</a> ·
   <a href="https://remcp.site/plugins">Plugins</a> ·
   <a href="https://remcp.site/docs">Docs</a> ·
