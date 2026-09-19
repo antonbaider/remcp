@@ -4,10 +4,8 @@
   "description": "Securely work with files, terminals, screenshots, search, and processes on computers you explicitly pair with ReMCP.",
   "mcpServers": {
     "remcp": {
-      "url": "https://remcp.site/mcp",
-      "type": "http",
-      "authProviderType": "dynamic_discovery",
-      "description": "ReMCP remote computer tools for paired devices."
+      "httpUrl": "https://remcp.site/mcp",
+      "authProviderType": "dynamic_discovery"
     }
   }
 }
