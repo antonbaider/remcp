@@ -2,12 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { advertisedTools } from '../src/catalog.mjs';
+import { allExtendedTools } from '../src/extended/catalog.mjs';
 
 const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-const tools = advertisedTools();
+const coreTools = advertisedTools();
+const tools = [...coreTools, ...allExtendedTools()];
 
 test('runtime README describes the tool surface that the package actually advertises', () => {
-  assert.equal(tools.length, 44, 'the 0.2.36 runtime contract has 44 local tools');
+  assert.equal(coreTools.length, 44, 'the backwards-compatible core tool set remains 44 tools');
+  assert.equal(tools.length, 83, 'the 0.2.48 runtime release contract has 83 local tools');
   assert.match(
     readme,
     new RegExp(`\\b${tools.length} tools\\b`, 'i'),

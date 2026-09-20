@@ -2,11 +2,23 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { resolveNpm } from './npm.mjs';
 import { isRuntimeSpecFor, normalizeRuntime } from './runtime.mjs';
 import { PACKAGE_NAME, VERSION } from './version.mjs';
 
 const npm = resolveNpm();
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const PACKAGE_CLI_ENTRY = path.join(PACKAGE_ROOT, 'bin', 'remcp.mjs');
+const PACKAGE_MANIFEST = path.join(PACKAGE_ROOT, 'package.json');
+
+function packageLocalNodeModules() {
+  const marker = `${path.sep}node_modules${path.sep}`;
+  const index = PACKAGE_ROOT.lastIndexOf(marker);
+  if (index < 0) return null;
+  return PACKAGE_ROOT.slice(0, index + `${path.sep}node_modules`.length);
+}
+
 // How long a handing-over agent waits for its replacement to take the device over before it keeps
 // running itself. Long enough for a fresh process to connect and be registered.
 const REPLACEMENT_HANDOVER_TIMEOUT_MS = 20_000;
@@ -19,6 +31,11 @@ function globalNodeModules() {
 
 export function localRuntimeEntry(runtimeValue) {
   const runtime = normalizeRuntime(runtimeValue);
+  const localModules = packageLocalNodeModules();
+  if (localModules) {
+    const sibling = path.join(localModules, ...runtime.packageName.split('/'), ...runtime.entry.split(/[\\/]+/));
+    if (existsSync(sibling)) return sibling;
+  }
   const candidate = path.join(globalNodeModules(), ...runtime.packageName.split('/'), ...runtime.entry.split(/[\\/]+/));
   if (!existsSync(candidate)) throw new Error('ReMCP local runtime is not installed. Run `remcp install`.');
   return candidate;
@@ -31,7 +48,7 @@ function parseVersion(value) {
   return match ? { parts: [Number(match[1]), Number(match[2]), Number(match[3])], prerelease: match[4] || '' } : null;
 }
 
-function isNewer(candidate, current) {
+export function isNewer(candidate, current) {
   const a = parseVersion(candidate);
   const b = parseVersion(current);
   if (!a || !b) return false;
@@ -142,7 +159,11 @@ export async function restartToApplyUpdate(cli, stopAgent, markStopping, onRunti
 // The version of the globally installed client, read from the package the CLI resolves to.
 export function globalInstalledVersion() {
   try {
-    const cli = globalCliEntry();
+    try {
+      const local = JSON.parse(readFileSync(PACKAGE_MANIFEST, 'utf8')).version;
+      if (local) return local;
+    } catch {}
+    const cli = globalCliEntry({ packageLocal:false });
     if (!cli) return null;
     const base = path.dirname(cli);
     const candidates = [
@@ -182,8 +203,12 @@ export function supervisorRestart({ platform = process.platform, dockerenv = exi
   return null;
 }
 
-export function globalCliEntry() {
-  const prefix = spawnSync(npm.command, [...npm.args, 'prefix', '--global'], { encoding: 'utf8' });
+export function globalCliEntry({ packageLocal = true } = {}) {
+  // The running agent already knows exactly which @remcp/remcp package owns it. Prefer the sibling
+  // CLI entry and avoid asking npm which global prefix happens to be active in a minimal service
+  // environment (FNM/NVM/Hermes/Homebrew can all disagree with the shell).
+  if (packageLocal && existsSync(PACKAGE_CLI_ENTRY)) return PACKAGE_CLI_ENTRY;
+  const prefix = spawnSync(npm.command, [...npm.args, 'prefix', '--global'], { encoding:'utf8' });
   if (prefix.error || prefix.status !== 0) return null;
   const base = String(prefix.stdout || '').trim();
   return process.platform === 'win32'

@@ -34,7 +34,7 @@ test('install uses a stable global CLI path and update refreshes/restarts it', (
   const launcherFile = path.join(configDir, 'remcp-agent-launcher');
   const unit = readFileSync(serviceFile, 'utf8');
   const escapedLauncher = launcherFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  assert.match(unit, new RegExp(`ExecStart="${escapedLauncher}" start`));
+  assert.match(unit, new RegExp(`ExecStart="${escapedLauncher}" start --service`));
   assert.match(readFileSync(launcherFile, 'utf8'), new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp`));
   let calls = readFileSync(log, 'utf8');
   assert.match(calls, new RegExp(`npm install --global @remcp/remcp@${VERSION.replaceAll('.', '\\.')}`));
@@ -51,7 +51,7 @@ test('install uses a stable global CLI path and update refreshes/restarts it', (
   assert.equal(update.status, 0, update.stderr || update.stdout);
   const repairedUnit = readFileSync(serviceFile, 'utf8');
   const repairedLauncher = readFileSync(launcherFile, 'utf8');
-  assert.match(repairedUnit, new RegExp(`ExecStart="${escapedLauncher}" start`));
+  assert.match(repairedUnit, new RegExp(`ExecStart="${escapedLauncher}" start --service`));
   assert.doesNotMatch(repairedUnit, /old\/nvm/);
   assert.match(repairedLauncher, new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp`));
   assert.doesNotMatch(repairedLauncher, /old\/nvm/);
@@ -86,7 +86,7 @@ test('a systemd unit without ExecStart is rewritten instead of leaving the old C
   assert.equal(update.status, 0, update.stderr || update.stdout);
   const unit = readFileSync(unitFile, 'utf8');
   const launcherFile = path.join(configDir, 'remcp-agent-launcher');
-  assert.match(unit, new RegExp(`ExecStart="${launcherFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" start`), 'the unit is rewritten to the stable launcher');
+  assert.match(unit, new RegExp(`ExecStart="${launcherFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" start --service`), 'the unit is rewritten to the stable supervisor-owned launcher');
   assert.match(readFileSync(launcherFile, 'utf8'), new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp`), 'the launcher targets the prefix npm installed into');
   assert.doesNotMatch(unit, /hand-edited/);
 });
@@ -413,4 +413,80 @@ test('macOS preference changes restart a loaded agent through the detached helpe
   assert.match(calls, /launchctl submit -l com\.remcp\.agent\.restart\./);
   assert.doesNotMatch(calls, /launchctl bootout/);
   assert.doesNotMatch(calls, /launchctl kickstart -k/, 'the caller must return before the helper performs the destructive restart');
+});
+
+
+test('update synchronizes an exact release pair into a distinct canonical service Node installation', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'remcp-cli-sync-'));
+  const home = path.join(root, 'home');
+  const configDir = path.join(root, 'config');
+  const fakeBin = path.join(root, 'bin');
+  const log = path.join(root, 'calls.log');
+  const servicePrefix = path.join(root, 'service-node');
+  const serviceNode = path.join(servicePrefix, 'bin', 'node');
+  const serviceCli = path.join(servicePrefix, 'lib', 'node_modules', '@remcp', 'remcp', 'bin', 'remcp.mjs');
+  const serviceClientPackage = path.join(servicePrefix, 'lib', 'node_modules', '@remcp', 'remcp', 'package.json');
+  const serviceRuntimePackage = path.join(servicePrefix, 'lib', 'node_modules', '@remcp', 'runtime', 'package.json');
+
+  mkdirSync(home, { recursive:true });
+  mkdirSync(configDir, { recursive:true });
+  mkdirSync(fakeBin, { recursive:true });
+  mkdirSync(path.dirname(serviceNode), { recursive:true });
+  mkdirSync(path.dirname(serviceCli), { recursive:true });
+  mkdirSync(path.dirname(serviceRuntimePackage), { recursive:true });
+  fakeExecutable(serviceNode, 'exit 0');
+  writeFileSync(serviceCli, '#!/usr/bin/env node\n');
+  writeFileSync(serviceClientPackage, JSON.stringify({ name:'@remcp/remcp', version:VERSION }));
+  writeFileSync(serviceRuntimePackage, JSON.stringify({ name:'@remcp/runtime', version:VERSION }));
+
+  writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
+    serverUrl:'https://remcp.site',
+    deviceId:'test',
+    deviceToken:'test',
+    deviceName:'test',
+    trustRuntime:true,
+    serviceInstalled:true,
+    serviceNodePath:serviceNode,
+    serviceCliPath:serviceCli,
+    runtime:{ kind:'npm', packageName:'@remcp/runtime', packageSpec:'@remcp/runtime@' + VERSION, entry:'src/index.mjs' },
+  }));
+  const serviceFile = path.join(home, '.config', 'systemd', 'user', 'remcp-agent.service');
+  mkdirSync(path.dirname(serviceFile), { recursive:true });
+  writeFileSync(serviceFile, '[Service]\nExecStart="/old/launcher" start\n');
+
+  fakeExecutable(path.join(fakeBin, 'npm'), [
+    'echo "npm $@" >> "$REMCP_TEST_LOG"',
+    'if [ "$1" = "prefix" ]; then echo "$REMCP_TEST_PREFIX"; fi',
+    'exit 0',
+  ].join('\n'));
+  fakeExecutable(path.join(fakeBin, 'systemctl'), 'echo "systemctl $@" >> "$REMCP_TEST_LOG"\nexit 0');
+
+  const env = {
+    ...process.env,
+    HOME:home,
+    REMCP_CONFIG_DIR:configDir,
+    REMCP_TEST_LOG:log,
+    REMCP_TEST_PREFIX:path.join(root, 'interactive-prefix'),
+    REMCP_NPM:path.join(fakeBin, 'npm'),
+    NODE_ENV:'test',
+    REMCP_TEST_PLATFORM:'linux',
+    INVOCATION_ID:'',
+    PATH:fakeBin + ':' + process.env.PATH,
+  };
+  const result = spawnSync(process.execPath, [
+    bin, 'update',
+    '--client', '@remcp/remcp@' + VERSION,
+    '--runtime', '@remcp/runtime@' + VERSION,
+  ], { env, encoding:'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const calls = readFileSync(log, 'utf8');
+  const needle = 'npm install --global @remcp/remcp@' + VERSION + ' @remcp/runtime@' + VERSION;
+  assert.ok(calls.split('\n').filter(line => line.includes(needle)).length >= 2,
+    'the exact release pair is installed in the invoking prefix and canonical service prefix');
+  const launcher = readFileSync(path.join(configDir, 'remcp-agent-launcher'), 'utf8');
+  assert.ok(launcher.includes(serviceNode));
+  assert.ok(launcher.includes(serviceCli));
+  const saved = JSON.parse(readFileSync(path.join(configDir, 'config.json'), 'utf8'));
+  assert.equal(saved.serviceNodePath, serviceNode);
+  assert.equal(saved.serviceCliPath, serviceCli);
 });

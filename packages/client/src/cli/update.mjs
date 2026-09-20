@@ -11,7 +11,7 @@ import { PACKAGE_NAME, VERSION } from '../version.mjs';
 import { loadConfig, saveConfig } from './config.mjs';
 import { installedVersion } from './doctor.mjs';
 import { linuxServiceFile, macServiceFile, officialOrigin } from './env.mjs';
-import { ensureServiceIfRecorded, npmGlobalInstall, restartPersistentServiceIfInstalled } from './service.mjs';
+import { currentInstallationInfo, ensureServiceIfRecorded, installationVersionsAtCliPath, npmGlobalInstall, persistentServiceExpected, rememberCurrentInstallation, restartPersistentServiceIfInstalled, serviceInstallationInfo, syncKnownInstallations } from './service.mjs';
 
 const UPDATE_DISCOVERY_TIMEOUT_MS = 5000;
 
@@ -168,19 +168,59 @@ export async function resolveUpdateTargets({
   }
 }
 
+export function updateAlreadyCurrent({ cfg, targets, currentInstall, serviceInstall, serviceExpected }) {
+  const targetClientVersion = specVersion(PACKAGE_NAME, targets?.clientSpec);
+  const targetRuntimeVersion = specVersion(cfg?.runtime?.packageName, targets?.runtimeSpec);
+  if (!targetClientVersion || !targetRuntimeVersion) return false;
+
+  const currentClientVersion = String(currentInstall?.cliVersion || '').trim();
+  const currentRuntimeVersion = String(currentInstall?.runtimeVersion || '').trim();
+  if (currentClientVersion !== targetClientVersion || currentRuntimeVersion !== targetRuntimeVersion) return false;
+
+  if (serviceExpected) {
+    if (String(serviceInstall?.cliVersion || '').trim() !== targetClientVersion) return false;
+    if (String(serviceInstall?.runtimeVersion || '').trim() !== targetRuntimeVersion) return false;
+  }
+
+  // A machine can have more than one Node manager. Do not claim "already current" while a known,
+  // still-existing ReMCP installation is recorded on an older release; the normal update path will
+  // converge it through syncKnownInstallations().
+  for (const item of Array.isArray(cfg?.installations) ? cfg.installations : []) {
+    const cliPath = String(item?.cliPath || '').trim();
+    if (!cliPath || !fs.existsSync(cliPath)) continue;
+    const actual = installationVersionsAtCliPath(cliPath, cfg.runtime.packageName);
+    if (String(actual.cliVersion || '').trim() !== targetClientVersion) return false;
+    if (String(actual.runtimeVersion || '').trim() !== targetRuntimeVersion) return false;
+  }
+  return true;
+}
+
 export async function updateCommand(flags) {
-  const cfg = loadConfig();
+  let cfg = rememberCurrentInstallation(loadConfig());
   const targets = await resolveUpdateTargets({ cfg, flags });
   if (targets.warning) console.error(`ReMCP update: ${targets.warning}`);
+
+  const currentInstall = currentInstallationInfo(cfg);
+  if (!currentInstall.runtimeVersion) currentInstall.runtimeVersion = installedVersion(cfg.runtime.packageName);
+  const serviceExpected = persistentServiceExpected(cfg);
+  const serviceInstall = serviceInstallationInfo(cfg);
+  const alreadyCurrent = targets.installable && updateAlreadyCurrent({
+    cfg,
+    targets,
+    currentInstall,
+    serviceInstall,
+    serviceExpected,
+  });
 
   if (flags.check) {
     console.log(JSON.stringify({
       current: VERSION,
-      installedRuntime: installedVersion(cfg.runtime.packageName),
+      installedRuntime: currentInstall.runtimeVersion,
       clientSpec: targets.clientSpec,
       runtimeSpec: targets.runtimeSpec,
       updateSource: targets.source,
       installable: targets.installable,
+      upToDate: alreadyCurrent,
       managedService: fs.existsSync(linuxServiceFile) || fs.existsSync(macServiceFile),
       supervisor: supervisorRestart() ?? 'none',
     }, null, 2));
@@ -191,14 +231,35 @@ export async function updateCommand(flags) {
     throw new Error(targets.warning || 'Could not resolve a complete client/runtime release pair.');
   }
 
+  if (alreadyCurrent) {
+    if (targets.persistRuntime) {
+      saveConfig({ ...cfg, runtime:{ ...cfg.runtime, packageSpec:targets.runtimeSpec } });
+    }
+    const currentRuntimeVersion = String(currentInstall.runtimeVersion || specVersion(cfg.runtime.packageName, targets.runtimeSpec) || '?');
+    console.log(`ReMCP is already up to date (client ${currentInstall.cliVersion || VERSION}, runtime ${currentRuntimeVersion}).`);
+    return;
+  }
+
   const before = { cli: VERSION, runtime: installedVersion(cfg.runtime.packageName) };
   console.log(`Updating ReMCP to ${targets.clientSpec} with ${targets.runtimeSpec}…`);
   npmGlobalInstall(targets.clientSpec, targets.runtimeSpec);
-  // The npm prefix can change across Node-manager upgrades. Repair an existing persistent-service
-  // launcher only after the install, when globalCliPath() points at the CLI we just installed.
+
+  // Converge every ReMCP installation this account has actually used on this machine. The canonical
+  // service installation is mandatory; secondary nvm/Hermes/Homebrew copies are best-effort and
+  // remain visible in status if they cannot be updated.
+  const synced = syncKnownInstallations(cfg, targets.clientSpec, targets.runtimeSpec);
+  for (const item of synced) {
+    if (!item.ok) console.error(`ReMCP update: could not sync secondary installation at ${item.nodePath}: ${item.error}`);
+  }
+
+  // Persist the validated runtime pair before repairing the supervisor so a repair cannot be
+  // overwritten by an older in-memory config object.
+  if (targets.persistRuntime) {
+    saveConfig({ ...cfg, runtime:{ ...cfg.runtime, packageSpec:targets.runtimeSpec } });
+    cfg = loadConfig();
+  }
   ensureServiceIfRecorded(cfg);
-  // Only a validated spec is persisted, so a failed update cannot leave the install unable to start.
-  if (targets.persistRuntime) saveConfig({ ...cfg, runtime: { ...cfg.runtime, packageSpec: targets.runtimeSpec } });
+  cfg = loadConfig();
   const after = { cli: installedVersion(PACKAGE_NAME), runtime: installedVersion(cfg.runtime.packageName) };
   const restarted = restartPersistentServiceIfInstalled(cfg);
   if (restarted) {

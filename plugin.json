@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "remcp",
-  "version": "0.2.47",
-  "description": "Work with files, images, searches, terminal sessions, and processes on computers you have explicitly paired with ReMCP.",
+  "version": "0.2.48",
+  "description": "Securely operate computers you explicitly pair with ReMCP using semantic desktop UI, browser DOM/CDP, files, terminal, diagnostics, and structured document tools.",
   "author": {
     "name": "Anton Baider",
     "url": "https://remcp.site"
@@ -15,23 +15,30 @@
     "remote-computer",
     "developer-tools",
     "files",
-    "terminal"
+    "terminal",
+    "computer-use",
+    "browser-automation",
+    "accessibility"
   ],
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "ReMCP",
-        "shortDescription": "Control your own computers",
+        "shortDescription": "Operate your paired computers",
         "developerName": "Anton Baider",
-        "longDescription": "ReMCP connects ChatGPT and Codex to computers you have explicitly paired, and to nothing else. Each computer runs an outbound agent with its own revocable credential, so no inbound port is opened and access can be withdrawn from the workspace at any time. Work with files and directories, read images and screenshots, transfer binaries, create and extract archives, search local content, and run or manage terminal sessions and processes. Read-only tools are annotated as such, and every tool that changes local state is annotated with a destructive hint. An isolated review sandbox is available for evaluation without a real computer.",
+        "longDescription": "ReMCP connects ChatGPT and Codex only to computers the signed-in user explicitly pairs. Each computer runs an outbound agent with its own revocable credential, so no inbound port is opened. Agents can inspect and operate native desktop UI through Accessibility/UI Automation, automate debuggable Chromium pages through loopback CDP, enter text and keyboard/pointer input, work with files and terminal sessions, inspect services/logs/network state, and read or edit PDF/DOCX/XLSX content. Semantic UI and browser DOM are preferred before OCR or coordinates. Tool schemas, output schemas, safety annotations, path confinement, command policy, and OAuth stay enforced server-side. An isolated review sandbox is available for evaluation without a real computer.",
         "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
         "websiteURL": "https://remcp.site",
         "privacyPolicyURL": "https://remcp.site/privacy",
         "termsOfServiceURL": "https://remcp.site/terms",
         "defaultPrompt": [
-          "Show my paired ReMCP computers and tell me which ones are online.",
-          "Read a README file from one of my ReMCP computers and summarize it without changing anything.",
-          "Take a screenshot from one of my ReMCP computers and show it to me."
+          "On my paired laptop, inspect the browser page semantically, make my requested change, then verify it with a targeted screenshot.",
+          "Read a README from one of my ReMCP computers, summarize it without changing it, then show the interactive file preview.",
+          "Inspect what is visible on one paired computer using semantic UI first, and use a screenshot only when visual proof adds value."
         ],
         "brandColor": "#4C50D8",
         "composerIcon": "./assets/remcp-icon.png",

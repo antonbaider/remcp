@@ -17,8 +17,8 @@ credential under `~/.config/remcp/`, installs the runtime from npm, and register
 ## Commands
 
 ```text
-remcp start                  Run the device agent in the foreground
-remcp status                 Show version, pairing, runtime, telemetry and server health as JSON
+remcp start                  Run the device agent when no managed background service is already running
+remcp status                 Show device/agent versions, update consistency and server reachability as JSON
 remcp doctor                 Same report plus a real tool handshake with the local runtime, and which
                              macOS privacy folders (Desktop, Documents, Downloads, iCloud Drive) this
                              computer currently lets ReMCP use
@@ -31,8 +31,7 @@ remcp godmode [status|on|off]
 remcp --version
 ```
 
-`remcp status` reports the runtime the device would install, whether the agent service is running,
-and the current usage-metrics state, so a support request can be answered with one paste.
+`remcp status` reports the configured/installed runtime, the managed-agent state, whether multiple local ReMCP installations are consistent, whether an update is required, server reachability, and the current usage-metrics state. It deliberately does not expose backend database/provider, relay topology, fleet size, or other operational internals. `remcp doctor` adds local runtime/filesystem diagnostics, so a support request can still be answered with one paste.
 
 ## Unrestricted mode
 
@@ -66,11 +65,15 @@ permission, and `remcp doctor` reports the state of each one.
 
 ## Updates
 
-The agent asks the server which versions it should run when it connects and every six hours, installs
-a newer client and runtime in the background, and restarts the service so they take effect. A failed
-install is retried no more often than every thirty minutes, so a broken release cannot turn into an
-install loop. `remcp update` does the same immediately; `remcp auto-update off` turns the automatic
-check off for a machine that must not change on its own.
+The agent asks the server which versions it should run on every successful connection and every six hours, installs the exact trusted client/runtime release pair in the background, and restarts the managed service so it takes effect. The updater resolves itself and the sibling runtime from the package that is actually running instead of depending on an interactive shell PATH. When the same computer has been used from more than one Node manager (for example NVM plus Hermes/FNM/Homebrew), ReMCP keeps the canonical service installation stable and converges the known local installations on the same release pair. `remcp status` reports mixed installations instead of hiding the skew. A failed install is retried no more often than every thirty minutes and update-check failures are logged, so a broken release cannot become a silent install loop. `remcp update` does the same immediately; `remcp auto-update off` disables automatic checks.
+
+## Computer-use routing
+
+When an AI host controls a visible application, ReMCP is designed for semantic targeting rather than screenshot-coordinate loops:
+
+`Accessibility/UI Automation → browser DOM/CDP → OCR → coordinates`
+
+Use `computer_snapshot` for an unfamiliar state, native `ui_*` tools for desktop applications, and `browser_*` tools for debuggable Chromium page content. `browser_navigate action=new_tab` can create the first page target when the debug browser has none. `type_text` with its default `method=auto` is for exact Unicode text; `keyboard` is for shortcuts and navigation/control keys. `type_text method=keys` emits physical keys and therefore follows the computer's active keyboard layout. Prefer `wait_for_ui` or `browser_wait` to fixed sleeps and use `screenshot_region` only when pixel/layout verification adds information. For PDF/DOCX/XLSX content, use the structured document tools before automating Office applications.
 
 ## Screenshots
 

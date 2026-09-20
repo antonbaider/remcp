@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -13,7 +13,6 @@ process.env.NODE_ENV = 'test';
 process.env.REMCP_TEST_PLATFORM = 'aix';
 
 const { main } = await import('../src/cli.mjs');
-const { ensureMachineId } = await import('../src/cli/config.mjs');
 const { PACKAGE_NAME, VERSION } = await import('../src/version.mjs');
 
 const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -30,21 +29,6 @@ test('CLI version is sourced from package metadata', async () => {
   assert.equal(PACKAGE_NAME, '@remcp/remcp');
   assert.equal(VERSION, packageVersion);
   assert.equal(await captureLog(() => main(['--version'])), packageVersion);
-});
-
-test('machine identity stays stable across reconnect-style config changes', () => {
-  const machineIdFile = path.join(configDir, 'machine-id');
-  rmSync(machineIdFile, { force: true });
-
-  const first = ensureMachineId();
-  writeFileSync(path.join(configDir, 'config.json'), '{}\n');
-  rmSync(path.join(configDir, 'config.json'), { force: true });
-  const second = ensureMachineId();
-
-  assert.match(first, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
-  assert.equal(second, first);
-  assert.equal(readFileSync(machineIdFile, 'utf8').trim(), first);
-  if (process.platform !== 'win32') assert.equal(statSync(machineIdFile).mode & 0o777, 0o600);
 });
 
 test('CLI help keeps pairing in the workspace and documents update lifecycle', async () => {

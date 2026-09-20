@@ -26,7 +26,8 @@ test('doctor resolves the runtime, performs a real handshake and reports a verdi
     const report = JSON.parse(output.slice(start, output.lastIndexOf('}') + 1));
     assert.equal(report.configured, true);
     // The server is unreachable on port 9, which must be reported, not thrown.
-    assert.ok(report.serverHealth.error || report.serverHealth.ok === undefined);
+    assert.equal(report.server.reachable, false);
+    assert.ok(report.server.error);
     assert.ok(report.diagnosis, 'the diagnosis is always present');
     assert.ok(['ok', 'runtime-not-installed', 'runtime-entry-missing', 'runtime-handshake-failed'].includes(report.diagnosis.verdict));
     assert.equal(typeof report.diagnosis.entryExists, 'boolean');

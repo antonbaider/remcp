@@ -1,10 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { supervisorRestart, updateDecision } from '../src/agent.mjs';
-import { updateInvocationArgs } from '../src/agent-update.mjs';
+import { globalCliEntry, globalInstalledVersion, updateInvocationArgs } from '../src/agent-update.mjs';
+import { VERSION } from '../src/version.mjs';
 
 const advertised = (cli, runtime) => ({ cli, runtime, minimum: '0.1.0' });
 const decide = input => updateDecision({ runtimePackageName: '@remcp/runtime', ...input });
+
+test('auto-updater resolves the CLI and installed version from the package that is actually running', () => {
+  const cli = globalCliEntry();
+  assert.ok(cli, 'package-local CLI is available without relying on npm prefix discovery');
+  assert.match(cli.replaceAll('\\\\','/'), /\/bin\/remcp\.mjs$/);
+  assert.equal(globalInstalledVersion(), VERSION);
+});
 
 // The update hands the device over by exiting, so the agent must know whether anything will start it
 // again. systemd sets INVOCATION_ID and JOURNAL_STREAM for a unit and every child of that unit

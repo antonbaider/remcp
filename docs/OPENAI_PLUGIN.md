@@ -19,8 +19,7 @@ plugin name.
 The rest of this document is for **developers and reviewers**.
 
 ReMCP ships a production OpenAI Plugins package for ChatGPT and Codex. It combines the hosted remote
-MCP server with five shared operational skills, review metadata, and two self-contained MCP App
-resources for file and image previews.
+MCP server with five shared operational skills, review metadata, a self-contained file editor MCP App, a shared fullscreen image viewer layered on native MCP image/screenshot content, and a compact terminal-output MCP App attached directly to process-result tools.
 
 This is the **OpenAI-specific** package. Claude Code packaging lives beside it and does not replace,
 rename, or regenerate the files described here.
@@ -33,8 +32,8 @@ rename, or regenerate the files described here.
 | Manifest | `plugin.json` |
 | MCP configuration | `mcp.json` |
 | Shared skills | 5 |
-| Hosted tool surface | 52 tools |
-| Rich UI | file preview/editor + image/screenshot preview |
+| Hosted tool surface | 92 tools |
+| Rich UI | compact file editor/diff, one-tap fullscreen image viewer, and terminal output viewer; image/terminal UI is attached to existing result tools without extra model-facing render tools |
 | Authentication | OAuth authorization code + PKCE, OIDC/UserInfo metadata |
 | Public overview | [`docs/PLUGINS.md`](PLUGINS.md) |
 
@@ -72,11 +71,11 @@ rename, or regenerate the files described here.
 8. In the portal choose **With MCP → Universal**, enter `https://remcp.site/mcp`, configure OAuth, then **Scan Tools**.
 9. Let **Scan Tools** import the five skills from the MCP skills extension. If the portal explicitly asks for a bundle instead, upload `submission/remcp-plugin.zip`.
 10. Enter the three starter prompts and the 5 positive / 3 negative test cases from `chatgpt-app-submission.json`.
-11. Screenshots are optional. If you include them, capture 3 current ChatGPT PNG/JPEG screenshots — one per starter prompt — each exactly 706 px wide and 400–860 px high. Make the set demonstrate both deployed MCP App components (file preview/editor and image/screenshot preview), and use the synthetic `review-sandbox` image whenever the image preview is shown so no private computer screen appears in submission materials.
+11. Screenshots are currently omitted. They are optional. If you add them while the listing has three starter prompts, provide exactly 3 current ChatGPT PNG/JPEG captures (one per prompt), each exactly 706 px wide and 400–860 px high. Show the deployed file editor/diff, fullscreen image viewer, or terminal viewer as appropriate, using only synthetic `review-sandbox` data so no private computer screen appears in submission materials.
 12. Select only regions where the hosted service, support, privacy policy, and terms are ready.
 13. Review the final policy attestations manually and submit for review.
 
-ReMCP has two self-contained plugin UI components. They are served as MCP App resources and use no external assets or network fetches; the portal screenshots should show the deployed ChatGPT rendering, not a mockup.
+ReMCP has three current self-contained MCP Apps: file preview/editor, image viewer, and terminal output viewer. They use no external assets or network fetches. Image tools keep native MCP image content and attach the viewer only as presentation; terminal process-result tools attach their viewer directly, so neither feature adds a competing model-facing render tool. All three support host-negotiated fullscreen; image adds pinch zoom/pan/reset, file adds syntax highlighting plus added/removed-line review, and terminal adds wrap/copy/refresh of the same process output.
 
 ## Review-sensitive behavior
 

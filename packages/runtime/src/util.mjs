@@ -88,8 +88,16 @@ function resolvedRoots() {
 // Canonical, allowlist-checked path for every file tool. The canonical path is what
 // callers must use, so a symlink cannot be swapped between the check and the access.
 export async function resolveSafePath(value, field = 'path') {
-  const absolute = resolveInputPath(value, field);
+  const raw = expandHome(requireString(value, field));
+  if (raw.includes('\0')) fail(`${field} contains an invalid character`);
+  const absolute = path.resolve(raw);
   if (!runtimeConfig.allowedRoots.length) return absolute;
+
+  // Canonicalize both sides before enforcing confinement. This matters on macOS where
+  // /var is a symlink to /private/var: a safe path returned by an earlier canonicalization
+  // must not be rejected merely because its lexical prefix differs from the configured root.
+  // Symlink escapes remain blocked because the final canonical target must still be inside
+  // one of the canonical allowed roots.
   const canonical = await canonicalizePath(absolute);
   const roots = await resolvedRoots();
   if (!roots.some(root => isInsideRoot(canonical, root))) {
@@ -143,6 +151,21 @@ export function text(value, isError = false) {
     ? rendered
     : `${rendered.slice(0, 512)}… (${size} bytes total; the full result is in the text content)`;
   return { content: [{ type: 'text', text: rendered }], structuredContent: { text: mirror }, ...(isError ? { isError: true } : {}) };
+}
+
+export function structured(value, fallbackText = null) {
+  const serialized = JSON.stringify(value);
+  const bytes = Buffer.byteLength(serialized ?? 'null', 'utf8');
+  const rendered = truncate(fallbackText == null ? JSON.stringify(value, null, 2) : String(fallbackText));
+  let structuredContent;
+  if (bytes > STRUCTURED_MIRROR_LIMIT_BYTES) {
+    structuredContent = { truncated: true, bytes, preview: rendered.slice(0, 2048) };
+  } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+    structuredContent = value;
+  } else {
+    structuredContent = { data: value };
+  }
+  return { content: [{ type: 'text', text: rendered }], structuredContent };
 }
 
 export function image(data, mimeType) {

@@ -16,21 +16,6 @@
 </p>
 
 <p align="center">
-  <a href="https://remcp.site/install/chatgpt"><img alt="ChatGPT plugin" src="https://img.shields.io/badge/ChatGPT-plugin-1f2328?style=flat-square"></a>
-  <a href="https://remcp.site/install/chatgpt"><img alt="Codex plugin" src="https://img.shields.io/badge/Codex-plugin-1f2328?style=flat-square"></a>
-  <a href="https://remcp.site/install/claude"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-1f2328?style=flat-square"></a>
-  <a href="https://cursor.com/marketplace"><img alt="Cursor Marketplace" src="https://img.shields.io/badge/Cursor-marketplace-1f2328?style=flat-square"></a>
-  <a href="docs/PLUGINS.md#gemini-cli"><img alt="Gemini CLI extension" src="https://img.shields.io/badge/Gemini%20CLI-extension-1f2328?style=flat-square"></a>
-  <a href="https://github.com/github/awesome-copilot/issues/3326"><img alt="GitHub Copilot CLI plugin" src="https://img.shields.io/badge/Copilot%20CLI-plugin-1f2328?style=flat-square"></a>
-  <a href="https://github.com/github/awesome-copilot/issues/3326"><img alt="VS Code Agent Plugin" src="https://img.shields.io/badge/VS%20Code-agent%20plugin-1f2328?style=flat-square"></a>
-  <a href="https://kiro.dev/powers/"><img alt="Kiro Power" src="https://img.shields.io/badge/Kiro-power-1f2328?style=flat-square"></a>
-  <a href="https://github.com/cline/mcp-marketplace/issues/2573"><img alt="Cline MCP Marketplace" src="https://img.shields.io/badge/Cline-MCP-1f2328?style=flat-square"></a>
-  <a href="https://smithery.ai/servers/antonbaider/remcp"><img alt="Smithery directory" src="https://img.shields.io/badge/Smithery-directory-1f2328?style=flat-square"></a>
-  <a href="https://glama.ai/mcp/servers/antonbaider/remcp"><img alt="Glama quality score" src="https://glama.ai/mcp/servers/antonbaider/remcp/badges/score.svg"></a>
-  <a href="docs/PLUGINS.md#smithery-glama-and-the-official-mcp-registry"><img alt="Official MCP Registry" src="https://img.shields.io/badge/MCP%20Registry-published-1f2328?style=flat-square"></a>
-</p>
-
-<p align="center">
   <a href="https://remcp.site">Website</a> ·
   <a href="https://remcp.site/plugins">Plugins</a> ·
   <a href="https://remcp.site/docs">Docs</a> ·
@@ -50,7 +35,7 @@ Registry metadata, and the host-specific OpenAI and Anthropic plugin packaging.
 | Package | What it is |
 | --- | --- |
 | [`@remcp/remcp`](packages/client) | The device client: pairing, the outbound agent, the background service, and the usage-metrics switch. |
-| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **44 MCP tools** for files, images, binary transfer, archives, screenshots, search, terminal sessions, processes, and narrowly scoped runtime preferences, with **two direct dependencies**. |
+| [`@remcp/runtime`](packages/runtime) | The first-party local runtime: **83 MCP tools** for files, images, binary transfer, archives, screenshots, search, terminal/process work, native desktop UI, loopback browser CDP, diagnostics, lightweight documents, and narrowly scoped runtime preferences, with **two direct dependencies**. |
 
 ## Install
 
@@ -71,9 +56,9 @@ runtime and registers the background service.
 
 | Command | Purpose |
 | --- | --- |
-| `remcp start` | Start the device agent in the foreground |
-| `remcp status` | Show pairing, runtime, telemetry, and service health as JSON |
-| `remcp doctor` | Alias for `status` |
+| `remcp start` | Start the device agent when no managed background service is already running |
+| `remcp status` | Show device, client/runtime versions, managed-agent state, update consistency and server reachability as JSON |
+| `remcp doctor` | Status plus a real local-runtime handshake and filesystem diagnostics |
 | `remcp install` | Install or repair the persistent user service |
 | `remcp update` | Update the client and runtime, then restart the service |
 | `remcp uninstall` | Stop and remove the user service |
@@ -166,7 +151,7 @@ either host-specific contract drifts from the shared ReMCP version or production
 with, [DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) or any other MCP
 server.
 
-**44 tools:**
+**83 tools:**
 
 | Area | Tools |
 | --- | --- |
@@ -179,8 +164,28 @@ server.
 | Search | `start_search`, `get_more_search_results`, `stop_search`, `list_searches` |
 | Processes | `start_process`, `read_process_output`, `wait_for_process_output`, `interact_with_process`, `force_terminate`, `list_sessions`, `list_processes`, `kill_process` |
 | Runtime | `get_system_info`, `get_runtime_info`, `get_runtime_stats`, `set_config_value` |
+| Computer use | `computer_snapshot`, `computer_action`, `list_windows`, `window_action`, `launch_app`, `ui_snapshot`, `ui_find`, `ui_action`, `type_text`, `keyboard`, `pointer`, `drag_drop`, `scroll`, `wait_for_ui`, `clipboard`, `display_inventory`, `screenshot_region`, `open_path`, `reveal_path`, `notification` |
+| Browser | `browser_tabs`, `browser_navigate`, `browser_snapshot`, `browser_find`, `browser_action`, `browser_wait`, `browser_evaluate` |
+| Diagnostics | `service`, `event_log`, `network`, `installed_apps`, `environment`, `audio`, `power_action`, `record_screen` |
+| Documents | `read_document`, `edit_spreadsheet`, `edit_document`, `pdf_action` |
 
-The hosted ReMCP endpoint adds eight account/relay tools, so ChatGPT currently scans **52 tools**.
+The hosted ReMCP endpoint has nine hosted account/presentation tools in its full UI-capable catalog, for **92 tools**. Plain MCP clients that do not negotiate MCP Apps receive 91 tools because `render_file_preview` is omitted. `read_file` stays data-first and may return a short-lived `preview_id`; `render_file_preview` accepts only that id and renders the exact already-read payload without a second device RPC. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
+
+### Tool selection for AI agents
+
+ReMCP publishes selection-oriented descriptions and ships the same decision tree in its operator skill:
+
+`native Accessibility/UI Automation → browser DOM/CDP → OCR → coordinates`
+
+- Start unfamiliar desktop work with `computer_snapshot`; use `ui_snapshot/ui_find/ui_action` for native apps.
+- For Chromium page content use `browser_navigate action=new_tab` when needed, then `browser_snapshot/browser_find/browser_action/browser_wait` instead of desktop coordinates.
+- Use `type_text` for normal Unicode text and `keyboard` for shortcuts/navigation keys.
+- Use `pointer` only when semantic actions cannot express the task; prefer element ids for `drag_drop`.
+- Use `wait_for_ui` / `browser_wait` instead of fixed sleeps.
+- Use `screenshot_region` for targeted visual proof and `record_screen` only for motion/timing.
+- Use structured document tools instead of automating Office when the request is about file content.
+
+All 39 computer/browser/diagnostic/document tools declare closed top-level input schemas, parameter descriptions, structured output schemas, and MCP read-only/destructive/idempotent/open-world hints.
 
 **Why the tool list looks different from other computer-control servers.** Security-sensitive
 configuration remains deliberately narrow, and everything else the alternatives can do has an
@@ -188,7 +193,7 @@ equivalent here — usually more than one:
 
 | Not included | Why |
 | --- | --- |
-| `write_pdf`, spreadsheet and DOCX editing | These are the reason other servers ship Puppeteer, `sharp`, and `exceljs` — ReMCP does not bundle that browser/document-rendering stack. |
+| Bundled browser/document rendering stacks | ReMCP supports lightweight DOCX/XLSX/PDF operations but deliberately uses OOXML and existing system PDF utilities instead of bundling Puppeteer, `sharp`, `exceljs`, or Chromium. |
 | Broad configuration mutation | `set_config_value` can change only telemetry and context/output preferences. Access roots, blocked commands, command policy, shell, write limit and unrestricted mode stay local to the computer. |
 | URL fetching in `read_file` | It is a server-side request forgery surface. The runtime reads your computer, not the internet. |
 

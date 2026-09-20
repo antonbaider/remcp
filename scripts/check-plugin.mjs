@@ -15,9 +15,45 @@ export function checkPlugin(root = fileURLToPath(new URL('..', import.meta.url))
   assert.equal(mcp.mcpServers.remcp.url, 'https://remcp.site/mcp');
   const files = ['plugin.json', 'mcp.json'];
   const iface = plugin.extensions['com.openai'].interface;
+  assert.deepEqual(iface.capabilities, ['Read', 'Write'], 'OpenAI interface declares the read/write capability shown by the actual tool surface');
   for (const asset of new Set([iface.logo, iface.composerIcon])) {
     assert.match(asset, /^\.\/assets\/[\w.-]+$/, 'icons must be bundled assets');
     files.push(asset.slice(2));
+  }
+  if (iface.screenshots !== undefined) {
+    assert.ok(Array.isArray(iface.screenshots) && iface.screenshots.length > 0, 'screenshots must be a non-empty array when supplied');
+    assert.equal(iface.screenshots.length, iface.defaultPrompt?.length || 0, 'OpenAI requires exactly one screenshot for each starter prompt when screenshots are supplied');
+    const dimensions = buffer => {
+      const isPng = buffer.length >= 24 && buffer.subarray(0, 8).toString('hex') === '89504e470d0a1a0a';
+      if (isPng) return { type:'png', width:buffer.readUInt32BE(16), height:buffer.readUInt32BE(20) };
+      if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
+        let offset = 2;
+        while (offset + 8 < buffer.length) {
+          if (buffer[offset] !== 0xff) { offset += 1; continue; }
+          const marker = buffer[offset + 1];
+          offset += 2;
+          if (marker === 0xd8 || marker === 0xd9 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+          if (offset + 2 > buffer.length) break;
+          const length = buffer.readUInt16BE(offset);
+          if (length < 2 || offset + length > buffer.length) break;
+          if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) || (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+            return { type:'jpeg', height:buffer.readUInt16BE(offset + 3), width:buffer.readUInt16BE(offset + 5) };
+          }
+          offset += length;
+        }
+      }
+      return null;
+    };
+    for (const asset of iface.screenshots) {
+      assert.match(asset, /^\.\/assets\/[\w.-]+\.(?:png|jpe?g)$/i, 'screenshots must be bundled PNG or JPEG assets');
+      const relative = asset.slice(2);
+      const image = read(relative);
+      const size = dimensions(image);
+      assert.ok(size, `${relative} is a valid PNG or JPEG`);
+      assert.equal(size.width, 706, `${relative} must be exactly 706 px wide`);
+      assert.ok(size.height >= 400 && size.height <= 860, `${relative} height must be 400–860 px`);
+      files.push(relative);
+    }
   }
   const walk = relative => {
     for (const entry of readdirSync(join(root, relative), { withFileTypes: true })) {

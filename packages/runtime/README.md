@@ -1,12 +1,13 @@
 # ReMCP local runtime
 
 `@remcp/runtime` is the local device runtime for [ReMCP](https://remcp.site). It is an MCP
-server that runs on a computer you paired with ReMCP and executes the file, image, search, terminal,
-and process tools that the hosted ReMCP MCP endpoint exposes to ChatGPT and Codex.
+server that runs on a computer you paired with ReMCP and executes file, image, search, terminal,
+process, desktop UI, browser, diagnostics, and document tools exposed through the hosted ReMCP MCP endpoint.
 
 The ReMCP device agent starts this runtime as a child process and talks to it over stdio. The runtime
-never talks to the network on its own: it only answers the paired agent, which holds the device
-credential you can revoke at any time.
+has no independent cloud service or telemetry endpoint: browser automation connects only to a loopback
+Chrome DevTools endpoint, while the explicit `network` diagnostic and commands you run can reach the
+network when requested. The device credential remains in the paired agent and can be revoked at any time.
 
 ## Install
 
@@ -27,8 +28,10 @@ npx @remcp/runtime              # MCP server over stdio
 
 ## Tools
 
-44 tools, all implemented in this repository. Nothing is gated behind an approval step: a tool call
-executes.
+83 tools are implemented in this repository: the original 44 filesystem/search/terminal/process tools
+plus 39 computer-use, browser, diagnostics, and document tools. The release contract contains all 83;
+the live local MCP `tools/list` omits optional platform-specific tools that the current computer cannot
+support and emits `notifications/tools/list_changed` when that capability set changes. The stdio server is dual-era: existing 2025-era clients continue to work unchanged, while clients that negotiate MCP `2026-07-28` use `server/discover`, cache hints, unrestricted structured output validation, and `subscriptions/listen` for list-change delivery.
 
 | Area | Tools |
 | --- | --- |
@@ -41,18 +44,25 @@ executes.
 | Search | `start_search`, `get_more_search_results`, `stop_search`, `list_searches` |
 | Processes | `start_process`, `read_process_output`, `wait_for_process_output`, `interact_with_process`, `force_terminate`, `list_sessions`, `list_processes`, `kill_process` |
 | Runtime | `get_system_info`, `get_runtime_info`, `get_runtime_stats`, `set_config_value` |
+| Computer use | `computer_snapshot`, `computer_action`, `list_windows`, `window_action`, `launch_app`, `ui_snapshot`, `ui_find`, `ui_action`, `type_text`, `keyboard`, `pointer`, `drag_drop`, `scroll`, `wait_for_ui`, `clipboard`, `display_inventory`, `screenshot_region`, `open_path`, `reveal_path`, `notification` |
+| Browser | `browser_tabs`, `browser_navigate`, `browser_snapshot`, `browser_find`, `browser_action`, `browser_wait`, `browser_evaluate` |
+| Diagnostics | `service`, `event_log`, `network`, `installed_apps`, `environment`, `audio`, `power_action`, `record_screen` |
+| Documents | `read_document`, `edit_spreadsheet`, `edit_document`, `pdf_action` |
 
 The hosted ReMCP endpoint adds eight account/relay tools — `list_devices`, `ping_device`,
 `who_am_i`, `create_pairing_command`, `get_recent_tool_calls`, `get_usage_statistics`,
-`get_configuration`, and `rename_device` — for a 52-tool public surface. Everything else the
-agent may need, including service management, package installs, git and docker, runs through
-`start_process` with the permissions of the account running the agent.
+`get_configuration`, and `rename_device` — for a 91-tool release contract.
 
-`set_config_value` is deliberately narrow: it can change only `telemetryEnabled`,
+`computer_snapshot` and `computer_action` keep OCR inside the compact high-level surface: when a local `tesseract` binary is available, snapshot can return bounded OCR text/boxes and click targeting can fall back through Accessibility → browser DOM/CDP → OCR → coordinates. OCR is optional and never adds another MCP tool or bundled OCR dependency.
+
+For frontend QA, use semantic data to operate the page and rendered pixels to verify it: `browser_action(action="set_viewport")` sets an exact responsive-test viewport, `browser_wait` waits for the real application state, and `browser_snapshot(include_screenshot=true, selector=...)` recenters the component, returns its bounds, and attaches the real CDP-rendered viewport PNG. This intentionally treats screenshots as the visual oracle without making screenshot-driven coordinate guessing the primary control path.
+
+`set_config_value` remains deliberately narrow: it can change only `telemetryEnabled`,
 `maxReadLines`, `maxBufferedLines`, and `maxOutputBytes`. Access roots, blocked commands,
 the command guardrail, shell, write limit, runtime name, and unrestricted mode stay with the person
-at the computer. There is no `write_pdf`/spreadsheet/DOCX tooling; use `start_process` with the
-document tools already installed on your machine.
+at the computer. DOCX/XLSX edits operate directly on OOXML, while structural PDF writes use existing
+system tools such as qpdf/poppler when present; ReMCP still does not bundle Chromium, Puppeteer,
+`sharp`, or `exceljs`.
 
 `--print-tools` prints the exact JSON contract (schemas and annotations) the runtime advertises, and
 `src/catalog.mjs` is the single source of truth for it.
@@ -60,8 +70,14 @@ document tools already installed on your machine.
 ## No approval staircase
 
 ReMCP is a remote control for computers you own, with the same trust model as SSH: the tool call runs,
-and the user's request is the authorization. There is no approval prompt, no "are you sure", and no
-dry-run detour unless you ask for one.
+and the user's request is the authorization. ReMCP adds no per-tool approval prompt, no "are you sure",
+and no dry-run detour unless you ask for one.
+
+Operating-system security boundaries still apply. macOS can require Accessibility/Screen Recording grants,
+and GNOME Wayland requires a one-time XDG RemoteDesktop consent before low-level keyboard/pointer input.
+ReMCP does not bypass those controls: after GNOME grants access, the portal restore token is stored locally
+under the runtime config directory with mode `0600` and reused when the portal permits it. Semantic AT-SPI
+UI actions and the XDG Screenshot portal remain separate from that low-level input permission.
 
 - file writes replace by default (`mode: "append"` to add), moves and copies replace the destination
   (`overwrite: false` refuses instead), `replace_in_files` applies immediately (`dry_run: true`
@@ -106,9 +122,10 @@ in `~/.config/remcp/runtime.json`. `--describe` always reports the current state
 
 ## Runtime properties
 
-- **No network calls of its own.** The runtime opens no sockets: every byte it emits goes to the
-  paired agent. Shell commands it runs can of course reach the network, exactly as they would from
-  your own terminal.
+- **No independent cloud control plane.** Telemetry and device RPC still leave only through the paired
+  agent. Browser control accepts only loopback CDP endpoints. The explicit `network` diagnostic can
+  open a bounded TCP connection to a host/port, and shell/browser actions can reach the network when
+  the requested operation itself requires it.
 - **Optional confinement.** `allowedRoots` is empty by default. When you set it, it is enforced
   against the resolved real path of the deepest existing ancestor rather than the lexical string, so
   `<allowed>/link -> /etc` cannot be used to read or write outside the allowed directories.
@@ -194,8 +211,8 @@ MCP server.
 
 | | Desktop Commander 0.2.50 | ReMCP runtime |
 | --- | --- | --- |
-| Tools | 26, including config mutators and document tooling | 44, including binary transfer, bulk file operations, archives, screenshots, search, process control, and narrowly scoped runtime preferences |
-| Runtime dependencies | 34 (Supabase, Puppeteer/md-to-pdf, `sharp`, `exceljs`, Tiptap, ripgrep download) | 2 direct (`@modelcontextprotocol/sdk`, `@jellybrick/dbus-next`) |
+| Tools | 26, including config mutators and document tooling | 83, including filesystem/terminal plus native desktop UI, browser CDP, diagnostics, and lightweight document operations |
+| Runtime dependencies | 34 (Supabase, Puppeteer/md-to-pdf, `sharp`, `exceljs`, Tiptap, ripgrep download) | 2 production-direct (`@modelcontextprotocol/server` v2, `@jellybrick/dbus-next`); legacy/modern clients are dev-only compatibility tests |
 | Install scripts | `postinstall` posts an install payload that ignores the telemetry setting | none |
 | Telemetry | opt-out, 51 event names, remote feature flags, A/B assignment, third-party processor | opt-out, whitelisted event schema, no endpoint, no flags |
 | Package footprint | 3.78 MB unpacked, 249 files | small first-party runtime package; no bundled browser or document-rendering stack |
@@ -206,12 +223,12 @@ MCP server.
 | Images | file preview UI in a specific client | `read_image` returns the image to any MCP client |
 | Termination | session kill only | whole process group, plus runtime supervision and restart |
 
-What ReMCP deliberately does not implement, and why: document rendering (`write_pdf`) and spreadsheet
-handling would put Puppeteer, `sharp`, and `exceljs` on your computer; unrestricted configuration
-mutation is intentionally absent — `set_config_value` is limited to four non-security preferences,
-while access roots and command security remain local; local usage history would write your arguments
-to disk; URL reads in `read_file` would add an SSRF surface. Everything else the upstream server can
-do has an equivalent here, and the tool count is higher.
+What ReMCP deliberately does not bundle: browser/document rendering stacks such as Puppeteer,
+`sharp`, and `exceljs`. Spreadsheet and DOCX edits use OOXML directly, and PDF structural operations
+use existing system utilities when installed. Unrestricted configuration mutation is intentionally
+absent — `set_config_value` is limited to four non-security preferences, while access roots and
+command security remain local; local usage history would write arguments to disk; URL reads in
+`read_file` remain absent to avoid an implicit SSRF surface.
 
 ## License
 

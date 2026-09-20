@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
+import { resolveNpm } from '../npm.mjs';
 import { PACKAGE_NAME, VERSION } from '../version.mjs';
 
 import { saveConfig } from './config.mjs';
@@ -28,6 +29,11 @@ export function npmGlobalInstall(...specs) {
   run(npm.command, [...npm.args, 'install', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
 }
 
+export function npmGlobalInstallForNode(nodePath, ...specs) {
+  const resolved = resolveNpm({ nodePath, home, platform:servicePlatform() });
+  run(resolved.command, [...resolved.args, 'install', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
+}
+
 export function quoteSystemd(value) {
   return `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
@@ -36,9 +42,9 @@ function resolvedCliScript(cliPath) {
   return fs.existsSync(cliPath) ? fs.realpathSync(cliPath) : path.resolve(cliPath);
 }
 
-function writeLinuxServiceLauncher(cliPath = globalCliPath()) {
+function writeLinuxServiceLauncher(cliPath = globalCliPath(), nodePath = process.execPath) {
   const cliScript = resolvedCliScript(cliPath);
-  const launcher = `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(cliScript)} \"$@\"\n`;
+  const launcher = `#!/bin/sh\nexec ${shellQuote(nodePath)} ${shellQuote(cliScript)} \"$@\"\n`;
   fs.mkdirSync(path.dirname(linuxServiceLauncherFile), { recursive: true, mode: 0o700 });
   const temporary = `${linuxServiceLauncherFile}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(temporary, launcher, { mode: 0o700 });
@@ -51,9 +57,9 @@ export function xmlEscape(value) {
   return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
 }
 
-export function installLinuxService(cliPath = globalCliPath()) {
-  const launcherFile = writeLinuxServiceLauncher(cliPath);
-  const unit = `[Unit]\nDescription=ReMCP device agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=${quoteSystemd(launcherFile)} start\nRestart=always\nRestartSec=3\nNoNewPrivileges=true\n\n[Install]\nWantedBy=default.target\n`;
+export function installLinuxService(cliPath = globalCliPath(), nodePath = process.execPath) {
+  const launcherFile = writeLinuxServiceLauncher(cliPath, nodePath);
+  const unit = `[Unit]\nDescription=ReMCP device agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=${quoteSystemd(launcherFile)} start --service\nRestart=always\nRestartSec=3\nNoNewPrivileges=true\n\n[Install]\nWantedBy=default.target\n`;
   fs.mkdirSync(path.dirname(linuxServiceFile), { recursive: true });
   fs.writeFileSync(linuxServiceFile, unit);
   run('systemctl', ['--user', 'daemon-reload']);
@@ -69,12 +75,12 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
-function macServicePlist(cliPath) {
+function macServicePlist(cliPath, nodePath = process.execPath) {
   // launchd wants an absolute path; a symlinked prefix that npm has not materialised yet (or a path
   // that is about to be replaced by the next install) must not abort the repair — a stale plist is
   // exactly the loop this function exists to break.
   const cliScript = fs.existsSync(cliPath) ? fs.realpathSync(cliPath) : path.resolve(cliPath);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${macServiceLabel}</string>\n<key>ProgramArguments</key><array><string>${xmlEscape(process.execPath)}</string><string>${xmlEscape(cliScript)}</string><string>start</string></array>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n<key>ProcessType</key><string>Background</string>\n<key>StandardOutPath</key><string>${xmlEscape(macLogFile)}</string>\n<key>StandardErrorPath</key><string>${xmlEscape(macLogFile)}</string>\n</dict></plist>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${macServiceLabel}</string>\n<key>ProgramArguments</key><array><string>${xmlEscape(nodePath)}</string><string>${xmlEscape(cliScript)}</string><string>start</string><string>--service</string></array>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n<key>ProcessType</key><string>Background</string>\n<key>StandardOutPath</key><string>${xmlEscape(macLogFile)}</string>\n<key>StandardErrorPath</key><string>${xmlEscape(macLogFile)}</string>\n</dict></plist>\n`;
 }
 
 function macJobLoaded(target) {
@@ -118,10 +124,10 @@ function scheduleMacServiceRestart(target) {
   ]);
 }
 
-export function installMacService(cliPath = globalCliPath(), { restart = true } = {}) {
+export function installMacService(cliPath = globalCliPath(), { restart = true, nodePath = process.execPath } = {}) {
   const domain = macLaunchDomain();
   const target = `${domain}/${macServiceLabel}`;
-  const plist = macServicePlist(cliPath);
+  const plist = macServicePlist(cliPath, nodePath);
   let previous = '';
   try { previous = fs.readFileSync(macServiceFile, 'utf8'); } catch {}
   const loaded = macJobLoaded(target);
@@ -152,7 +158,7 @@ export function installMacService(cliPath = globalCliPath(), { restart = true } 
 }
 
 export function installWindowsService(cliPath = globalCliPath()) {
-  const command = `"${cliPath}" start`;
+  const command = `"${cliPath}" start --service`;
   run('schtasks.exe', ['/Create', '/TN', windowsTaskName, '/TR', command, '/SC', 'ONLOGON', '/RL', 'HIGHEST', '/F']);
   run('schtasks.exe', ['/Run', '/TN', windowsTaskName]);
 }
@@ -171,6 +177,175 @@ export function persistentServiceExpected(config) {
     return spawnSync('schtasks.exe', ['/Query', '/TN', windowsTaskName], { stdio: 'ignore' }).status === 0;
   }
   return false;
+}
+
+export function persistentServiceState(config) {
+  const platform = servicePlatform();
+  const expected = persistentServiceExpected(config);
+  if (platform === 'linux') {
+    const installed = fs.existsSync(linuxServiceFile);
+    const active = installed && spawnSync('systemctl', ['--user', 'is-active', '--quiet', 'remcp-agent.service'], { stdio: 'ignore' }).status === 0;
+    return { expected, installed, active, manager:'systemd-user', name:'remcp-agent.service' };
+  }
+  if (platform === 'darwin') {
+    const installed = fs.existsSync(macServiceFile);
+    const target = typeof process.getuid === 'function' ? 'gui/' + process.getuid() + '/' + macServiceLabel : macServiceLabel;
+    const active = installed && spawnSync('launchctl', ['print', target], { stdio: 'ignore' }).status === 0;
+    return { expected, installed, active, manager:'launchd', name:macServiceLabel };
+  }
+  if (platform === 'win32') {
+    const query = spawnSync('schtasks.exe', ['/Query', '/TN', windowsTaskName, '/FO', 'LIST'], { encoding:'utf8' });
+    const installed = query.status === 0;
+    const outputText = String(query.stdout || '');
+    const active = installed && /(?:Status|Состояние):\s*Running/i.test(outputText);
+    return { expected, installed, active, manager:'schtasks', name:windowsTaskName };
+  }
+  return { expected:false, installed:false, active:false, manager:null, name:null };
+}
+
+function inferServiceIdentity() {
+  const platform = servicePlatform();
+  if (platform === 'linux' && fs.existsSync(linuxServiceLauncherFile)) {
+    try {
+      const body = fs.readFileSync(linuxServiceLauncherFile, 'utf8');
+      const match = body.match(/^exec\s+'([^']+)'\s+'([^']+)'/m);
+      if (match) return { nodePath:match[1], cliPath:match[2] };
+    } catch {}
+  }
+  if (platform === 'darwin' && fs.existsSync(macServiceFile)) {
+    try {
+      const body = fs.readFileSync(macServiceFile, 'utf8');
+      const args = [...body.matchAll(/<string>([^<]+)<\/string>/g)].map(match => match[1]);
+      const startIndex = args.indexOf('start');
+      if (startIndex >= 2) return { nodePath:args[startIndex - 2], cliPath:args[startIndex - 1] };
+    } catch {}
+  }
+  return {};
+}
+
+function canonicalServiceCliPath(config) {
+  const configured = String(config?.serviceCliPath || '').trim();
+  if (configured && fs.existsSync(configured)) return configured;
+  const inferred = inferServiceIdentity().cliPath;
+  if (inferred && fs.existsSync(inferred)) return inferred;
+  return globalCliPath();
+}
+
+function canonicalServiceNodePath(config) {
+  const configured = String(config?.serviceNodePath || '').trim();
+  if (configured && fs.existsSync(configured)) return configured;
+  const inferred = inferServiceIdentity().nodePath;
+  if (inferred && fs.existsSync(inferred)) return inferred;
+  return process.execPath;
+}
+
+function versionFromPackageJson(file) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return typeof parsed.version === 'string' ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+
+function packageVersionBesideCli(cliPath, packageName) {
+  if (!cliPath || !packageName) return null;
+  const marker = path.sep + 'node_modules' + path.sep;
+  const index = cliPath.lastIndexOf(marker);
+  if (index < 0) return null;
+  const nodeModules = cliPath.slice(0, index + (path.sep + 'node_modules').length);
+  return versionFromPackageJson(path.join(nodeModules, ...String(packageName).split('/'), 'package.json'));
+}
+
+export function installationVersionsAtCliPath(cliPath, runtimePackageName) {
+  if (!cliPath) return { cliVersion:null, runtimeVersion:null, cliPath:null };
+  let resolvedCliPath = cliPath;
+  try { if (fs.existsSync(cliPath)) resolvedCliPath = fs.realpathSync(cliPath); } catch {}
+  return {
+    cliVersion:packageVersionBesideCli(resolvedCliPath, PACKAGE_NAME),
+    runtimeVersion:packageVersionBesideCli(resolvedCliPath, runtimePackageName),
+    cliPath:resolvedCliPath,
+  };
+}
+
+export function serviceInstallationInfo(config) {
+  if (!persistentServiceExpected(config)) return { cliVersion:null, runtimeVersion:null, cliPath:null, nodePath:null };
+  const cliPath = canonicalServiceCliPath(config);
+  const nodePath = canonicalServiceNodePath(config);
+  let resolvedCliPath = cliPath;
+  try { if (cliPath && fs.existsSync(cliPath)) resolvedCliPath = fs.realpathSync(cliPath); } catch {}
+  return {
+    cliVersion:packageVersionBesideCli(resolvedCliPath, PACKAGE_NAME),
+    runtimeVersion:packageVersionBesideCli(resolvedCliPath, config?.runtime?.packageName),
+    cliPath:resolvedCliPath || cliPath,
+    nodePath,
+  };
+}
+
+export function currentInstallationInfo(config) {
+  let cliPath = process.argv[1] || '';
+  try { if (cliPath && fs.existsSync(cliPath)) cliPath = fs.realpathSync(cliPath); } catch {}
+  return {
+    cliVersion:VERSION,
+    runtimeVersion:config?.runtime?.packageName ? packageVersionBesideCli(cliPath, config.runtime.packageName) : null,
+    cliPath:cliPath || null,
+    nodePath:process.execPath,
+  };
+}
+
+export function rememberCurrentInstallation(config, { service = false } = {}) {
+  if (!config || typeof config !== 'object') return config;
+  const info = currentInstallationInfo(config);
+  if (!info.cliPath || !info.nodePath) return config;
+  const key = info.nodePath + '\u0000' + info.cliPath;
+  const existing = Array.isArray(config.installations) ? config.installations.filter(item => item && typeof item === 'object') : [];
+  const filtered = existing.filter(item => ((item.nodePath || '') + '\u0000' + (item.cliPath || '')) !== key);
+  const record = {
+    nodePath:info.nodePath,
+    cliPath:info.cliPath,
+    cliVersion:info.cliVersion,
+    runtimeVersion:info.runtimeVersion,
+    service:Boolean(service),
+    lastSeenAt:new Date().toISOString(),
+  };
+  const installations = [...filtered, record].slice(-8);
+  const next = {
+    ...config,
+    installations,
+    ...(service ? { serviceInstalled:true, serviceCliPath:info.cliPath, serviceNodePath:info.nodePath } : {}),
+  };
+  saveConfig(next);
+  return next;
+}
+
+export function syncKnownInstallations(config, ...specs) {
+  const serviceInfo = serviceInstallationInfo(config);
+  const current = currentInstallationInfo(config);
+  const candidates = [
+    ...(Array.isArray(config?.installations) ? config.installations : []),
+    ...(serviceInfo.nodePath ? [{ nodePath:serviceInfo.nodePath, cliPath:serviceInfo.cliPath, service:true }] : []),
+  ];
+  const currentNode = (() => { try { return fs.realpathSync(current.nodePath); } catch { return current.nodePath; } })();
+  const seen = new Set();
+  const results = [];
+  for (const candidate of candidates) {
+    const nodePath = String(candidate?.nodePath || '').trim();
+    if (!nodePath || !fs.existsSync(nodePath)) continue;
+    let resolvedNode = nodePath;
+    try { resolvedNode = fs.realpathSync(nodePath); } catch {}
+    if (resolvedNode === currentNode || seen.has(resolvedNode)) continue;
+    seen.add(resolvedNode);
+    const required = Boolean(candidate?.service) || resolvedNode === serviceInfo.nodePath;
+    try {
+      npmGlobalInstallForNode(resolvedNode, ...specs);
+      results.push({ nodePath:resolvedNode, ok:true, required });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      results.push({ nodePath:resolvedNode, ok:false, required, error:message });
+      if (required) throw new Error('Could not update canonical ReMCP service installation at ' + resolvedNode + ': ' + message);
+    }
+  }
+  return results;
 }
 
 export function configurePostInstallAccess() {
@@ -225,11 +400,13 @@ export function installPersistentAgent(config) {
   console.log(`Installing ReMCP ${VERSION}…`);
   npmGlobalInstall(`${PACKAGE_NAME}@${VERSION}`, config.runtime.packageSpec);
   const cliPath = globalCliPath();
-  if (platform === 'linux') installLinuxService(cliPath);
-  else if (platform === 'darwin') installMacService(cliPath);
+  const cliScript = resolvedCliScript(cliPath);
+  const nodePath = process.execPath;
+  if (platform === 'linux') installLinuxService(cliPath, nodePath);
+  else if (platform === 'darwin') installMacService(cliPath, { nodePath });
   else installWindowsService(cliPath);
   configurePostInstallAccess();
-  saveConfig({ ...config, serviceInstalled: true });
+  saveConfig({ ...config, serviceInstalled: true, serviceCliPath: cliScript, serviceNodePath: nodePath });
   console.log('ReMCP is installed as a background service. Future updates: remcp update');
 }
 
@@ -239,23 +416,24 @@ export function installPersistentAgent(config) {
 export function ensureServiceIfRecorded(config) {
   if (!persistentServiceExpected(config)) return false;
   try {
-    const cliPath = globalCliPath();
+    const cliPath = canonicalServiceCliPath(config);
+    const nodePath = canonicalServiceNodePath(config);
     const platform = servicePlatform();
     if (platform === 'linux') {
       if (!fs.existsSync(linuxServiceFile)) {
-        installLinuxService(cliPath);
+        installLinuxService(cliPath, nodePath);
       } else {
-        // Keep the systemd unit independent of nvm/Hermes/Homebrew prefixes. Only this small launcher
-        // changes when npm or Node moves, so every install converges on one supervisor entrypoint.
-        const launcherFile = writeLinuxServiceLauncher(cliPath);
+        // Keep the supervisor bound to the installation that owns the service. A manual update from
+        // another nvm/Hermes/Homebrew prefix must not silently steal service ownership.
+        const launcherFile = writeLinuxServiceLauncher(cliPath, nodePath);
         const unit = fs.readFileSync(linuxServiceFile, 'utf8');
-        const expected = `ExecStart=${quoteSystemd(launcherFile)} start`;
+        const expected = `ExecStart=${quoteSystemd(launcherFile)} start --service`;
         if (!unit.includes(expected)) {
           const repaired = /^ExecStart=/m.test(unit) ? unit.replace(/^ExecStart=.*$/m, expected) : '';
           if (!repaired) {
             // A hand-edited unit with no launcher line is replaced wholesale; the stable launcher is
             // still refreshed first so the replacement never points back at a retired Node manager.
-            installLinuxService(cliPath);
+            installLinuxService(cliPath, nodePath);
           } else {
             fs.writeFileSync(linuxServiceFile, repaired);
             run('systemctl', ['--user', 'daemon-reload']);
@@ -267,11 +445,14 @@ export function ensureServiceIfRecorded(config) {
       // boot out a loaded agent inline: this updater may itself be a descendant of that LaunchAgent.
       // installMacService either leaves an unchanged loaded job alone, bootstraps an unloaded job, or
       // hands a changed launcher to an independent transient launchd helper.
-      installMacService(cliPath, { restart: false });
+      installMacService(cliPath, { restart: false, nodePath });
     } else if (platform === 'win32') installWindowsService(cliPath);
     // Upgrade the legacy inferred state only after the supervisor repair succeeded. A failed repair
     // must not turn a stale artifact into a permanent "managed service" declaration.
-    if (config?.serviceInstalled !== true) saveConfig({ ...config, serviceInstalled: true });
+    const cliScript = resolvedCliScript(cliPath);
+    if (config?.serviceInstalled !== true || config?.serviceCliPath !== cliScript || config?.serviceNodePath !== nodePath) {
+      saveConfig({ ...config, serviceInstalled: true, serviceCliPath: cliScript, serviceNodePath: nodePath });
+    }
     return true;
   } catch (error) {
     console.error(`Could not ensure the background service: ${error instanceof Error ? error.message : String(error)}`);
@@ -296,7 +477,7 @@ export function restartPersistentServiceIfInstalled(config) {
     } else {
       // A plist can survive while launchd has no loaded job (older installs, logout/login cleanup,
       // manual bootout, or a failed previous update). Re-register it directly.
-      installMacService(globalCliPath());
+      installMacService(canonicalServiceCliPath(config), { nodePath:canonicalServiceNodePath(config) });
     }
     return macServiceLabel;
   }

@@ -1,7 +1,7 @@
 interface:
   display_name: "ReMCP operator"
-  short_description: "Operate a paired computer safely, including screenshot-based visual verification"
-  default_prompt: "Inspect my project on the paired laptop and tell me what changed."
+  short_description: "Operate paired desktops and browsers with semantic UI first, coordinates last"
+  default_prompt: "Use ReMCP on my paired computer. Prefer native Accessibility or browser DOM tools before OCR or coordinates, perform the requested task, wait for the resulting UI state, and verify it semantically plus targeted pixels when visual proof matters."
 dependencies:
   tools:
     - type: "mcp"

@@ -84,6 +84,7 @@ export async function runAgent(options) {
   let runtimeVersion = 'unknown';
   let runtimeRestarts = 0;
   let runtimeDown = false;
+  let runtimeTools = [];
   // The reason the runtime is not running, sent to the server so the workspace can show something
   // actionable instead of a machine that merely looks connected.
   let runtimeError = '';
@@ -119,6 +120,25 @@ export async function runAgent(options) {
     return env;
   }
 
+  function toolNames(listed) {
+    const tools = Array.isArray(listed?.tools) ? listed.tools : [];
+    return [...new Set(tools.map(tool => String(tool?.name || '').trim().slice(0, 128)).filter(Boolean))].slice(0, 256);
+  }
+
+  async function refreshRuntimeTools(client = mcp, { announce = true } = {}) {
+    if (!client || runtimeDown) return runtimeTools;
+    try {
+      const listed = await client.listTools(undefined, { timeout: 3000 });
+      const next = toolNames(listed);
+      if (next.length === runtimeTools.length && next.every((name, index) => name === runtimeTools[index])) return runtimeTools;
+      runtimeTools = next;
+      if (announce) send({ type: 'capabilities', runtimeTools });
+    } catch (error) {
+      console.error(`ReMCP could not refresh runtime capabilities: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return runtimeTools;
+  }
+
   async function startRuntime() {
     if (stopping) return;
     clearTimeout(runtimeRestartTimer);
@@ -139,6 +159,10 @@ export async function runAgent(options) {
     mcp = client;
     transport = stdio;
     client.fallbackNotificationHandler = async notification => {
+      if (notification?.method === 'notifications/tools/list_changed') {
+        await refreshRuntimeTools(client);
+        return;
+      }
       if (!telemetryEnabled) return;
       if (notification?.method !== 'notifications/remcp/telemetry') return;
       const events = Array.isArray(notification.params?.events) ? notification.params.events : [];
@@ -159,6 +183,7 @@ export async function runAgent(options) {
       runtimeRestartDelay = RUNTIME_RESTART_BASE_MS;
       runtimeDown = false;
       runtimeError = '';
+      await refreshRuntimeTools(client);
       console.log(`ReMCP local runtime ready (${runtimeVersion})`);
       send({ type: 'metrics', runtimeState: 'ready', runtimeError: '', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown: false }) });
       if (runtimeRestarts > 1) queueEvent({ event: 'runtime_restart', at: Date.now(), count: runtimeRestarts, success: true });
@@ -173,6 +198,8 @@ export async function runAgent(options) {
   function handleRuntimeExit(reason) {
     if (stopping || runtimeRestartTimer) return;
     runtimeDown = true;
+    runtimeTools = [];
+    send({ type: 'capabilities', runtimeTools });
     const delay = jitter(runtimeRestartDelay);
     runtimeRestartDelay = Math.min(RUNTIME_RESTART_MAX_MS, runtimeRestartDelay * 2);
     console.error(`ReMCP local runtime ${reason}; restarting in ${delay}ms`);
@@ -315,6 +342,7 @@ export async function runAgent(options) {
         runtimeVersion,
         runtimeState: runtimeDown ? 'down' : 'ready',
         runtimeError,
+        runtimeTools,
         telemetryEnabled,
         reconnects,
       }));
@@ -380,6 +408,8 @@ export async function runAgent(options) {
   let updateInFlight = false;
   let lastAttemptedVersion = '';
   let lastAttemptAt = 0;
+  let lastUpdateCheckError = '';
+  let lastUpdateCheckErrorAt = 0;
   async function checkForUpdate() {
     if (options.autoUpdate === false) return;
     if (updateInFlight) return;
@@ -460,8 +490,17 @@ export async function runAgent(options) {
         console.error(`remcp update could not start: ${error.message}`);
       });
       child.unref();
-    } catch {
-      // Offline, DNS failure, older server without the endpoint: keep running as-is.
+    } catch (error) {
+      // Update discovery must never take the agent offline, but swallowing the exception made FNM/
+      // launchd failures impossible to diagnose. Log only when the reason changes or every 30 min.
+      const message = error instanceof Error ? error.message : String(error);
+      const now = Date.now();
+      if (message !== lastUpdateCheckError || now - lastUpdateCheckErrorAt >= UPDATE_RETRY_COOLDOWN_MS) {
+        console.error(`ReMCP auto-update check failed: ${message}`);
+        lastUpdateCheckError = message;
+        lastUpdateCheckErrorAt = now;
+      }
+      queueEvent({ event:'agent_update', at:now, reason:'check-failed', success:false, errorClass:error?.name || 'Error' });
     }
   }
 

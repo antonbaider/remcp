@@ -1,0 +1,16 @@
+{
+  "name": "remcp",
+  "interface": {
+    "displayName": "ReMCP"
+  },
+  "plugins": [
+    {
+      "name": "remcp",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

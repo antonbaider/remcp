@@ -75,7 +75,7 @@ export function filesystemErrorExplanation(error, options = {}) {
     return `Windows Controlled folder access is blocking ${windowsLocation} (${code}). Add the binary that runs the tools (${execPath}) under Windows Security → Virus & threat protection → Ransomware protection → Allow an app through Controlled folder access, then restart the agent with \`remcp start\`. A folder outside Desktop, Documents, Downloads and OneDrive needs no new permission.`;
   }
   if (platform === 'darwin') {
-    return `macOS denied access to ${where} (${code}). Check the ownership and permissions of that folder, or add ${execPath} to System Settings → Privacy & Security → Full Disk Access and restart the agent with \`remcp start\`.`;
+    return `macOS denied access to ${where} (${code}). Check that this user owns the folder and its parents, or choose another path. If normal permissions are correct and macOS privacy still blocks it, add ${execPath} to System Settings → Privacy & Security → Full Disk Access and restart the agent with \`remcp start\`.`;
   }
   if (platform === 'win32') {
     return `Windows denied access to ${where} (${code}). Check whether the file is read-only, open in another program, or inside a Controlled folder access area, then allow ${execPath} through Windows Security (Controlled folder access) and restart the agent with \`remcp start\`.`;

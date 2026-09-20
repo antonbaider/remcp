@@ -9,6 +9,7 @@ const claudePlugin = readJson('.claude-plugin/plugin.json');
 const claudeMcp = readJson('.mcp.json');
 const gemini = readJson('gemini-extension.json');
 const registry = readJson('server.json');
+const codexMarketplace = readJson('.agents/plugins/marketplace.json');
 const copilotMarketplace = readJson('.github/plugin/marketplace.json');
 
 const problems = [];
@@ -40,6 +41,14 @@ check(registry?.remotes?.length === 1, 'MCP Registry record must expose exactly 
 check(registry?.remotes?.[0]?.type === 'streamable-http', 'MCP Registry remote must use Streamable HTTP');
 check(registry?.remotes?.[0]?.url === endpoint, 'MCP Registry remote must point at the production MCP endpoint');
 
+check(codexMarketplace.name === 'remcp', 'Codex marketplace name must be remcp');
+check(codexMarketplace?.interface?.displayName === 'ReMCP', 'Codex marketplace display name must be ReMCP');
+check(codexMarketplace?.plugins?.length === 1, 'Codex marketplace must expose exactly one ReMCP plugin');
+check(codexMarketplace?.plugins?.[0]?.name === 'remcp', 'Codex marketplace plugin name must be remcp');
+check(codexMarketplace?.plugins?.[0]?.source?.source === 'local', 'Codex marketplace must use a local source for this repository');
+check(codexMarketplace?.plugins?.[0]?.source?.path === './', 'Codex marketplace must source the root Agent Plugin');
+check(codexMarketplace?.plugins?.[0]?.category === 'Developer Tools', 'Codex marketplace category must stay Developer Tools');
+
 check(copilotMarketplace.name === 'remcp', 'Copilot marketplace name must be remcp');
 check(copilotMarketplace?.metadata?.version === version, 'Copilot marketplace version must match package.json');
 check(copilotMarketplace?.plugins?.length === 1, 'Copilot marketplace must expose exactly one ReMCP plugin');
@@ -53,4 +62,4 @@ if (problems.length) {
   process.exit(1);
 }
 
-console.log(`distribution contracts OK: Agent Plugins, Claude Code, Gemini CLI, MCP Registry, Copilot/VS Code (v${version})`);
+console.log(`distribution contracts OK: Agent Plugins, Codex marketplace, Claude Code, Gemini CLI, MCP Registry, Copilot/VS Code (v${version})`);

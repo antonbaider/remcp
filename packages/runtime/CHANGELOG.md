@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+## 0.2.48 — 2026-09-20
+
+- Migrate the local stdio runtime to the official `@modelcontextprotocol/server` v2 serving entry while preserving legacy 2025-era client compatibility.
+- Add negotiated MCP `2026-07-28` support, including `server/discover`, cache hints, full structured output validation, and subscription-based `notifications/tools/list_changed` delivery.
+- Keep the legacy `@modelcontextprotocol/sdk` and modern `@modelcontextprotocol/client` packages dev-only so CI continuously proves both protocol eras against the same runtime.
+- Add optional Tesseract-backed OCR inside `computer_snapshot`/`computer_action`, including bounded word/line boxes and HiDPI/multi-monitor coordinate mapping, without adding another MCP tool or production dependency.
+- Added 39 computer-use tools: native desktop/window automation, accessibility UI inspection/actions, browser CDP, diagnostics, and lightweight DOCX/XLSX/PDF operations.
+- Live `tools/list` now advertises only capabilities available on the current operating system and sends `notifications/tools/list_changed` when the capability set changes; `--print-tools` remains the stable full 83-tool release contract.
+- Added high-level `computer_snapshot` and `computer_action` primitives so agents can prefer semantic Accessibility/DOM targets and fall back to coordinates/screenshots only when necessary.
+- Chrome DevTools Protocol endpoints are restricted to loopback addresses. New filesystem/document operations continue through the existing resolved-path allowlist, and launch/service/power operations reuse the runtime command policy.
+- Fixed metadata output truncation once the JSON tool contract exceeded the operating-system pipe buffer by waiting for stdout writes to flush before exit.
+- No browser/document rendering stack was added; the runtime remains dependency-light and uses native OS facilities plus existing qpdf/poppler/zip helpers when available.
+
 ## 0.2.47 — 2026-09-19
 
 - Lockstep release with the ReMCP client. Runtime behavior is unchanged from 0.2.46; the client now recovers from transient HTTP handshake failures and migrates Linux systemd services to a stable launcher independent of nvm/Hermes prefixes.

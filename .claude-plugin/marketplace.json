@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "remcp",
-  "description": "ReMCP plugins for Claude Code.",
+  "description": "ReMCP plugins for secure remote computer, browser, terminal, file, and document workflows.",
   "owner": {
     "name": "Anton Baider",
     "url": "https://remcp.site"
@@ -11,7 +11,7 @@
       "name": "remcp",
       "displayName": "ReMCP",
       "source": "./",
-      "description": "Securely work with files, terminals, screenshots, search, and processes on computers you explicitly pair.",
+      "description": "Securely operate computers you explicitly pair using semantic desktop UI, browser automation, files, terminal, diagnostics, and structured documents.",
       "author": {
         "name": "Anton Baider",
         "url": "https://remcp.site"
@@ -19,8 +19,24 @@
       "homepage": "https://remcp.site/install/claude",
       "repository": "https://github.com/antonbaider/remcp",
       "license": "MIT",
-      "keywords": ["mcp","remote-computer","developer-tools","files","terminal"],
-      "tags": ["mcp","remote-computer","terminal","files","screenshots"]
+      "keywords": [
+        "mcp",
+        "remote-computer",
+        "developer-tools",
+        "computer-use",
+        "browser-automation",
+        "files",
+        "terminal"
+      ],
+      "tags": [
+        "mcp",
+        "remote-computer",
+        "computer-use",
+        "browser-automation",
+        "terminal",
+        "files",
+        "screenshots"
+      ]
     }
   ]
 }

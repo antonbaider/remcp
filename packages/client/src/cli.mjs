@@ -2,15 +2,16 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { runAgent } from './agent.mjs';
+import { isNewer } from './agent-update.mjs';
 import { normalizeRuntime } from './runtime.mjs';
 import { PACKAGE_NAME, VERSION } from './version.mjs';
 import { probeFilesystemAccess } from './fs-access.mjs';
 
 import { ensureMachineId, loadConfig, readJsonFile, saveConfig, setTelemetry, telemetryState, writeJsonFile } from './cli/config.mjs';
 import { assertRuntimeTrust, pairWithDeviceCode } from './cli/connect.mjs';
-import { diagnoseLocalRuntime, runtimeAllowedRoots } from './cli/doctor.mjs';
+import { diagnoseLocalRuntime, installedVersion, runtimeAllowedRoots } from './cli/doctor.mjs';
 import { configFile, npm, officialOrigin, runtimeConfigFile } from './cli/env.mjs';
-import { installPersistentAgent, restartPersistentServiceIfInstalled, uninstallPersistentService } from './cli/service.mjs';
+import { currentInstallationInfo, installPersistentAgent, persistentServiceState, rememberCurrentInstallation, restartPersistentServiceIfInstalled, serviceInstallationInfo, uninstallPersistentService } from './cli/service.mjs';
 import { run } from './cli/shell.mjs';
 import { updateCommand } from './cli/update.mjs';
 function parse(argv) {
@@ -92,7 +93,15 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (command === 'start') {
-    const cfg = loadConfig();
+    const supervised = flags.service === true
+      || Boolean(process.env.INVOCATION_ID)
+      || String(process.env.XPC_SERVICE_NAME || '').includes('com.remcp.agent');
+    const cfg = rememberCurrentInstallation(loadConfig(), { service:supervised });
+    const service = persistentServiceState(cfg);
+    if (!supervised && service.active) {
+      console.log(`ReMCP is already running as a background service (${service.name}). Use \`remcp status\` to inspect it or \`remcp doctor\` to diagnose it.`);
+      return;
+    }
     const telemetry = telemetryState();
     await runAgent({
       ...cfg,
@@ -173,29 +182,97 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (command === 'status' || command === 'doctor') {
-    const cfg = loadConfig();
-    const health = await fetch(`${cfg.serverUrl}/health?fresh=${Date.now()}`, { cache: 'no-store' }).then(r => r.json()).catch(error => ({ error: error.message }));
+    const cfg = rememberCurrentInstallation(loadConfig());
+    const [health, advertised] = await Promise.all([
+      fetch(`${cfg.serverUrl}/health?fresh=${Date.now()}`, { cache:'no-store' })
+        .then(async response => ({ reachable:response.ok && (await response.json().catch(() => null))?.ok === true }))
+        .catch(error => ({ reachable:false, error:error.message })),
+      fetch(`${cfg.serverUrl}/api/agent/version?fresh=${Date.now()}`, { cache:'no-store' })
+        .then(response => response.ok ? response.json() : null)
+        .catch(() => null),
+    ]);
+    const telemetry = telemetryState();
+    const service = persistentServiceState(cfg);
+    const currentInstall = currentInstallationInfo(cfg);
+    const serviceInstall = serviceInstallationInfo(cfg);
+    const installedRuntime = installedVersion(cfg.runtime.packageName);
+    const targetClient = String(advertised?.cliVersion || '').trim() || null;
+    const targetRuntime = String(advertised?.runtime || '').trim() || null;
+    const configuredRuntime = String(cfg.runtime.packageSpec || '');
+    const installationPaths = new Set([
+      currentInstall.cliPath,
+      serviceInstall.cliPath,
+      ...(Array.isArray(cfg.installations) ? cfg.installations.map(item => item?.cliPath) : []),
+    ].filter(Boolean));
+    const multipleInstallations = installationPaths.size > 1;
+    const knownCliVersions = [VERSION, serviceInstall.cliVersion].filter(Boolean);
+    const knownRuntimeVersions = [installedRuntime, serviceInstall.runtimeVersion].filter(Boolean);
+    const versionConsistent = cfg.runtime.packageName === '@remcp/runtime'
+      ? new Set([...knownCliVersions, ...knownRuntimeVersions]).size <= 1
+      : new Set(knownCliVersions).size <= 1 && new Set(knownRuntimeVersions).size <= 1;
+    const clientMeetsTarget = Boolean(targetClient && !isNewer(targetClient, VERSION));
+    const configuredRuntimeMeetsTarget = Boolean(!targetRuntime || (configuredRuntime && !isNewer(targetRuntime, configuredRuntime)));
+    const runtimeMeetsTarget = Boolean(!targetRuntime || (installedRuntime && !isNewer(targetRuntime, installedRuntime)));
+    const serviceClientMeetsTarget = !service.installed
+      || Boolean(targetClient && serviceInstall.cliVersion && !isNewer(targetClient, serviceInstall.cliVersion));
+    const serviceRuntimeMeetsTarget = !service.installed
+      || Boolean(!targetRuntime || (serviceInstall.runtimeVersion && !isNewer(targetRuntime, serviceInstall.runtimeVersion)));
+    const upToDate = Boolean(
+      targetClient
+      && clientMeetsTarget
+      && configuredRuntimeMeetsTarget
+      && runtimeMeetsTarget
+      && serviceClientMeetsTarget
+      && serviceRuntimeMeetsTarget
+    );
+    const updateState = !targetClient
+      ? 'unknown'
+      : !upToDate
+        ? 'update_available'
+        : versionConsistent
+          ? (isNewer(VERSION, targetClient) ? 'ahead' : 'current')
+          : 'mixed_current';
     const report = {
-      configured: true,
-      cliVersion: VERSION,
-      deviceId: cfg.deviceId,
-      deviceName: cfg.deviceName,
-      server: cfg.serverUrl,
-      runtime: cfg.runtime,
-      telemetry: telemetryState(),
-      serverHealth: health,
+      configured:true,
+      device:{ id:cfg.deviceId, name:cfg.deviceName },
+      client:{ version:VERSION },
+      runtime:{
+        packageName:cfg.runtime.packageName,
+        configured:configuredRuntime,
+        installed:installedRuntime,
+      },
+      agent:{
+        mode:service.installed ? 'service' : 'manual',
+        running:service.active,
+        manager:service.manager,
+        serviceCliVersion:serviceInstall.cliVersion,
+        serviceRuntimeVersion:serviceInstall.runtimeVersion,
+      },
+      server:{
+        url:cfg.serverUrl,
+        reachable:health.reachable === true,
+        ...(health.error ? { error:health.error } : {}),
+      },
+      update:{
+        auto:cfg.autoUpdate !== false,
+        targetClient,
+        targetRuntime,
+        multipleInstallations,
+        versionConsistent,
+        state:updateState,
+        upToDate,
+      },
+      telemetry:{ enabled:telemetry.enabled },
     };
-    // `doctor` answers the question the workspace cannot: is this machine actually able to run a
-    // tool? It resolves the runtime entry, installs nothing, and tries one real MCP handshake with
-    // the runtime, so the failure is visible here instead of only as "runtime not running".
     if (command === 'doctor') {
       report.diagnosis = await diagnoseLocalRuntime(cfg);
-      // A computer can pass every other check and still be unable to write where the tools work:
-      // macOS answers EACCES for Desktop until TCC is granted, Windows has Controlled folder access,
-      // Linux answers EACCES for a folder this user does not own. The probe writes and removes a
-      // temporary file in each allowed root, so the doctor reports what actually happens rather than
-      // what the permission bits claim, and names the fix for this platform and this binary.
-      report.diagnosis.filesystem = await probeFilesystemAccess({ roots: runtimeAllowedRoots() });
+      report.diagnosis.filesystem = await probeFilesystemAccess({ roots:runtimeAllowedRoots() });
+      report.diagnostic = {
+        serviceExpected:service.expected,
+        serviceInstalled:service.installed,
+        runtimeEntry:cfg.runtime.entry,
+        npmManaged:true,
+      };
     }
     console.log(JSON.stringify(report, null, 2));
     if (command === 'doctor' && report.diagnosis.verdict !== 'ok') process.exitCode = 1;

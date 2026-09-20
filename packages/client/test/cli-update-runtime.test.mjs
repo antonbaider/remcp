@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveUpdateTargets } from '../src/cli/update.mjs';
+import { resolveUpdateTargets, updateAlreadyCurrent } from '../src/cli/update.mjs';
 import { VERSION } from '../src/version.mjs';
 
 const currentClient = `@remcp/remcp@${VERSION}`;
@@ -18,6 +18,43 @@ const officialConfig = {
     entry: 'src/index.mjs',
   },
 };
+
+test('manual update is a no-op when the running and managed service release pair already matches the target', () => {
+  const cfg = {
+    ...officialConfig,
+    runtime:{ ...officialConfig.runtime, packageSpec:currentRuntime },
+    installations:[],
+  };
+  const targets = {
+    clientSpec:currentClient,
+    runtimeSpec:currentRuntime,
+    installable:true,
+    persistRuntime:false,
+  };
+  assert.equal(updateAlreadyCurrent({
+    cfg,
+    targets,
+    currentInstall:{ cliVersion:VERSION, runtimeVersion:VERSION },
+    serviceInstall:{ cliVersion:VERSION, runtimeVersion:VERSION },
+    serviceExpected:true,
+  }), true);
+
+  assert.equal(updateAlreadyCurrent({
+    cfg,
+    targets,
+    currentInstall:{ cliVersion:VERSION, runtimeVersion:VERSION },
+    serviceInstall:{ cliVersion:VERSION, runtimeVersion:'0.2.35' },
+    serviceExpected:true,
+  }), false, 'a stale managed runtime still requires convergence');
+
+  assert.equal(updateAlreadyCurrent({
+    cfg,
+    targets,
+    currentInstall:{ cliVersion:VERSION, runtimeVersion:'0.2.35' },
+    serviceInstall:{ cliVersion:VERSION, runtimeVersion:VERSION },
+    serviceExpected:true,
+  }), false, 'a stale running runtime still requires an update');
+});
 
 test('manual update follows the trusted server release pair instead of keeping a stale runtime pin', async () => {
   const requestedUrls = [];

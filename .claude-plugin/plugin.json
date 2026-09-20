@@ -1,8 +1,8 @@
 {
   "name": "remcp",
   "displayName": "ReMCP",
-  "version": "0.2.47",
-  "description": "Securely work with files, terminals, screenshots, search, and processes on computers you explicitly pair.",
+  "version": "0.2.48",
+  "description": "Securely operate computers you explicitly pair using semantic desktop UI, browser automation, files, terminal, diagnostics, screenshots, and structured documents.",
   "author": {
     "name": "Anton Baider",
     "url": "https://remcp.site"
@@ -14,7 +14,10 @@
     "mcp",
     "remote-computer",
     "developer-tools",
+    "computer-use",
+    "browser-automation",
     "files",
-    "terminal"
+    "terminal",
+    "screenshots"
   ]
 }

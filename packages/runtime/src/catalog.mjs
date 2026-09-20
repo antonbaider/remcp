@@ -26,7 +26,7 @@ export const toolDefinitions = [
   {
     name: 'read_file',
     title: 'Read file',
-    description: 'Read a file on this computer: text as text, and .docx or .pdf as their extracted document text (a scanned or font-obfuscated PDF says so instead of returning noise). Use offset and length to page through large files; a negative offset reads from the end of the file.',
+    description: 'Read a plain text or line-oriented file on this computer: source, config, Markdown, scripts or logs. Use read_document for PDF, DOCX, XLSX and other structured documents. Legacy .docx/.pdf extraction remains supported for compatibility. Use offset and length to page through large text files; a negative offset reads from the end.',
     inputSchema: {
       type: 'object',
       properties: {

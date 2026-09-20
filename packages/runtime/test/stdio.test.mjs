@@ -2,12 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
+import http from 'node:http';
+import { once } from 'node:events';
 import { promisify } from 'node:util';
 import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { Client as ModernClient } from '@modelcontextprotocol/client';
+import { StdioClientTransport as ModernStdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { body, freshWorkspace } from './helpers.mjs';
 
 const run = promisify(execFile);
@@ -18,13 +22,33 @@ function printedTools() {
   return JSON.parse(execFileSync(process.execPath, [entry, '--print-tools'], { encoding: 'utf8' }));
 }
 
+async function unusedPort() {
+  const server = http.createServer();
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const port = server.address().port;
+  await new Promise(resolve => server.close(resolve));
+  return port;
+}
+
+async function waitUntil(predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  return false;
+}
+
 test('runtime serves MCP over stdio like the ReMCP agent expects', async () => {
-  const transport = new StdioClientTransport({ command: process.execPath, args: [entry] });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [entry], env: { ...process.env } });
   const client = new Client({ name: 'remcp-agent-test', version: '1.0.0' });
   await client.connect(transport);
   try {
     const { tools } = await client.listTools();
-    assert.equal(tools.length, printedTools().length);
+    const described = JSON.parse(execFileSync(process.execPath, [entry, '--describe'], { encoding: 'utf8' }));
+    assert.equal(tools.length, described.supportedTools, 'live tools/list should reflect this host\'s capabilities');
+    assert.ok(tools.length <= printedTools().length, 'live tools/list must be a subset of the full published contract');
     const target = join(root, 'stdio.txt');
     const written = await client.callTool({ name: 'write_file', arguments: { path: target, content: 'over stdio\n' } });
     assert.equal(written.isError, undefined);
@@ -34,6 +58,133 @@ test('runtime serves MCP over stdio like the ReMCP agent expects', async () => {
     const process1 = await client.callTool({ name: 'start_process', arguments: { command: 'printf "stdio-process\\n"', timeout_ms: 2000 } });
     assert.match(body(process1), /stdio-process/);
   } finally {
+    await client.close();
+  }
+});
+
+test('runtime sends tools/list_changed when the dynamic CDP toolset appears and disappears', async () => {
+  const port = await unusedPort();
+  const endpoint = `http://127.0.0.1:${port}`;
+  const changes = [];
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [entry],
+    env: { ...process.env, REMCP_CDP_URL: endpoint, REMCP_CAPABILITY_POLL_MS: '250' },
+  });
+  const client = new Client(
+    { name: 'remcp-list-changed-test', version: '1.0.0' },
+    {
+      listChanged: {
+        tools: {
+          autoRefresh: true,
+          debounceMs: 0,
+          onChanged(error, tools) {
+            changes.push({ error, tools });
+          },
+        },
+      },
+    },
+  );
+  let server;
+  await client.connect(transport);
+  try {
+    const initial = await client.listTools();
+    assert.equal(initial.tools.some(tool => tool.name === 'browser_tabs'), false);
+
+    server = http.createServer((request, response) => {
+      if (request.url === '/json/version') {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ Browser: 'Chrome/ReMCP-test' }));
+        return;
+      }
+      response.writeHead(404);
+      response.end();
+    });
+    server.listen(port, '127.0.0.1');
+    await once(server, 'listening');
+
+    assert.equal(await waitUntil(() => changes.some(change =>
+      !change.error && Array.isArray(change.tools) && change.tools.some(tool => tool.name === 'browser_tabs')
+    )), true, 'browser tools should appear after the CDP endpoint starts');
+
+    await new Promise(resolve => server.close(resolve));
+    server = null;
+    const appearedAt = changes.findIndex(change => Array.isArray(change.tools) && change.tools.some(tool => tool.name === 'browser_tabs'));
+    assert.equal(await waitUntil(() => changes.slice(appearedAt + 1).some(change =>
+      !change.error && Array.isArray(change.tools) && !change.tools.some(tool => tool.name === 'browser_tabs')
+    )), true, 'browser tools should disappear after the CDP endpoint stops');
+  } finally {
+    if (server) await new Promise(resolve => server.close(resolve));
+    await client.close();
+  }
+});
+
+test('runtime negotiates MCP 2026-07-28 and delivers subscription-based tool changes', async () => {
+  const port = await unusedPort();
+  const endpoint = `http://127.0.0.1:${port}`;
+  const changes = [];
+  const transport = new ModernStdioClientTransport({
+    command: process.execPath,
+    args: [entry],
+    env: { ...process.env, REMCP_CDP_URL: endpoint, REMCP_CAPABILITY_POLL_MS: '250' },
+    stderr: 'pipe',
+  });
+  const client = new ModernClient(
+    { name: 'remcp-modern-test', version: '1.0.0' },
+    {
+      versionNegotiation: { mode: { pin: '2026-07-28' } },
+      listChanged: {
+        tools: {
+          autoRefresh: true,
+          debounceMs: 0,
+          onChanged(error, tools) {
+            changes.push({ error, tools });
+          },
+        },
+      },
+    },
+  );
+  let server;
+  await client.connect(transport);
+  try {
+    const discover = client.getDiscoverResult();
+    assert.deepEqual(discover?.supportedVersions, ['2026-07-28']);
+    assert.equal(discover?.capabilities?.tools?.listChanged, true);
+
+    const initial = await client.listTools();
+    assert.equal(initial.cacheScope, 'private');
+    assert.equal(initial.ttlMs, 1500);
+    assert.equal(initial.tools.some(tool => tool.name === 'browser_tabs'), false);
+
+    const environment = await client.callTool({ name: 'environment', arguments: {} });
+    assert.equal(environment.isError, undefined);
+    assert.equal(environment.structuredContent?.platform, process.platform);
+    assert.equal(environment._meta?.['io.modelcontextprotocol/serverInfo']?.name, 'remcp-runtime');
+
+    server = http.createServer((request, response) => {
+      if (request.url === '/json/version') {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ Browser: 'Chrome/ReMCP-modern-test' }));
+        return;
+      }
+      response.writeHead(404);
+      response.end();
+    });
+    server.listen(port, '127.0.0.1');
+    await once(server, 'listening');
+
+    assert.equal(await waitUntil(() => changes.some(change =>
+      !change.error && Array.isArray(change.tools) && change.tools.some(tool => tool.name === 'browser_tabs')
+    )), true, 'modern subscriptions/listen should receive browser tool appearance');
+
+    await new Promise(resolve => server.close(resolve));
+    server = null;
+    const appearedAt = changes.findIndex(change => Array.isArray(change.tools) && change.tools.some(tool => tool.name === 'browser_tabs'));
+    assert.equal(await waitUntil(() => changes.slice(appearedAt + 1).some(change =>
+      !change.error && Array.isArray(change.tools) && !change.tools.some(tool => tool.name === 'browser_tabs')
+    )), true, 'modern subscriptions/listen should receive browser tool disappearance');
+  } finally {
+    if (server) await new Promise(resolve => server.close(resolve));
     await client.close();
   }
 });
