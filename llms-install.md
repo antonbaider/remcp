@@ -72,11 +72,11 @@ The curated Kiro Powers submission was received on September 19, 2026.
 ReMCP's hosted endpoint can be registered directly with Cline:
 
 ```bash
-cline mcp add remcp https://remcp.site/mcp --transport streamable-http --yes
+cline mcp install remcp --transport http https://remcp.site/mcp --yes
 ```
 
-Complete the browser authorization flow when Cline requests it. The Cline Marketplace submission is
-tracked at <https://github.com/cline/mcp-marketplace/issues/2573>.
+Complete the browser authorization flow when Cline requests it. ReMCP's current Cline Marketplace
+submission is tracked in the marketplace source of truth at <https://github.com/cline/marketplace/pull/125>.
 
 ### Discovery directories
 

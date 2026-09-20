@@ -14,7 +14,7 @@ You do **not** need to paste an MCP server URL, edit a manifest, clone the repos
 Shareable install guides:
 
 - All integrations and current status: <https://remcp.site/plugins>
-- [Complete tool reference](TOOLS.md): 83 device tools + 8 account/fleet tools in the default 91-tool hosted catalog; UI-capable MCP Apps clients can additionally negotiate three presentation-only render tools.
+- [Complete tool reference](TOOLS.md): 83 device tools + 8 account/fleet tools form the 91-tool native surface; MCP Apps-capable clients additionally negotiate 3 chat-presentation tools for 94 total.
 - ChatGPT & Codex: <https://remcp.site/install/chatgpt>
 - Claude Code: <https://remcp.site/install/claude>
 - Cursor Marketplace: <https://cursor.com/marketplace>
@@ -129,15 +129,15 @@ After registry approval, users can discover ReMCP directly in <https://kiro.dev/
 
 ## Cline
 
-ReMCP has been submitted to Cline's MCP Marketplace:
+ReMCP has been submitted to Cline's current MCP Marketplace source of truth:
 
-<https://github.com/cline/mcp-marketplace/issues/2573>
+<https://github.com/cline/marketplace/pull/125>
 
-The submission includes the hosted Streamable HTTP server, OAuth flow, a 400×400 marketplace image,
-and `llms-install.md`. The direct CLI path that was smoke-tested during submission is:
+The open marketplace PR includes the hosted Streamable HTTP server, OAuth install metadata, and marketplace
+artwork. The direct CLI path was also smoke-tested during submission:
 
 ```bash
-cline mcp add remcp https://remcp.site/mcp --transport streamable-http --yes
+cline mcp install remcp --transport http https://remcp.site/mcp --yes --json
 ```
 
 After marketplace approval, users can find **ReMCP** in Cline's MCP Marketplace instead of entering

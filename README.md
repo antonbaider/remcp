@@ -23,7 +23,7 @@
   <a href="https://github.com/github/awesome-copilot/issues/3326"><img alt="GitHub Copilot CLI plugin" src="https://img.shields.io/badge/Copilot%20CLI-plugin-1f2328?style=flat-square"></a>
   <a href="https://github.com/github/awesome-copilot/issues/3326"><img alt="VS Code Agent Plugin" src="https://img.shields.io/badge/VS%20Code-agent%20plugin-1f2328?style=flat-square"></a>
   <a href="https://kiro.dev/powers/"><img alt="Kiro Power" src="https://img.shields.io/badge/Kiro-power-1f2328?style=flat-square"></a>
-  <a href="https://github.com/cline/mcp-marketplace/issues/2573"><img alt="Cline MCP Marketplace" src="https://img.shields.io/badge/Cline-MCP-1f2328?style=flat-square"></a>
+  <a href="https://github.com/cline/marketplace/pull/125"><img alt="Cline MCP Marketplace" src="https://img.shields.io/badge/Cline-MCP-1f2328?style=flat-square"></a>
   <a href="https://smithery.ai/servers/antonbaider/remcp"><img alt="Smithery directory" src="https://img.shields.io/badge/Smithery-directory-1f2328?style=flat-square"></a>
   <a href="https://glama.ai/mcp/servers/antonbaider/remcp"><img alt="Glama quality score" src="https://glama.ai/mcp/servers/antonbaider/remcp/badges/score.svg"></a>
   <a href="docs/PLUGINS.md#smithery-glama-and-the-official-mcp-registry"><img alt="Official MCP Registry" src="https://img.shields.io/badge/MCP%20Registry-published-1f2328?style=flat-square"></a>
@@ -138,7 +138,7 @@ ReMCP publishes host-native metadata for coding agents plus directory records fo
 | **GitHub Copilot CLI** | Install from the `awesome-copilot` default marketplace after external-plugin review. | submitted |
 | **VS Code Agent Plugins** | Browse `@agentPlugins` / **Chat: Plugins** after the same Awesome Copilot listing is accepted. | submitted |
 | **Kiro Powers** | Import `https://github.com/antonbaider/remcp` from **Add Custom Power → Import power from GitHub** while the curated listing is reviewed. | submitted |
-| **Cline** | Use the Cline MCP Marketplace after review; the submission is tracked publicly. | submitted |
+| **Cline** | Use the Cline MCP Marketplace after review; the current submission is tracked in [`cline/marketplace` PR #125](https://github.com/cline/marketplace/pull/125). | submitted |
 | **Smithery** | Open <https://smithery.ai/servers/antonbaider/remcp>. | published |
 | **Glama** | Open <https://glama.ai/mcp/servers/antonbaider/remcp>. | listed |
 | **Official MCP Registry** | Search for `io.github.antonbaider/remcp` in registry-aware clients. | published |

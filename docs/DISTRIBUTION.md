@@ -13,7 +13,7 @@ ReMCP keeps one public source repository and publishes host-native discovery met
 | GitHub Copilot CLI | Awesome Copilot default marketplace | external submission under review |
 | VS Code Agent Plugins | Awesome Copilot / `@agentPlugins` | same external submission and Agent Plugins 1.0 package |
 | Kiro Powers | Kiro Powers registry + direct GitHub import | submitted September 19, 2026; pending review |
-| Cline | Cline MCP Marketplace | external submission under review |
+| Cline | Cline MCP Marketplace ([PR #125](https://github.com/cline/marketplace/pull/125)) | submitted in current `cline/marketplace`; pending review |
 | Smithery | smithery.ai/servers/antonbaider/remcp | published |
 | Glama | glama.ai/mcp/servers/antonbaider/remcp | indexed / listed |
 | Official MCP Registry | registry.modelcontextprotocol.io | published remote Streamable HTTP server |

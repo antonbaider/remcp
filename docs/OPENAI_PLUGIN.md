@@ -36,7 +36,7 @@ rename, or regenerate the files described here.
 | Rich UI | Production file editor/diff with syntax highlighting and save, fullscreen image viewer, and terminal output viewer. The three presentation-only render tools require client negotiation of `io.modelcontextprotocol/ui` and consume short-lived preview references without rerunning source actions |
 | Authentication | OAuth authorization code + PKCE, OIDC/UserInfo metadata |
 | Public overview | [`docs/PLUGINS.md`](PLUGINS.md) |
-| Full tool reference | [`docs/TOOLS.md`](TOOLS.md) — generated from the default 91-tool production catalog |
+| Full tool reference | [`docs/TOOLS.md`](TOOLS.md) — 94 tools for MCP Apps clients; 91-tool native surface without the UI extension |
 
 ## Package layout
 

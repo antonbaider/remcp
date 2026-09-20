@@ -73,8 +73,9 @@ A running device can advertise a smaller capability-aware subset; the runtime de
 agent forwards the refreshed tool names to the hosted relay. Browser/CDP tools are the primary dynamic
 example: they are enabled only while the runtime can use a supported loopback browser endpoint.
 
-The complete hosted 91-tool reference (83 device + 8 account/fleet) is generated from the production
-catalog at https://remcp.site/docs#tools and in the public repository as `docs/TOOLS.md`.
+The generated hosted reference covers the full **94-tool UI-capable surface**: 83 device tools,
+8 account/fleet tools, and 3 chat-presentation tools. Clients without MCP Apps negotiation receive
+the 91-tool native surface. See https://remcp.site/docs#tools and public `docs/TOOLS.md`.
 
 ## No approval staircase
 
