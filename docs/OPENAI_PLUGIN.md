@@ -44,7 +44,7 @@ rename, or regenerate the files described here.
 - `skills/` — five skills exported over the MCP skills extension (`skills/list`, `skills/get`,
   `resources/read` with SHA-256 digests): the operator guide, code change and verification,
   process supervision, safe destructive operations, and transfers between machines.
-- `assets/remcp-icon.png` — plugin icon/logo.
+- `assets/remcp-icon.png` — square plugin/composer mark derived from the canonical `assets/remcp-logo.png` brand asset.
 - `chatgpt-app-submission.json` — generated tool annotations and 5 positive / 3 negative review cases.
 - `submission/plugin-form.md` — copy-ready portal values.
 

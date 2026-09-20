@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.60 — 2026-09-20
+
+- Lockstep branding release with the ReMCP client at `0.2.60`; runtime tool behavior is unchanged from `0.2.59`.
+
 ## 0.2.59 — 2026-09-20
 
 - Tool descriptions now make routing boundaries explicit across overlapping filesystem, search, process, system, desktop, diagnostics, and document operations so AI hosts prefer the narrowest semantic tool instead of broad shell or fallback tools.

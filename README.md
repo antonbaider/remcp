@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="./assets/remcp-icon.png" width="168" alt="ReMCP logo">
+  <img src="./assets/remcp-logo.png" width="240" alt="ReMCP logo">
 </p>
-
-<h1 align="center">ReMCP</h1>
 
 <p align="center"><strong>Your computer. Your tools. One secure MCP connection.</strong></p>
 
