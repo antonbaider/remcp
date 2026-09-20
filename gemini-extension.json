@@ -1,6 +1,6 @@
 {
   "name": "remcp",
-  "version": "0.2.63",
+  "version": "0.2.64",
   "description": "Securely work with files, terminals, screenshots, search, and processes on computers you explicitly pair with ReMCP.",
   "mcpServers": {
     "remcp": {

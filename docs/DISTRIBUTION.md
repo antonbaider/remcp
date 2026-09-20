@@ -24,7 +24,7 @@ For ordinary users, the product flow is always:
 
 The production MCP URL and host-specific manifests are implementation details, not normal installation steps.
 
-Every host reaches the same capability-aware ReMCP tool contract. See the [full generated tool contract](TOOLS.md) for all 83 device tools, the 8 default account/fleet tools, dynamic `tools/list_changed` behavior, schemas, and safety hints.
+Every host reaches the same capability-aware ReMCP tool contract. Hosted `remcp.site` discovery exposes the stable release catalog so installation-time schema caching cannot hide newer tools; the selected computer is still checked against its live runtime capabilities before dispatch. Local runtimes remain dynamic and emit `tools/list_changed` when their own available set changes. See the [full generated tool contract](TOOLS.md) for all 83 device tools, the 8 default account/fleet tools, schemas, and safety hints.
 
 ## Portable core
 
