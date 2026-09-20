@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { createWaylandRemoteDesktopSession, waylandPortalCandidate } from '../src/wayland-remote-desktop.mjs';
+import { createWaylandRemoteDesktopSession, portalPointerMotionAbsolute, waylandPortalCandidate } from '../src/wayland-remote-desktop.mjs';
 
 const PORTAL_PATH = '/org/freedesktop/portal/desktop';
 const REMOTE = 'org.freedesktop.portal.RemoteDesktop';
@@ -151,4 +151,23 @@ test('remote desktop portal clears a stale restore token and disconnects when St
   );
   assert.equal(cleared, 1);
   assert.equal(fake.disconnected(), true);
+});
+
+
+test('EIS absolute pointer motion sends desktop coordinates without relative calibration', async () => {
+  const sent = [];
+  await portalPointerMotionAbsolute(321.5, -42, {
+    state: {
+      backend: 'xdg-eis',
+      async send(payload) { sent.push(payload); },
+    },
+  });
+  assert.deepEqual(sent, [{ op:'motion_absolute', x:321.5, y:-42 }]);
+});
+
+test('absolute pointer motion fails closed on legacy portal backends', async () => {
+  await assert.rejects(
+    portalPointerMotionAbsolute(10, 20, { state:{ backend:'xdg-dbus' } }),
+    /requires the EIS Remote Desktop backend/,
+  );
 });

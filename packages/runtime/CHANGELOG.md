@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.59 — 2026-09-20
+
+- Tool descriptions now make routing boundaries explicit across overlapping filesystem, search, process, system, desktop, diagnostics, and document operations so AI hosts prefer the narrowest semantic tool instead of broad shell or fallback tools.
+- Wayland absolute pointer delivery uses the EIS helper path and avoids stale cached-position assumptions when falling back, improving deterministic desktop input on GNOME/Wayland.
+- Lockstep patch release with the ReMCP client at `0.2.59`.
+
 ## 0.2.58 — 2026-09-20
 
 - `computer_snapshot` normalizes partial platform-capture failures into schema-stable collections/objects and bounded `{ source, message }` errors instead of leaking error strings into structured output.

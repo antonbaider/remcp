@@ -6,10 +6,10 @@ Load this reference when the task primarily edits files, transfers data, runs co
 
 Choose the narrowest read that answers the question:
 
-- `read_file` with `offset`/`length` for large text files. Keep it data-first for model reasoning.
-- `render_file_preview` only when `read_file` returned `structuredContent.preview` and interactive preview/editing is useful. Pass `structuredContent.preview.id`; the render tool uses that short-lived account-scoped server reference and never re-reads the computer.
-- `render_image_preview` only when an image/screenshot data tool returned a preview reference and an interactive viewer helps; model vision still uses the native MCP `image` content.
-- `render_terminal_preview` only when a process data tool returned a preview reference and an interactive terminal viewer helps; it renders already-returned output and its refresh control reads the same PID instead of rerunning the command.
+- `read_file` with `offset`/`length` for large text files. Its normal text/structured result is the complete default path; do not look for a custom renderer.
+- `read_image`, `take_screenshot`, and `screenshot_region` return native MCP image content for model vision and host presentation. Do not follow them with `read_binary` or another tool just to display the image.
+- Process tools return model-readable terminal text/structured state directly. Continue the same PID with `read_process_output` or `wait_for_process_output`; never rerun a command merely to obtain another visual result.
+- If and only if this server actually advertises one of the optional `render_*` tools, its source result includes `structuredContent.preview`, and the user explicitly benefits from custom interactive UI, the renderer may consume that preview id. This is an opt-in MCP Apps path, not the default workflow.
 - `read_multiple_files` for two or more exact paths you already know; use `read_file` for one path.
 - `read_files` only when the files should be discovered by one glob; do not use it for an explicit path list.
 - `list_directory` with `depth`/`pattern` instead of shell `find`/`ls`.

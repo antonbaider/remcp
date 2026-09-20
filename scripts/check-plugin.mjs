@@ -3,7 +3,97 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { inflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+}
+
+function decodePngPixels(buffer) {
+  assert.equal(buffer.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'plugin icon must be a PNG');
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let interlace = 0;
+  const idat = [];
+  while (offset + 12 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.subarray(offset + 4, offset + 8).toString('ascii');
+    const data = buffer.subarray(offset + 8, offset + 8 + length);
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+      interlace = data[12];
+    } else if (type === 'IDAT') idat.push(data);
+    else if (type === 'IEND') break;
+    offset += 12 + length;
+  }
+  assert.equal(bitDepth, 8, 'plugin icon PNG must use 8-bit channels');
+  assert.ok(colorType === 2 || colorType === 6, 'plugin icon PNG must be RGB or RGBA');
+  assert.equal(interlace, 0, 'plugin icon PNG must be non-interlaced for deterministic validation');
+  const channels = colorType === 6 ? 4 : 3;
+  const stride = width * channels;
+  const raw = inflateSync(Buffer.concat(idat));
+  assert.equal(raw.length, height * (stride + 1), 'plugin icon PNG has an unexpected decoded size');
+  const rows = [];
+  let cursor = 0;
+  let previous = Buffer.alloc(stride);
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[cursor++];
+    const encoded = raw.subarray(cursor, cursor + stride);
+    cursor += stride;
+    const row = Buffer.alloc(stride);
+    for (let x = 0; x < stride; x += 1) {
+      const left = x >= channels ? row[x - channels] : 0;
+      const up = previous[x] || 0;
+      const upLeft = x >= channels ? previous[x - channels] : 0;
+      const source = encoded[x];
+      if (filter === 0) row[x] = source;
+      else if (filter === 1) row[x] = (source + left) & 0xff;
+      else if (filter === 2) row[x] = (source + up) & 0xff;
+      else if (filter === 3) row[x] = (source + Math.floor((left + up) / 2)) & 0xff;
+      else if (filter === 4) row[x] = (source + paeth(left, up, upLeft)) & 0xff;
+      else assert.fail(`unsupported PNG filter ${filter}`);
+    }
+    rows.push(row);
+    previous = row;
+  }
+  return { width, height, channels, rows };
+}
+
+function assertPluginIconLegible(buffer, brandColor) {
+  const decoded = decodePngPixels(buffer);
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(brandColor || ''));
+  assert.ok(match, 'brandColor must be available before validating the plugin icon');
+  const brand = match.slice(1).map(value => Number.parseInt(value, 16));
+  let brandPixels = 0;
+  let brightPixels = 0;
+  let transparentPixels = 0;
+  let total = 0;
+  for (const row of decoded.rows) {
+    for (let x = 0; x < decoded.width; x += 1) {
+      const index = x * decoded.channels;
+      const rgb = [row[index], row[index + 1], row[index + 2]];
+      const alpha = decoded.channels === 4 ? row[index + 3] : 255;
+      total += 1;
+      if (alpha < 250) transparentPixels += 1;
+      if (rgb.every((value, channel) => Math.abs(value - brand[channel]) <= 4)) brandPixels += 1;
+      if (rgb.every(value => value >= 235) && alpha >= 250) brightPixels += 1;
+    }
+  }
+  assert.equal(transparentPixels, 0, 'plugin icon must be opaque so a dark transparent mark cannot disappear on dark ChatGPT surfaces');
+  assert.ok(brandPixels / total >= 0.45, 'plugin icon must visibly use the declared brandColor as its background');
+  assert.ok(brightPixels / total >= 0.08, 'plugin icon must contain a substantial bright mark that contrasts on the brand background');
+}
 
 export function checkPlugin(root = fileURLToPath(new URL('..', import.meta.url))) {
   const read = file => readFileSync(join(root, file));
@@ -20,6 +110,7 @@ export function checkPlugin(root = fileURLToPath(new URL('..', import.meta.url))
     assert.match(asset, /^\.\/assets\/[\w.-]+$/, 'icons must be bundled assets');
     files.push(asset.slice(2));
   }
+  assertPluginIconLegible(read(iface.logo.slice(2)), iface.brandColor);
   if (iface.screenshots !== undefined) {
     assert.ok(Array.isArray(iface.screenshots) && iface.screenshots.length > 0, 'screenshots must be a non-empty array when supplied');
     assert.equal(iface.screenshots.length, iface.defaultPrompt?.length || 0, 'OpenAI requires exactly one screenshot for each starter prompt when screenshots are supplied');

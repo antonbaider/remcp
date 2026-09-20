@@ -109,7 +109,7 @@ export const toolDefinitions = [
   {
     name: 'read_files',
     title: 'Read files by glob',
-    description: 'Read files discovered by one glob under a directory, each section prefixed with its path and line count. Use this when the exact file list is not already known. If you already know the exact paths, use read_multiple_files; for one known path use read_file.',
+    description: 'Read the contents of files discovered by one glob under a directory, each section prefixed with its path and line count. Use this when the matched file contents are the result you want. Use start_search instead to find filenames or text matches without reading every matched file. If you already know the exact paths, use read_multiple_files; for one known path use read_file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -142,7 +142,7 @@ export const toolDefinitions = [
   {
     name: 'read_image',
     title: 'Read image',
-    description: 'Return an image file (PNG, JPEG, GIF, WebP, BMP, AVIF, or SVG) as a viewable image, so screenshots and diagrams can be inspected. Fails above the inline size limit.',
+    description: 'Return an image file (PNG, JPEG, GIF, WebP, BMP, AVIF, or SVG) as native MCP image content so screenshots, photos, and diagrams can be inspected or shown. Use read_binary only for byte-for-byte transfer, not merely to display an image. Fails above the inline size limit.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -157,7 +157,7 @@ export const toolDefinitions = [
   {
     name: 'read_binary',
     title: 'Read binary chunk',
-    description: 'Read any file as base64, in chunks, for transferring binaries, images, archives, or documents off the computer. Returns size, offset, and nextOffsetBytes; call again with offset_bytes set to nextOffsetBytes until complete is true.',
+    description: 'Read any file as base64 chunks for byte-for-byte transfer of binaries, archives, documents, or oversized media. For a normal image that should be inspected or shown, use read_image instead. Returns size, offset, and nextOffsetBytes; call again with offset_bytes set to nextOffsetBytes until complete is true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -239,7 +239,7 @@ export const toolDefinitions = [
   {
     name: 'write_file',
     title: 'Write file',
-    description: 'Create or replace exactly one text file. Parent directories are created automatically; mode "append" adds to the end. Use write_files for two or more independent files, and write_binary for binary bytes.',
+    description: 'Create or replace the complete contents of exactly one text file. Parent directories are created automatically; mode "append" adds to the end. For a small exact-block edit use edit_block, for a known line range use replace_lines, and when you already have a unified diff use apply_patch. Use write_files for two or more independent complete files, and write_binary for binary bytes.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -256,7 +256,7 @@ export const toolDefinitions = [
   {
     name: 'write_files',
     title: 'Write multiple files',
-    description: 'Create or replace two or more text files in one batch, each with its own path, content, and optional mode. Use this for scaffolding or coherent multi-file writes; for one path use write_file.',
+    description: 'Create or replace the complete contents of two or more text files in one batch, each with its own path, content, and optional mode. Use this for scaffolding or coherent multi-file writes; for one path use write_file. For partial edits use edit_block, replace_lines, replace_in_files, or apply_patch instead of rewriting whole files.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -284,7 +284,7 @@ export const toolDefinitions = [
   {
     name: 'apply_patch',
     title: 'Apply patch',
-    description: 'Apply a unified diff to one file or to several files at once, matching each hunk with a little fuzz so small offsets and whitespace differences still apply. This is the fastest way to land a multi-line change a model has already worked out. Pass dry_run to see the result as a diff first.',
+    description: 'Apply an already-prepared unified diff to one file or several files, matching each hunk with a little fuzz so small offsets and whitespace differences still apply. Prefer this when the change is naturally patch-shaped; use edit_block for one exact text block and write_file only when replacing a complete file. Pass dry_run to see the result first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -320,7 +320,7 @@ export const toolDefinitions = [
   {
     name: 'edit_block',
     title: 'Edit file',
-    description: 'Replace an exact block of text in a file. Provide enough surrounding context to make old_string unique; the call fails unless the number of matches equals expected_replacements. When the exact text is not found, a whitespace-tolerant match is attempted and reported. Pass dry_run to preview the change as a diff without writing.',
+    description: 'Replace one known text block in one file. Provide enough surrounding context to make old_string unique; the call fails unless the number of matches equals expected_replacements. Use write_file for a whole-file replacement and replace_lines for a known line range. When exact text is not found, a whitespace-tolerant match is attempted and reported. Pass dry_run to preview without writing.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -340,7 +340,7 @@ export const toolDefinitions = [
   {
     name: 'replace_lines',
     title: 'Replace lines',
-    description: 'Replace an inclusive 1-based line range with new text. The rest of the file, including its line endings, is preserved. Pass dry_run to preview the change as a diff without writing.',
+    description: 'Replace an inclusive 1-based line range with new text. Use this when line numbers define the target; use edit_block when matching existing text and write_file for a complete rewrite. The rest of the file, including its line endings, is preserved. Pass dry_run to preview without writing.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -359,7 +359,7 @@ export const toolDefinitions = [
   {
     name: 'replace_in_files',
     title: 'Replace in files',
-    description: 'Replace text or a regular expression across the text files under a path and report what changed. Applies immediately; pass dry_run true to preview the affected files first.',
+    description: 'Search and replace the same text or regular expression across multiple text files under a path and report what changed. Use edit_block for one known block in one file and write_file for one complete known file. Applies immediately; pass dry_run true to preview the affected files first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -598,7 +598,7 @@ export const toolDefinitions = [
   {
     name: 'start_search',
     title: 'Start search',
-    description: 'Start a filename or content search on this computer and return the first results. Content searches return "path:line: text" rows. Use get_more_search_results to page and stop_search to stop a long search.',
+    description: 'Start a filename or content search on this computer and return the first matches without reading every matched file in full. Use read_files instead when a glob is already known and the contents of all matching files are the desired result. Content searches return "path:line: text" rows. Use get_more_search_results to page and stop_search to stop a long search.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -662,7 +662,7 @@ export const toolDefinitions = [
   {
     name: 'start_process',
     title: 'Start process',
-    description: 'Run a shell command on this computer and return its initial output. The process keeps running so read_process_output or interact_with_process can be used later. Commands can change local or external state.',
+    description: 'Run a shell command, script, build, test suite, or terminal server and return its initial output. Prefer dedicated semantic tools for jobs they already cover: launch_app for GUI apps, service for service-manager operations, power_action for lock/sleep/restart/shutdown, network for routine network inspection/tests, event_log for OS logs, installed_apps for software inventory, environment for environment facts, and open_path/reveal_path for opening or revealing files. The process keeps running so read_process_output or interact_with_process can be used later.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -736,7 +736,7 @@ export const toolDefinitions = [
   {
     name: 'force_terminate',
     title: 'Stop session',
-    description: 'Stop a session started with start_process, escalating from SIGTERM to SIGKILL when it does not exit.',
+    description: 'Stop a ReMCP terminal session started with start_process, escalating from SIGTERM to SIGKILL when it does not exit. Use kill_process for an arbitrary operating-system PID that is not a ReMCP terminal session.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -752,7 +752,7 @@ export const toolDefinitions = [
   {
     name: 'list_sessions',
     title: 'List sessions',
-    description: 'List terminal sessions started during this ReMCP runtime session with their status and how long they have been running.',
+    description: 'List only terminal sessions started through ReMCP start_process, with status and runtime. Use list_processes for the computer-wide operating-system process list.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: readOnly,
     outputSchema: LIST_SESSIONS_OUTPUT_SCHEMA,
@@ -761,7 +761,7 @@ export const toolDefinitions = [
   {
     name: 'get_system_info',
     title: 'Get system info',
-    description: 'Report host details for the paired computer: operating system and kernel, CPU model and load, memory pressure, free disk space on the working volume, uptime, and the default shell.',
+    description: 'Report machine health and host facts for the paired computer: operating system and kernel, CPU model/load, memory pressure, free disk space, uptime, and default shell. Use environment for PATH/shell/runtime environment variables and get_runtime_info for ReMCP-specific version, policy, roots, and limits.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: readOnly,
     handler: systemToolHandlers.get_system_info,
@@ -769,7 +769,7 @@ export const toolDefinitions = [
   {
     name: 'list_processes',
     title: 'List processes',
-    description: 'List running operating-system processes on this computer, highest CPU first, with pid, parent pid, CPU and memory usage, and command. Values that look like secrets are masked.',
+    description: 'List the computer-wide operating-system processes, highest CPU first, with pid, parent pid, CPU/memory usage, and command. Use list_sessions when the question is only about commands started through ReMCP start_process. Values that look like secrets are masked.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -783,7 +783,7 @@ export const toolDefinitions = [
   {
     name: 'kill_process',
     title: 'Kill process',
-    description: 'Terminate an operating-system process by pid. Terminates the process and its children on Windows.',
+    description: 'Terminate an arbitrary operating-system process by pid. If the pid belongs to a ReMCP terminal session created by start_process, prefer force_terminate so ReMCP updates the session consistently and handles its process tree. Terminates the process and its children on Windows.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -798,7 +798,7 @@ export const toolDefinitions = [
   {
     name: 'get_runtime_info',
     title: 'Get runtime info',
-    description: 'Report this device runtime: version, allowed roots, command policy, output limits, settable preferences, and whether usage metrics are enabled. Read-only; use set_config_value only for telemetryEnabled, maxReadLines, maxBufferedLines, or maxOutputBytes. Access roots and command security stay local to the computer.',
+    description: 'Report this computer\'s local ReMCP runtime: version, allowed roots, command policy, output limits, settable preferences, and usage-metric setting. Use get_system_info for OS/CPU/memory/disk facts and hosted get_configuration for deployment/account configuration. Read-only; use set_config_value only for telemetryEnabled, maxReadLines, maxBufferedLines, or maxOutputBytes. Access roots and command security stay local to the computer.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: readOnly,
     handler: statsToolHandlers.get_runtime_info,
@@ -806,7 +806,7 @@ export const toolDefinitions = [
   {
     name: 'get_runtime_stats',
     title: 'Get runtime stats',
-    description: 'Report local counters for this runtime session: tool calls and failures, blocked commands, active terminal and search sessions, and usage-metric queue state.',
+    description: 'Report counters from the current local runtime session on this machine: tool calls/failures, blocked commands, active terminal/search sessions, and usage-metric queue state. Use hosted get_usage_statistics for account-level historical usage aggregated across devices and days.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: readOnly,
     handler: statsToolHandlers.get_runtime_stats,

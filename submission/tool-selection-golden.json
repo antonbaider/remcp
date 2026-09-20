@@ -152,52 +152,54 @@
       "rationale": "new_tab bootstraps CDP even when no page target exists."
     },
     {
-      "id": "direct-render-file-preview",
+      "id": "direct-native-file-result",
       "kind": "direct",
-      "prompt": "Read README.md from my paired computer, summarize it, then show the interactive file preview.",
+      "prompt": "Read README.md from my paired computer, summarize it, and show the result here in chat.",
       "expected": {
         "action": "call",
         "sequence": [
           "list_devices",
-          "read_file",
-          "render_file_preview"
+          "read_file"
         ],
         "must_not_call": [
-          "open_path"
-        ],
-        "component": "file-preview"
+          "open_path",
+          "render_file_preview"
+        ]
       },
-      "rationale": "Data-first read should precede the presentation-only renderer."
+      "rationale": "The default production path ends with the model-readable file result; custom UI is not required."
     },
     {
-      "id": "direct-render-image-preview",
+      "id": "direct-native-image-result",
       "kind": "direct",
-      "prompt": "Take a screenshot of my paired computer and show it in the interactive image viewer.",
+      "prompt": "Take a screenshot of my paired computer and show it here in chat.",
       "expected": {
         "action": "call",
         "sequence": [
           "list_devices",
-          "take_screenshot",
+          "take_screenshot"
+        ],
+        "must_not_call": [
+          "read_binary",
           "render_image_preview"
-        ],
-        "component": "image-preview"
+        ]
       },
-      "rationale": "Image capture stays data-first; the render tool only presents returned bytes."
+      "rationale": "The screenshot tool already returns native MCP image content for the host and model."
     },
     {
-      "id": "direct-terminal-preview",
+      "id": "direct-native-terminal-result",
       "kind": "direct",
-      "prompt": "Run npm test on my paired laptop and then show the terminal output in the interactive terminal viewer.",
+      "prompt": "Run npm test on my paired laptop and show the terminal output here in chat.",
       "expected": {
         "action": "call",
         "sequence": [
           "list_devices",
-          "start_process",
-          "render_terminal_preview"
+          "start_process"
         ],
-        "component": "terminal-preview"
+        "must_not_call": [
+          "render_terminal_preview"
+        ]
       },
-      "rationale": "The command runs once; the renderer uses cached output and must not rerun it."
+      "rationale": "The command runs once and its normal MCP result is the default terminal presentation path."
     },
     {
       "id": "indirect-first-look",

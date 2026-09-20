@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "remcp",
-  "version": "0.2.58",
+  "version": "0.2.59",
   "description": "Securely operate computers you explicitly pair with ReMCP using semantic desktop UI, browser DOM/CDP, files, terminal, diagnostics, and structured document tools.",
   "author": {
     "name": "Anton Baider",
@@ -37,7 +37,7 @@
         "termsOfServiceURL": "https://remcp.site/terms",
         "defaultPrompt": [
           "On my paired laptop, inspect the browser page semantically, make my requested change, then verify it with a targeted screenshot.",
-          "Read a README from one of my ReMCP computers, summarize it without changing it, then show the interactive file preview.",
+          "Read a README from one of my ReMCP computers, summarize it without changing it, and show the native result here in chat.",
           "Inspect what is visible on one paired computer using semantic UI first, and use a screenshot only when visual proof adds value."
         ],
         "brandColor": "#4C50D8",

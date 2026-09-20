@@ -3,7 +3,7 @@ import process from 'node:process';
 import { readFile, stat } from 'node:fs/promises';
 import { image, multi, text } from '../util.mjs';
 import { capturePortalScreenshot, isWaylandSession } from '../screenshot-portal.mjs';
-import { hasWaylandRemoteDesktopGrant, portalPointerButton, portalPointerMotion, portalScroll, portalShortcut, portalTypeText, waylandPortalCandidate } from '../wayland-remote-desktop.mjs';
+import { hasWaylandRemoteDesktopGrant, portalPointerButton, portalPointerMotion, portalPointerMotionAbsolute, portalScroll, portalShortcut, portalTypeText, waylandPortalCandidate } from '../wayland-remote-desktop.mjs';
 import {
   clamp,
   commandExists,
@@ -863,9 +863,18 @@ async function portalMoveTo(x, y, options = {}) {
   const targetX = Math.trunc(Number(x));
   const targetY = Math.trunc(Number(y));
   if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) throw new Error('x and y must be finite coordinates');
-  if (options.recalibrate || !portalPointerState) await calibratePortalPointer(options);
   const motionOptions = { ...options };
   delete motionOptions.recalibrate;
+  try {
+    await portalPointerMotionAbsolute(targetX, targetY, motionOptions);
+    portalPointerState = { x:targetX, y:targetY };
+    return;
+  } catch (error) {
+    if (!/requires the EIS Remote Desktop backend/i.test(String(error?.message || error))) throw error;
+  }
+  // Legacy portal fallback: relative motion has no absolute position feedback,
+  // so recalibrate on every move instead of trusting cached coordinates.
+  await calibratePortalPointer(motionOptions);
   await portalPointerMotion(targetX - portalPointerState.x, targetY - portalPointerState.y, motionOptions);
   portalPointerState = { x:targetX, y:targetY };
 }

@@ -214,10 +214,13 @@ class EiSender:
         self.lib.ei_device_unref.restype = c_void_p
         self.lib.ei_device_has_capability.argtypes = [c_void_p, ctypes.c_int]
         self.lib.ei_device_has_capability.restype = ctypes.c_bool
+        self.lib.ei_device_get_region_at.argtypes = [c_void_p, ctypes.c_double, ctypes.c_double]
+        self.lib.ei_device_get_region_at.restype = c_void_p
         self.lib.ei_device_start_emulating.argtypes = [c_void_p, ctypes.c_uint32]
         self.lib.ei_device_stop_emulating.argtypes = [c_void_p]
         self.lib.ei_device_keyboard_key.argtypes = [c_void_p, ctypes.c_uint32, ctypes.c_bool]
         self.lib.ei_device_pointer_motion.argtypes = [c_void_p, ctypes.c_double, ctypes.c_double]
+        self.lib.ei_device_pointer_motion_absolute.argtypes = [c_void_p, ctypes.c_double, ctypes.c_double]
         self.lib.ei_device_button_button.argtypes = [c_void_p, ctypes.c_uint32, ctypes.c_bool]
         self.lib.ei_device_scroll_discrete.argtypes = [c_void_p, ctypes.c_int32, ctypes.c_int32]
         self.lib.ei_device_frame.argtypes = [c_void_p, ctypes.c_uint64]
@@ -243,6 +246,8 @@ class EiSender:
         self.devices = {}
         self.sequence = 1
         self.connected = False
+        self.pointer_device_key = None
+        self.pointer_position = None
 
     def _device_key(self, ptr):
         return int(ptr or 0)
@@ -259,6 +264,9 @@ class EiSender:
     def _drop_device(self, ptr):
         key = self._device_key(ptr)
         state = self.devices.pop(key, None)
+        if key == self.pointer_device_key:
+            self.pointer_device_key = None
+            self.pointer_position = None
         if state:
             if state["emulating"]:
                 try:
@@ -349,6 +357,46 @@ class EiSender:
                 return state["ptr"]
         raise RuntimeError(f"no resumed EIS device with capability {cap}")
 
+    def device_for_absolute(self, x, y):
+        candidates = []
+        for state in self.devices.values():
+            if not state["resumed"] or not state["emulating"]:
+                continue
+            device = state["ptr"]
+            if not self.lib.ei_device_has_capability(device, EI_CAP_POINTER_ABSOLUTE):
+                continue
+            candidates.append(device)
+            if self.lib.ei_device_get_region_at(device, float(x), float(y)):
+                return device
+        if candidates:
+            raise RuntimeError(f"no absolute-pointer EIS region contains desktop coordinate ({x}, {y})")
+        raise RuntimeError("no resumed EIS device with absolute-pointer capability")
+
+    def device_for_pointer_context(self, cap):
+        state = self.devices.get(self.pointer_device_key)
+        if (
+            state
+            and state["resumed"]
+            and state["emulating"]
+            and self.lib.ei_device_has_capability(state["ptr"], cap)
+        ):
+            return state["ptr"]
+        if self.pointer_position is not None:
+            x, y = self.pointer_position
+            for candidate in self.devices.values():
+                if not candidate["resumed"] or not candidate["emulating"]:
+                    continue
+                device = candidate["ptr"]
+                if not self.lib.ei_device_has_capability(device, cap):
+                    continue
+                if self.lib.ei_device_get_region_at(device, float(x), float(y)):
+                    return device
+        return self.device_for(cap)
+
+    def remember_pointer(self, device, position=None):
+        self.pointer_device_key = self._device_key(device)
+        self.pointer_position = position
+
     def frame(self, device):
         self.lib.ei_device_frame(device, self.lib.ei_now(self.ei))
 
@@ -361,13 +409,21 @@ class EiSender:
         elif op == "motion":
             device = self.device_for(EI_CAP_POINTER)
             self.lib.ei_device_pointer_motion(device, float(payload.get("dx", 0)), float(payload.get("dy", 0)))
+            self.remember_pointer(device)
+            self.frame(device)
+        elif op == "motion_absolute":
+            x = float(payload["x"])
+            y = float(payload["y"])
+            device = self.device_for_absolute(x, y)
+            self.lib.ei_device_pointer_motion_absolute(device, x, y)
+            self.remember_pointer(device, (x, y))
             self.frame(device)
         elif op == "button":
-            device = self.device_for(EI_CAP_BUTTON)
+            device = self.device_for_pointer_context(EI_CAP_BUTTON)
             self.lib.ei_device_button_button(device, int(payload["button"]), bool(payload.get("pressed")))
             self.frame(device)
         elif op == "scroll":
-            device = self.device_for(EI_CAP_SCROLL)
+            device = self.device_for_pointer_context(EI_CAP_SCROLL)
             self.lib.ei_device_scroll_discrete(device, int(payload.get("dx", 0)), int(payload.get("dy", 0)))
             self.frame(device)
         elif op == "ping":

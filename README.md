@@ -170,7 +170,7 @@ server.
 | Diagnostics | `service`, `event_log`, `network`, `installed_apps`, `environment`, `audio`, `power_action`, `record_screen` |
 | Documents | `read_document`, `edit_spreadsheet`, `edit_document`, `pdf_action` |
 
-The hosted ReMCP endpoint has eleven hosted account/presentation tools in its full UI-capable catalog, for **94 tools**. Plain MCP clients that do not negotiate MCP Apps receive 91 tools because the three presentation-only render tools are omitted. File/image/terminal data tools stay useful without UI and may return a short-lived `structuredContent.preview`; the named render tool accepts only that id and renders the exact already-returned payload without a second device RPC. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
+The hosted ReMCP endpoint adds eight account tools to the 83 device tools, for a **91-tool default native-first catalog**. ChatGPT receives standard MCP text/structured results and native MCP image content; custom file/image/terminal widgets are not advertised by default. An operator can explicitly enable the three optional presentation-only MCP Apps, but they appear only for clients that negotiate `io.modelcontextprotocol/ui`, producing a 94-tool UI mode. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
 
 ### Tool selection for AI agents
 

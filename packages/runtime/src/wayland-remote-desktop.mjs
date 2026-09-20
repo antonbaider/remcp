@@ -590,6 +590,15 @@ export async function portalPointerMotion(dx, dy, options = {}) {
   await state.remote.NotifyPointerMotion(state.session, {}, Number(dx), Number(dy));
 }
 
+export async function portalPointerMotionAbsolute(x, y, options = {}) {
+  const state = options.state || await ensureWaylandRemoteDesktop(options);
+  if (state.backend === 'xdg-eis') {
+    await state.send({ op:'motion_absolute', x:Number(x), y:Number(y) });
+    return;
+  }
+  throw new ToolError('Absolute pointer motion requires the EIS Remote Desktop backend');
+}
+
 export async function portalPointerButton(button, pressed, options = {}) {
   const state = options.state || await ensureWaylandRemoteDesktop(options);
   const code = String(button || 'left').toLowerCase() === 'right' ? 0x111 : String(button || 'left').toLowerCase() === 'middle' ? 0x112 : 0x110;
