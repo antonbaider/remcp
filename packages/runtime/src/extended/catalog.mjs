@@ -164,6 +164,7 @@ const outputString = description => ({ type:'string', ...(description ? { descri
 const outputNumber = description => ({ type:'number', ...(description ? { description } : {}) });
 const outputBoolean = description => ({ type:'boolean', ...(description ? { description } : {}) });
 const outputObject = description => ({ type:'object', additionalProperties:true, ...(description ? { description } : {}) });
+const outputNullableObject = description => ({ type:['object','null'], additionalProperties:true, ...(description ? { description } : {}) });
 const outputRecord = (properties = {}, description) => ({ type:'object', properties, additionalProperties:true, ...(description ? { description } : {}) });
 const outputArray = (items = {}, description) => ({ type:'array', items, ...(description ? { description } : {}) });
 
@@ -172,7 +173,7 @@ const OUTPUT_FIELDS = Object.freeze({
     device:outputObject('Device/platform metadata for the captured computer state.'),
     windows:outputArray(outputObject(), 'Top-level windows with stable ids/PIDs/bounds when available.'),
     displays:outputArray(outputObject(), 'Display inventory used for virtual-desktop geometry.'),
-    active_window:outputObject('Active top-level window when known.'),
+    active_window:outputNullableObject('Active top-level window when known; null when accessibility state cannot be joined to top-level window enumeration.'),
     ui:outputObject('Native accessibility snapshot and semantic tree.'),
     cursor:outputObject('Pointer position when available.'),
     clipboard:outputObject('Clipboard metadata only unless clipboard content was explicitly requested.'),

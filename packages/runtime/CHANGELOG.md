@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.52 — 2026-09-20
+
+- `computer_snapshot.active_window` is nullable when native accessibility state cannot be matched to the platform's top-level window enumeration, preventing valid macOS snapshots from failing structured output validation.
+- Lockstep patch release with the ReMCP client at `0.2.52`.
+
 ## 0.2.51 — 2026-09-20
 
 - Linux AT-SPI text/focus operations reject explicit false results, `type_text method=accessibility` remains accessibility-only, and semantic browser text failures direct callers to `browser_action` rather than reporting an unverified paste as success.

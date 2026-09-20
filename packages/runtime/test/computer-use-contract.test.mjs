@@ -44,7 +44,9 @@ test('computer_action stays a narrow cross-backend fallback instead of duplicati
     'scroll_into_view','set_range_value','add_to_selection','remove_from_selection',
   ]) assert.ok(uiActions.includes(action), `ui_action missing ${action}`);
 
-  const snapshot = tool('computer_snapshot').inputSchema.properties;
+  const snapshotTool = tool('computer_snapshot');
+  const snapshot = snapshotTool.inputSchema.properties;
+  assert.deepEqual(snapshotTool.outputSchema.properties.active_window.type, ['object','null'], 'active_window may be unknown even when native accessibility is available');
   assert.deepEqual(snapshot.ui_scope.enum, ['active','desktop']);
   assert.equal(snapshot.screenshot_region.minItems, 4);
   assert.equal(snapshot.screenshot_region.maxItems, 4);
