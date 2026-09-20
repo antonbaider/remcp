@@ -19,7 +19,7 @@ plugin name.
 The rest of this document is for **developers and reviewers**.
 
 ReMCP ships a production OpenAI Plugins package for ChatGPT and Codex. It combines the hosted remote
-MCP server with five shared operational skills, review metadata, and three self-contained MCP Apps: a file editor/diff with syntax highlighting and in-chat save, a fullscreen image viewer layered on native MCP image/screenshot content, and a compact terminal-output viewer. Source tools remain data-first; presentation-only render tools mount the corresponding app after the source result already exists.
+MCP server with five shared operational skills, review metadata, and three self-contained MCP Apps: a file editor/diff with syntax highlighting and in-chat save, a fullscreen image viewer layered on native MCP image/screenshot content, and a compact terminal-output viewer. Source tools remain data-first and own the corresponding app resource directly, so the same tool result hydrates UI; app-only render helpers exist only for late-mount recovery.
 
 This is the **OpenAI-specific** package. Claude Code packaging lives beside it and does not replace,
 rename, or regenerate the files described here.
@@ -33,7 +33,7 @@ rename, or regenerate the files described here.
 | MCP configuration | `mcp.json` |
 | Shared skills | 5 |
 | Hosted tool surface | 94 tools with custom widgets enabled; 91 in native-only mode |
-| Rich UI | Production file editor/diff with syntax highlighting and save, fullscreen image viewer, and terminal output viewer. When custom widgets are enabled, the three presentation-only render tools are advertised on every stateless request and consume short-lived preview references without rerunning source actions |
+| Rich UI | Production file editor/diff with syntax highlighting and save, fullscreen image viewer, and terminal output viewer. When custom widgets are enabled, file/image/terminal source tools carry their MCP Apps resource directly; three app-only recovery helpers can consume short-lived preview references without rerunning source actions |
 | Authentication | OAuth authorization code + PKCE, OIDC/UserInfo metadata |
 | Public overview | [`docs/PLUGINS.md`](PLUGINS.md) |
 | Full tool reference | [`docs/TOOLS.md`](TOOLS.md) — 94-tool production surface with custom widgets enabled; 91-tool native-only surface when disabled |

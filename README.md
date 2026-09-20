@@ -187,7 +187,7 @@ server.
 | Diagnostics | `service`, `event_log`, `network`, `installed_apps`, `environment`, `audio`, `power_action`, `record_screen` |
 | Documents | `read_document`, `edit_spreadsheet`, `edit_document`, `pdf_action` |
 
-The hosted ReMCP endpoint has eleven hosted account/presentation tools in its normal production catalog, for **94 tools**. Setting `REMCP_CUSTOM_WIDGETS_ENABLED=false` omits the three presentation-only render tools and returns the 91-tool native-only surface. File/image/terminal data tools stay useful without UI and may return a short-lived `structuredContent.preview` whenever custom widgets are enabled; the named render tool accepts that id and renders the exact already-returned payload without a second device RPC. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
+The hosted ReMCP endpoint has eleven hosted account/presentation tools in its normal production catalog, for **94 tools**. Setting `REMCP_CUSTOM_WIDGETS_ENABLED=false` omits the three app-only preview recovery helpers and returns the 91-tool native-only surface. With widgets enabled, file/image/terminal source tools own their UI resource directly and hydrate it from the same tool result; `structuredContent.preview` remains a short-lived retry reference for the app only, so no second model-selected render call or device RPC is required. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
 
 ### Tool selection for AI agents
 

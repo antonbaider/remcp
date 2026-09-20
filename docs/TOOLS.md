@@ -31,9 +31,9 @@ Render already-returned file, image, and terminal data inside MCP Apps-capable c
 
 | Tool | Safety | Parameters | When to use |
 | --- | --- | --- | --- |
-| `render_file_preview` | read-only | `preview_id*` (string) | Use this when read_file has returned structuredContent.preview and the file should be shown in a UI-capable chat, especially for code review or editing. Pass structuredContent.preview.id here. This presentation-only tool shows the exact already-returned file with syntax highlighting, source/edit/diff views, and in-chat save through write_file; it never re-reads the computer for presentation. |
-| `render_image_preview` | read-only | `preview_id*` (string) | Use this when read_image, take_screenshot, or screenshot_region has returned a preview reference and the image should be shown in a UI-capable chat. Pass that preview id here. This presentation-only tool renders the exact validated image bytes already returned by the data tool with the ReMCP image viewer; it never captures or reads the computer again. |
-| `render_terminal_preview` | read-only | `preview_id*` (string) | Use this when a process tool has returned a terminal preview reference and console output should be shown in a UI-capable chat. Pass that preview id here. This presentation-only tool renders the already-returned output in the ReMCP terminal viewer; refresh reads the same process and never reruns the command. |
+| `render_file_preview` | read-only | `preview_id*` (string) | Use this when the file preview app needs to recover from late or missing result metadata. Pass the source read_file structuredContent.preview.id. This presentation-only app helper rehydrates the exact already-returned file and never re-reads the computer. |
+| `render_image_preview` | read-only | `preview_id*` (string) | Use this when the image preview app needs to recover a read_image or screenshot result from late or missing result metadata. Pass the source tool structuredContent.preview.id. This presentation-only app helper rehydrates the exact validated image bytes already returned and never captures or reads the computer again. |
+| `render_terminal_preview` | read-only | `preview_id*` (string) | Use this when the terminal preview app needs to recover from late or missing result metadata. Pass the source process tool structuredContent.preview.id. This presentation-only app helper rehydrates the already-returned output; refresh reads the same process and never reruns the command. |
 
 ## Read & inspect files
 
