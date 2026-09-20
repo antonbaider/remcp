@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "remcp",
-  "version": "0.2.60",
+  "version": "0.2.61",
   "description": "Securely operate computers you explicitly pair with ReMCP using semantic desktop UI, browser DOM/CDP, files, terminal, diagnostics, and structured document tools.",
   "author": {
     "name": "Anton Baider",
@@ -41,6 +41,7 @@
           "Inspect what is visible on one paired computer using semantic UI first, and use a screenshot only when visual proof adds value."
         ],
         "brandColor": "#0A0A0C",
+        "brandColorDark": "#F2F2F2",
         "composerIcon": "./assets/remcp-icon.png",
         "logo": "./assets/remcp-icon.png"
       }
