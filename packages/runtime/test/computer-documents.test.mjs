@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { freshWorkspace } from './helpers.mjs';
 
@@ -69,6 +69,28 @@ test('DOCX edit and read round-trip preserves plain paragraph text', { skip: !zi
   assert.match(read.content[0].text, /Hello ReMCP/);
   assert.match(read.content[0].text, /Inserted paragraph/);
   assert.doesNotMatch(read.content[0].text, /Second paragraph/);
+});
+
+test('PDF reading falls back to local pdftotext when the built-in parser cannot decode text', { skip: process.platform === 'win32' }, async () => {
+  const binDir = join(root, 'fake-bin');
+  mkdirSync(binDir, { recursive: true });
+  const fakePdftotext = join(binDir, 'pdftotext');
+  writeFileSync(fakePdftotext, '#!/bin/sh\nprintf "Fallback PDF text\\nSecond fallback line\\n"\n');
+  chmodSync(fakePdftotext, 0o755);
+
+  const pdf = join(root, 'embedded-font-like.pdf');
+  writeFileSync(pdf, '%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF');
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binDir}:${previousPath || ''}`;
+  try {
+    const { readDocument } = await import('../src/extended/documents.mjs');
+    const result = await readDocument({ path: pdf });
+    assert.match(result.content[0].text, /Fallback PDF text/);
+    assert.match(result.content[0].text, /Second fallback line/);
+  } finally {
+    process.env.PATH = previousPath;
+  }
 });
 
 test('OOXML extraction rejects archive traversal before unzip writes anything', { skip: !zipReady }, async () => {

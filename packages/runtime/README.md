@@ -63,7 +63,7 @@ For frontend QA, use semantic data to operate the page and rendered pixels to ve
 `maxReadLines`, `maxBufferedLines`, and `maxOutputBytes`. Access roots, blocked commands,
 the command guardrail, shell, write limit, runtime name, and unrestricted mode stay with the person
 at the computer. DOCX/XLSX edits operate directly on OOXML, while structural PDF writes use existing
-system tools such as qpdf/poppler when present; ReMCP still does not bundle Chromium, Puppeteer,
+system tools such as qpdf/poppler when present. PDF text reading uses the built-in parser first and can fall back to local `pdftotext` for embedded-font PDFs; ReMCP still does not bundle Chromium, Puppeteer,
 `sharp`, or `exceljs`.
 
 `--print-tools` prints the exact JSON contract (schemas and annotations) the runtime advertises, and
@@ -76,7 +76,7 @@ and the user's request is the authorization. ReMCP adds no per-tool approval pro
 and no dry-run detour unless you ask for one.
 
 Operating-system security boundaries still apply. macOS can require Accessibility/Screen Recording grants,
-and GNOME Wayland requires a one-time XDG RemoteDesktop consent before low-level keyboard/pointer input.
+and GNOME Wayland requires a one-time XDG RemoteDesktop consent before low-level keyboard/pointer/drag input. XTEST/xdotool drag is deliberately not treated as reliable on GNOME Wayland.
 ReMCP does not bypass those controls: after GNOME grants access, the portal restore token is stored locally
 under the runtime config directory with mode `0600` and reused when the portal permits it. Semantic AT-SPI
 UI actions and the XDG Screenshot portal remain separate from that low-level input permission.

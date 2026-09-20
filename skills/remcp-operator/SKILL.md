@@ -27,7 +27,7 @@ For visible applications use:
 - Unknown desktop state: `computer_snapshot`.
 - Native UI: `ui_snapshot -> ui_find -> ui_action -> wait_for_ui`.
 - Chromium page: `browser_navigate/browser_tabs -> browser_snapshot/browser_find -> browser_action -> browser_wait`.
-- Normal Unicode text: `type_text`; shortcuts/control/navigation keys: `keyboard`.
+- Native/focused Unicode text: `type_text`; Chromium page DOM text: `browser_action`; shortcuts/control/navigation keys: `keyboard`.
 - Coordinates/`pointer` are the final interaction fallback.
 - Document content: prefer `read_document`, `edit_spreadsheet`, `edit_document`, or `pdf_action` over driving Office/PDF applications.
 

@@ -586,10 +586,14 @@ if target is None:raise Exception("UI element not found")
 if action in ("click","invoke","select","toggle"):
  target.queryAction().doAction(0)
 elif action=="focus":
- target.queryComponent().grabFocus()
+ if target.queryComponent().grabFocus() is False: raise Exception("focus accessibility action returned false")
 elif action=="set_value":
- try: target.queryEditableText().setTextContents(value)
- except: target.queryValue().currentValue=value
+ try:
+  applied=target.queryEditableText().setTextContents(value)
+  if applied is False: raise Exception("editable text write returned false")
+ except Exception as editable_error:
+  try: target.queryValue().currentValue=value
+  except Exception as value_error: raise Exception("set_value failed: editable=%s; value=%s"%(editable_error,value_error))
 elif action=="set_range_value":
  target.queryValue().currentValue=float(value)
 elif action in ("expand","collapse"):
@@ -620,7 +624,10 @@ print(json.dumps({"action":action,"name":target.name or "","role":target.getRole
   try { payload = JSON.parse(result.stdout || ''); } catch {}
   if (payload && !payload.error) return text(JSON.stringify(payload));
   if (payload?.error) unavailable('Linux accessibility action', payload.error);
-  if (result.code !== 0) unavailable('Linux accessibility action', (result.stderr || result.stdout).trim());
+  if (result.code !== 0) {
+    const detail = String(result.stderr || result.stdout || 'AT-SPI action failed').trim().split(/\r?\n/).filter(Boolean).at(-1) || 'AT-SPI action failed';
+    unavailable('Linux accessibility action', detail);
+  }
   return text(result.stdout.trim());
 }
 
@@ -961,9 +968,11 @@ export async function dragDrop(args = {}) {
         return jsonResult({ from:[args.from_x,args.from_y], to:[args.to_x,args.to_y], backend:'xdg-desktop-portal' });
       } catch {}
     }
-    if (backend !== 'portal' && await runXdotool()) return jsonResult({ from:[args.from_x,args.from_y], to:[args.to_x,args.to_y], backend:'xwayland-xdotool' });
+    if (backend === 'x11') {
+      unavailable('Wayland drag and drop', 'XTEST/xdotool drag events are not reliably delivered through GNOME Wayland; use backend=portal');
+    }
     if (backend === 'auto' && waylandPortalCandidate()) portalPermissionHint('Wayland drag and drop');
-    unavailable('Wayland drag and drop', backend === 'x11' ? 'xdotool is unavailable' : 'no working drag backend is available');
+    unavailable('Wayland drag and drop', 'no working consent-backed drag backend is available');
   }
   if (await runXdotool()) return jsonResult({ from:[args.from_x,args.from_y], to:[args.to_x,args.to_y], backend:'xdotool' });
   unavailable('Drag and drop', 'install xdotool');

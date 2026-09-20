@@ -567,24 +567,37 @@ export async function typeText(args = {}) {
   const value = String(args.text ?? '');
   const method = requireEnum(args.method || 'auto', 'method', ['auto','accessibility','clipboard','keys']);
   const resolvedArgs = args.label != null ? withResolvedUiLabel(args) : args;
-  const hasSelector = Boolean(
+  const hasElementSelector = Boolean(
     optionalString(resolvedArgs.id) || optionalString(resolvedArgs.name) || optionalString(resolvedArgs.role) ||
-    optionalString(resolvedArgs.automation_id || resolvedArgs.automationId) || optionalString(resolvedArgs.app) ||
-    optionalString(resolvedArgs.window_title || resolvedArgs.windowTitle) || Number.isInteger(Number(resolvedArgs.pid))
+    optionalString(resolvedArgs.automation_id || resolvedArgs.automationId)
   );
   const clear = args.clear === true;
   const pressEnter = args.press_enter === true;
   const caret = requireEnum(args.caret_position || 'idle', 'caret_position', ['start','idle','end']);
 
-  if ((method === 'auto' || method === 'accessibility') && hasSelector) {
-    const result = await uiAction({ ...resolvedArgs, action:'set_value', value });
-    const raw = result.content?.[0]?.text || '';
-    let target = raw;
-    try { target = JSON.parse(raw); } catch {}
-    if (pressEnter) await keyboard({ ...resolvedArgs, key:'ENTER' });
-    return jsonResult({ length:value.length, method:'accessibility', target, clear:true, press_enter:pressEnter });
+  if ((method === 'auto' || method === 'accessibility') && hasElementSelector) {
+    try {
+      const result = await uiAction({ ...resolvedArgs, action:'set_value', value });
+      const raw = result.content?.[0]?.text || '';
+      let target = raw;
+      try { target = JSON.parse(raw); } catch {}
+      if (pressEnter) await keyboard({ ...resolvedArgs, key:'ENTER' });
+      return jsonResult({ length:value.length, method:'accessibility', target, clear:true, press_enter:pressEnter });
+    } catch (error) {
+      if (method === 'accessibility') throw error;
+      if (!clear && caret === 'idle' && typeof adapter.typeTextFocused === 'function') {
+        await uiAction({ ...resolvedArgs, action:'focus' });
+        const semantic = await adapter.typeTextFocused(value, resolvedArgs);
+        if (semantic) {
+          if (pressEnter) await keyboard({ ...resolvedArgs, key:'ENTER' });
+          return jsonResult({ length:value.length, method:'accessibility', target:semantic, press_enter:pressEnter });
+        }
+      }
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Semantic text target rejected accessibility input. Refresh the UI target or use browser_action for browser page content. ${detail}`);
+    }
   }
-  if ((method === 'auto' || method === 'accessibility') && typeof adapter.typeTextFocused === 'function' && !clear && caret === 'idle') {
+  if ((method === 'auto' || method === 'accessibility') && !hasElementSelector && typeof adapter.typeTextFocused === 'function' && !clear && caret === 'idle') {
     const semantic = await adapter.typeTextFocused(value, resolvedArgs);
     if (semantic) {
       if (pressEnter) await keyboard({ ...resolvedArgs, key:'ENTER' });
@@ -592,8 +605,11 @@ export async function typeText(args = {}) {
     }
     if (method === 'accessibility') throw new Error('No focused editable accessibility element is available');
   }
+  if (method === 'accessibility') {
+    throw new Error('Accessibility-only text input requires a semantic element target for replacement, or a focused editable control with clear=false and caret_position=idle');
+  }
 
-  if (hasSelector) await uiAction({ ...resolvedArgs, action:'focus' }).catch(() => null);
+  if (hasElementSelector) await uiAction({ ...resolvedArgs, action:'focus' });
   if (clear) {
     await keyboard({ ...resolvedArgs, shortcut:process.platform === 'darwin' ? 'CMD+A' : 'CTRL+A' });
     await keyboard({ ...resolvedArgs, key:'BACKSPACE' });

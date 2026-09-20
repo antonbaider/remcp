@@ -130,6 +130,47 @@ test('Linux XWayland pixel geometry uses xwininfo absolute client coordinates', 
   assert.equal(linux.parseX11PixelBounds('Width: 0\nHeight: 0'), null);
 });
 
+test('Linux semantic typing rejects false AT-SPI writes and auto typing fails safely', async () => {
+  const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
+  const desktopSource = await readFile(new URL('../src/extended/desktop.mjs', import.meta.url), 'utf8');
+
+  assert.match(
+    linuxSource,
+    /setTextContents\(value\)[\s\S]{0,180}is False[\s\S]{0,180}raise Exception/,
+    'Linux set_value must treat an explicit AT-SPI false result as a failed semantic write',
+  );
+  assert.match(
+    desktopSource,
+    /method === 'auto'[\s\S]{0,600}try \{[\s\S]{0,500}uiAction\([\s\S]{0,900}catch[\s\S]{0,300}method === 'accessibility'[\s\S]{0,120}throw/,
+    'type_text auto mode must inspect semantic set_value failure while accessibility-only mode stays fail-closed',
+  );
+  assert.match(
+    desktopSource,
+    /Semantic text target rejected accessibility input[\s\S]{0,160}browser_action/,
+    'auto typing must fail safely instead of claiming an unverified keyboard paste into a semantic browser target',
+  );
+  assert.match(
+    desktopSource,
+    /if \(method === 'accessibility'\)[\s\S]{0,180}Accessibility-only text input requires a semantic element target/,
+    'explicit accessibility-only typing must never silently fall through to clipboard or key injection',
+  );
+  assert.match(
+    linuxSource,
+    /grabFocus\(\) is False[\s\S]{0,120}raise Exception/,
+    'Linux semantic focus must reject an explicit false AT-SPI focus result',
+  );
+  assert.doesNotMatch(
+    linuxSource,
+    /backend !== 'portal' && await runXdotool\(\)\) return jsonResult\(\{ from:\[args\.from_x,args\.from_y\], to:\[args\.to_x,args\.to_y\], backend:'xwayland-xdotool'/,
+    'GNOME Wayland drag must not claim success through unreliable XTEST/xdotool fallback',
+  );
+  assert.match(
+    linuxSource,
+    /Wayland drag and drop[\s\S]{0,240}XTEST\/xdotool drag events are not reliably delivered through GNOME Wayland/,
+    'Wayland drag failures should direct the caller to the portal backend',
+  );
+});
+
 test('Linux direct app launch honors cwd rather than silently accepting it', { skip: process.platform !== 'linux' }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'remcp-launch-cwd-'));
   try {

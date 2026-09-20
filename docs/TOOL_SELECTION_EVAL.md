@@ -35,7 +35,7 @@ The scorer checks ordered expected-tool subsequences, forbidden tools, expected 
 - Negative prompts are the priority: no ReMCP tool should run when a built-in platform capability or the conversation itself already satisfies the request.
 - Native desktop work should prefer Accessibility/UI Automation over coordinates.
 - Chromium page work should prefer browser DOM/CDP over desktop input.
-- `type_text` is for ordinary Unicode text; `keyboard` is for shortcuts/control/navigation keys.
+- `type_text` is for ordinary Unicode text in native/focused controls; Chromium page DOM text belongs to `browser_action`; `keyboard` is for shortcuts/control/navigation keys.
 - Static visual proof uses a targeted screenshot; motion/timing debugging uses screen recording.
 - Structured PDF/DOCX/XLSX content uses document tools before GUI automation.
 - Presentation render tools run only after their data tool has returned a preview id.

@@ -73,7 +73,7 @@ When an AI host controls a visible application, ReMCP is designed for semantic t
 
 `Accessibility/UI Automation → browser DOM/CDP → OCR → coordinates`
 
-Use `computer_snapshot` for an unfamiliar state, native `ui_*` tools for desktop applications, and `browser_*` tools for debuggable Chromium page content. `browser_navigate action=new_tab` can create the first page target when the debug browser has none. `type_text` with its default `method=auto` is for exact Unicode text; `keyboard` is for shortcuts and navigation/control keys. `type_text method=keys` emits physical keys and therefore follows the computer's active keyboard layout. Prefer `wait_for_ui` or `browser_wait` to fixed sleeps and use `screenshot_region` only when pixel/layout verification adds information. For PDF/DOCX/XLSX content, use the structured document tools before automating Office applications.
+Use `computer_snapshot` for an unfamiliar state, native `ui_*` tools for desktop applications, and `browser_*` tools for debuggable Chromium page content. `browser_navigate action=new_tab` can create the first page target when the debug browser has none. `type_text` with its default `method=auto` is for exact Unicode text in native/focused controls; use `browser_action` for Chromium page DOM text and `keyboard` for shortcuts/navigation/control keys. `type_text method=keys` emits physical keys and therefore follows the computer's active keyboard layout. Prefer `wait_for_ui` or `browser_wait` to fixed sleeps and use `screenshot_region` only when pixel/layout verification adds information. For PDF/DOCX/XLSX content, use the structured document tools before automating Office applications.
 
 ## Screenshots
 

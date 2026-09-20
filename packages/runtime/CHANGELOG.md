@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.51 — 2026-09-20
+
+- Linux AT-SPI text/focus operations reject explicit false results, `type_text method=accessibility` remains accessibility-only, and semantic browser text failures direct callers to `browser_action` rather than reporting an unverified paste as success.
+- GNOME Wayland drag requires the consent-backed Remote Desktop portal instead of unreliable XTEST/xdotool delivery.
+- PDF `read_document` falls back from the built-in parser to local `pdftotext` when embedded fonts prevent direct decoding, while preserving the existing no-text error when neither path extracts content.
+- Lockstep patch release with the ReMCP client at `0.2.51`.
+
 ## 0.2.50 — 2026-09-20
 
 - Lockstep release with the ReMCP client after the hosted MCP/plugin contract was hardened for current OpenAI/MCP Apps requirements.

@@ -180,8 +180,8 @@ ReMCP publishes selection-oriented descriptions and ships the same decision tree
 
 - Start unfamiliar desktop work with `computer_snapshot`; use `ui_snapshot/ui_find/ui_action` for native apps.
 - For Chromium page content use `browser_navigate action=new_tab` when needed, then `browser_snapshot/browser_find/browser_action/browser_wait` instead of desktop coordinates.
-- Use `type_text` for normal Unicode text and `keyboard` for shortcuts/navigation keys.
-- Use `pointer` only when semantic actions cannot express the task; prefer element ids for `drag_drop`.
+- Use `type_text` for normal Unicode text in native/focused controls, `browser_action` for Chromium page DOM text, and `keyboard` for shortcuts/navigation keys.
+- Use `pointer` only when semantic actions cannot express the task; prefer element ids for `drag_drop`. GNOME Wayland drag uses the consent-backed Remote Desktop portal rather than unreliable XTEST drag.
 - Use `wait_for_ui` / `browser_wait` instead of fixed sleeps.
 - Use `screenshot_region` for targeted visual proof and `record_screen` only for motion/timing.
 - Use structured document tools instead of automating Office when the request is about file content.

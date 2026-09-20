@@ -127,12 +127,29 @@ async function readXlsx(filePath, args) {
   } finally { await removeTemp(dir); }
 }
 
+async function readPdfDocument(filePath, data) {
+  try {
+    return readPdfText(data);
+  } catch (builtinError) {
+    if (commandExists('pdftotext')) {
+      const extracted = await runFile('pdftotext', ['-enc','UTF-8',filePath,'-'], {
+        label:'PDF text extraction',
+        timeout:60_000,
+        allowFailure:true,
+      });
+      const fallbackText = String(extracted.stdout || '').replace(/\f/g, '\n').trim();
+      if (extracted.code === 0 && fallbackText) return fallbackText;
+    }
+    throw builtinError;
+  }
+}
+
 export async function readDocument(args) {
   const filePath = await resolveSafePath(args.path,'path');
   const lower = filePath.toLowerCase();
   const data = await readFile(filePath);
   if (lower.endsWith('.docx')) return text(readDocxText(data));
-  if (lower.endsWith('.pdf')) return text(readPdfText(data));
+  if (lower.endsWith('.pdf')) return text(await readPdfDocument(filePath,data));
   if (lower.endsWith('.xlsx')) return jsonResult(await readXlsx(filePath,args));
   if (/\.(txt|md|csv|json|xml|yaml|yml)$/i.test(lower)) return text(data.toString('utf8'));
   throw new Error('read_document supports PDF, DOCX, XLSX, TXT, Markdown, CSV, JSON, XML, YAML');
