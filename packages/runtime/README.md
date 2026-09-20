@@ -49,9 +49,11 @@ support and emits `notifications/tools/list_changed` when that capability set ch
 | Diagnostics | `service`, `event_log`, `network`, `installed_apps`, `environment`, `audio`, `power_action`, `record_screen` |
 | Documents | `read_document`, `edit_spreadsheet`, `edit_document`, `pdf_action` |
 
-The hosted ReMCP endpoint adds eight account/relay tools — `list_devices`, `ping_device`,
+The hosted ReMCP endpoint adds eleven account/presentation tools — `list_devices`, `ping_device`,
 `who_am_i`, `create_pairing_command`, `get_recent_tool_calls`, `get_usage_statistics`,
-`get_configuration`, and `rename_device` — for a 91-tool release contract.
+`get_configuration`, `render_file_preview`, `render_image_preview`, `render_terminal_preview`, and
+`rename_device` — for a 94-tool MCP Apps catalog. Plain MCP clients receive 91 tools because the
+three presentation-only render tools are omitted unless the UI extension is negotiated.
 
 `computer_snapshot` and `computer_action` keep OCR inside the compact high-level surface: when a local `tesseract` binary is available, snapshot can return bounded OCR text/boxes and click targeting can fall back through Accessibility → browser DOM/CDP → OCR → coordinates. OCR is optional and never adds another MCP tool or bundled OCR dependency.
 

@@ -169,7 +169,7 @@ server.
 | Diagnostics | `service`, `event_log`, `network`, `installed_apps`, `environment`, `audio`, `power_action`, `record_screen` |
 | Documents | `read_document`, `edit_spreadsheet`, `edit_document`, `pdf_action` |
 
-The hosted ReMCP endpoint has nine hosted account/presentation tools in its full UI-capable catalog, for **92 tools**. Plain MCP clients that do not negotiate MCP Apps receive 91 tools because `render_file_preview` is omitted. `read_file` stays data-first and may return a short-lived `preview_id`; `render_file_preview` accepts only that id and renders the exact already-read payload without a second device RPC. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
+The hosted ReMCP endpoint has eleven hosted account/presentation tools in its full UI-capable catalog, for **94 tools**. Plain MCP clients that do not negotiate MCP Apps receive 91 tools because the three presentation-only render tools are omitted. File/image/terminal data tools stay useful without UI and may return a short-lived `structuredContent.preview`; the named render tool accepts only that id and renders the exact already-returned payload without a second device RPC. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
 
 ### Tool selection for AI agents
 

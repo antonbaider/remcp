@@ -17,7 +17,7 @@ import {
   waitForProcessExit,
   waitForProcessActivity,
 } from '../sessions.mjs';
-import { clampInteger, fail, requireInteger, requireString, text } from '../util.mjs';
+import { clampInteger, fail, requireInteger, requireString, structured, text } from '../util.mjs';
 
 function shellCommand() {
   if (runtimeConfig.defaultShell) return runtimeConfig.defaultShell;
@@ -32,7 +32,15 @@ function shellArgs(command) {
 
 function describeSession(session) {
   const status = session.exited ? `exited${session.signal ? ` (${session.signal})` : session.exitCode === null ? '' : ` (code ${session.exitCode})`}` : 'running';
-  return { pid: session.pid, status, runtimeMs: (session.finishedAt || Date.now()) - session.startedAt, lines: totalLines(session) };
+  return {
+    pid: session.pid,
+    status,
+    runtimeMs: (session.finishedAt || Date.now()) - session.startedAt,
+    lines: totalLines(session),
+    exited: Boolean(session.exited),
+    exitCode: session.exitCode ?? null,
+    signal: session.signal ?? null,
+  };
 }
 
 function abortError() {
@@ -90,8 +98,16 @@ export async function startProcessTool(args, extra = {}) {
   const partial = session.partial;
   session.cursor = session.droppedLines + session.lines.length;
   session.lastPartialRead = session.partial || null;
-  const warning = verdict.note ? `${verdict.note}\n` : '';
-  return text(`${warning}${[headline, output, partial].filter(Boolean).join('\n')}`);
+  const warning = verdict.note ? String(verdict.note) : '';
+  const rendered = [warning, headline, output, partial].filter(Boolean).join('\n');
+  const status = describeSession(session);
+  return structured({
+    ...status,
+    command,
+    output,
+    ...(partial ? { partial } : {}),
+    ...(warning ? { warning } : {}),
+  }, rendered);
 }
 
 export async function readProcessOutputTool(args, extra = {}) {
@@ -124,7 +140,13 @@ export async function readProcessOutputTool(args, extra = {}) {
   }
   const status = describeSession(session);
   const header = `pid ${pid} ${status.status} · lines ${range}`;
-  return text(`${header}\n${slice.join('\n')}`);
+  const output = slice.join('\n');
+  return structured({
+    ...status,
+    range,
+    output,
+    explicitOffset:hasOffset,
+  }, `${header}\n${output}`);
 }
 
 function compileWaiter(pattern) {
@@ -164,7 +186,15 @@ export async function waitForProcessOutputTool(args, extra = {}) {
   const headline = matched
     ? `pid ${pid} ${status.status} · pattern matched${bufferedMatch ? ' (already buffered)' : ''}`
     : `pid ${pid} ${status.status} · pattern not matched within ${timeoutMs}ms`;
-  return text([headline, slice.join('\n')].filter(Boolean).join('\n'));
+  const output = slice.join('\n');
+  return structured({
+    ...status,
+    pattern,
+    matched,
+    bufferedMatch,
+    timeoutMs,
+    output,
+  }, [headline, output].filter(Boolean).join('\n'));
 }
 
 export async function interactWithProcessTool(args, extra = {}) {
@@ -195,34 +225,49 @@ export async function interactWithProcessTool(args, extra = {}) {
   }
   const slice = readNewOutput(session);
   const status = describeSession(session);
-  return text([`pid ${pid} ${status.status}`, slice.join('\n')].filter(Boolean).join('\n'));
+  const output = slice.join('\n');
+  return structured({
+    ...status,
+    output,
+  }, [`pid ${pid} ${status.status}`, output].filter(Boolean).join('\n'));
 }
 
 export async function forceTerminateTool(args) {
   const pid = requireInteger(args.pid, 'pid');
   const session = getProcessSession(pid);
   if (!session) fail(`No ReMCP session with pid ${pid}`);
-  if (session.exited) return text(`Process ${pid} already exited.`);
+  if (session.exited) {
+    const status = describeSession(session);
+    return structured({ ...status, terminated:false, alreadyExited:true, escalated:false }, `Process ${pid} already exited.`);
+  }
   killSessionTree(session, 'SIGTERM');
   const deadline = Date.now() + 2000;
   while (!session.exited && Date.now() < deadline) await waitForProcessActivity(session, 100);
+  let escalated = false;
   if (!session.exited) {
+    escalated = true;
     killSessionTree(session, 'SIGKILL');
     await waitForProcessActivity(session, 1000);
   }
   const status = describeSession(session);
-  return text(`Terminated session ${pid}${status.status.startsWith('exited') ? '' : ' (still running)'}. Status: ${status.status}.`);
+  return structured(
+    { ...status, terminated:Boolean(session.exited), alreadyExited:false, escalated },
+    `Terminated session ${pid}${status.status.startsWith('exited') ? '' : ' (still running)'}. Status: ${status.status}.`,
+  );
 }
 
 export async function listSessionsTool() {
   const sessions = listProcessSessions();
-  if (!sessions.length) return text('No active terminal sessions.');
-  const rows = sessions.map(session => {
+  const facts = sessions.map(session => {
     const status = describeSession(session);
     const blocked = session.exited ? '' : session.partial ? 'blocked-possibly' : 'idle-or-running';
-    return `pid ${status.pid} · ${status.status} · ${Math.round(status.runtimeMs / 1000)}s · ${blocked} · ${session.command.slice(0, 120)}`;
+    return { ...status, blocked, command:session.command.slice(0, 120) };
   });
-  return text(rows.join('\n'));
+  if (!facts.length) return structured({ sessions:[] }, 'No active terminal sessions.');
+  const rows = facts.map(session =>
+    `pid ${session.pid} · ${session.status} · ${Math.round(session.runtimeMs / 1000)}s · ${session.blocked} · ${session.command}`
+  );
+  return structured({ sessions:facts }, rows.join('\n'));
 }
 
 export const terminalToolHandlers = {

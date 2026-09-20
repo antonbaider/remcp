@@ -19,7 +19,7 @@ plugin name.
 The rest of this document is for **developers and reviewers**.
 
 ReMCP ships a production OpenAI Plugins package for ChatGPT and Codex. It combines the hosted remote
-MCP server with five shared operational skills, review metadata, a self-contained file editor MCP App, a shared fullscreen image viewer layered on native MCP image/screenshot content, and a compact terminal-output MCP App attached directly to process-result tools.
+MCP server with five shared operational skills, review metadata, and three self-contained MCP Apps: a file editor/diff, a fullscreen image viewer layered on native MCP image/screenshot content, and a compact terminal-output viewer. Source tools remain data-first; presentation-only render tools mount the corresponding app only when interactive UI helps.
 
 This is the **OpenAI-specific** package. Claude Code packaging lives beside it and does not replace,
 rename, or regenerate the files described here.
@@ -32,8 +32,8 @@ rename, or regenerate the files described here.
 | Manifest | `plugin.json` |
 | MCP configuration | `mcp.json` |
 | Shared skills | 5 |
-| Hosted tool surface | 92 tools |
-| Rich UI | compact file editor/diff, one-tap fullscreen image viewer, and terminal output viewer; image/terminal UI is attached to existing result tools without extra model-facing render tools |
+| Hosted tool surface | 94 tools with MCP Apps; 91 for clients without the UI extension |
+| Rich UI | compact file editor/diff, one-tap fullscreen image viewer, and terminal output viewer; three narrowly scoped render tools consume short-lived preview references and never rerun the source action |
 | Authentication | OAuth authorization code + PKCE, OIDC/UserInfo metadata |
 | Public overview | [`docs/PLUGINS.md`](PLUGINS.md) |
 
@@ -75,7 +75,7 @@ rename, or regenerate the files described here.
 12. Select only regions where the hosted service, support, privacy policy, and terms are ready.
 13. Review the final policy attestations manually and submit for review.
 
-ReMCP has three current self-contained MCP Apps: file preview/editor, image viewer, and terminal output viewer. They use no external assets or network fetches. Image tools keep native MCP image content and attach the viewer only as presentation; terminal process-result tools attach their viewer directly, so neither feature adds a competing model-facing render tool. All three support host-negotiated fullscreen; image adds pinch zoom/pan/reset, file adds syntax highlighting plus added/removed-line review, and terminal adds wrap/copy/refresh of the same process output.
+ReMCP has three current self-contained MCP Apps: file preview/editor, image viewer, and terminal output viewer. They use no external assets or network fetches. File/image/terminal source tools remain useful without UI and may return a short-lived `structuredContent.preview`; `render_file_preview`, `render_image_preview`, and `render_terminal_preview` only render that already-returned payload and never repeat a read, screenshot, or command. All three support host-negotiated fullscreen; image adds pinch zoom/pan/reset, file adds syntax highlighting plus added/removed-line review, and terminal adds wrap/copy/refresh of the same process output.
 
 ## Review-sensitive behavior
 

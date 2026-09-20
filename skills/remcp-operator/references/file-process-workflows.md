@@ -7,7 +7,9 @@ Load this reference when the task primarily edits files, transfers data, runs co
 Choose the narrowest read that answers the question:
 
 - `read_file` with `offset`/`length` for large text files. Keep it data-first for model reasoning.
-- `render_file_preview` only when `read_file` returned a `preview_id` and an interactive preview/editor is useful. The render tool uses that short-lived server-side reference and never re-reads the computer.
+- `render_file_preview` only when `read_file` returned `structuredContent.preview` and interactive preview/editing is useful. Pass `structuredContent.preview.id`; the render tool uses that short-lived account-scoped server reference and never re-reads the computer.
+- `render_image_preview` only when an image/screenshot data tool returned a preview reference and an interactive viewer helps; model vision still uses the native MCP `image` content.
+- `render_terminal_preview` only when a process data tool returned a preview reference and an interactive terminal viewer helps; it renders already-returned output and its refresh control reads the same PID instead of rerunning the command.
 - `read_multiple_files` for a handful of named files.
 - `read_files` for one glob over many files.
 - `list_directory` with `depth`/`pattern` instead of shell `find`/`ls`.

@@ -16,6 +16,72 @@ export const TEXT_OUTPUT_SCHEMA = {
   additionalProperties: false,
 };
 
+const NULLABLE_NUMBER_SCHEMA = { anyOf:[{ type:'number' }, { type:'null' }] };
+const NULLABLE_STRING_SCHEMA = { anyOf:[{ type:'string' }, { type:'null' }] };
+const TERMINAL_SESSION_PROPERTIES = {
+  pid:{ type:'number', description:'Process/session id used by follow-up terminal tools.' },
+  status:{ type:'string', description:'running or exited, with an exit code/signal when known.' },
+  runtimeMs:{ type:'number' },
+  lines:{ type:'number', description:'Total output lines produced by the session.' },
+  exited:{ type:'boolean' },
+  exitCode:NULLABLE_NUMBER_SCHEMA,
+  signal:NULLABLE_STRING_SCHEMA,
+};
+function terminalOutputSchema(extraProperties = {}, extraRequired = []) {
+  return {
+    type:'object',
+    properties:{ ...TERMINAL_SESSION_PROPERTIES, ...extraProperties },
+    required:['pid','status','runtimeMs','lines','exited','exitCode','signal', ...extraRequired],
+    additionalProperties:false,
+  };
+}
+const START_PROCESS_OUTPUT_SCHEMA = terminalOutputSchema({
+  command:{ type:'string' },
+  output:{ type:'string' },
+  partial:{ type:'string' },
+  warning:{ type:'string' },
+}, ['command','output']);
+const READ_PROCESS_OUTPUT_SCHEMA = terminalOutputSchema({
+  range:{ type:'string' },
+  output:{ type:'string' },
+  explicitOffset:{ type:'boolean' },
+}, ['range','output','explicitOffset']);
+const WAIT_PROCESS_OUTPUT_SCHEMA = terminalOutputSchema({
+  pattern:{ type:'string' },
+  matched:{ type:'boolean' },
+  bufferedMatch:{ type:'boolean' },
+  timeoutMs:{ type:'number' },
+  output:{ type:'string' },
+}, ['pattern','matched','bufferedMatch','timeoutMs','output']);
+const INTERACT_PROCESS_OUTPUT_SCHEMA = terminalOutputSchema({
+  output:{ type:'string' },
+}, ['output']);
+const TERMINATE_PROCESS_OUTPUT_SCHEMA = terminalOutputSchema({
+  terminated:{ type:'boolean' },
+  alreadyExited:{ type:'boolean' },
+  escalated:{ type:'boolean' },
+}, ['terminated','alreadyExited','escalated']);
+const LIST_SESSIONS_OUTPUT_SCHEMA = {
+  type:'object',
+  properties:{
+    sessions:{
+      type:'array',
+      items:{
+        type:'object',
+        properties:{
+          ...TERMINAL_SESSION_PROPERTIES,
+          blocked:{ type:'string' },
+          command:{ type:'string' },
+        },
+        required:['pid','status','runtimeMs','lines','exited','exitCode','signal','blocked','command'],
+        additionalProperties:false,
+      },
+    },
+  },
+  required:['sessions'],
+  additionalProperties:false,
+};
+
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const readOnlyNonIdempotent = { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const additive = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -606,6 +672,7 @@ export const toolDefinitions = [
       additionalProperties: false,
     },
     annotations: command,
+    outputSchema: START_PROCESS_OUTPUT_SCHEMA,
     handler: terminalToolHandlers.start_process,
   },
   {
@@ -626,6 +693,7 @@ export const toolDefinitions = [
     // Reading without an explicit offset advances the session cursor, so retries can return
     // different output even after the process exits. It never modifies user files.
     annotations: readOnlyNonIdempotent,
+    outputSchema: READ_PROCESS_OUTPUT_SCHEMA,
     handler: terminalToolHandlers.read_process_output,
   },
   {
@@ -643,6 +711,7 @@ export const toolDefinitions = [
       additionalProperties: false,
     },
     annotations: command,
+    outputSchema: INTERACT_PROCESS_OUTPUT_SCHEMA,
     handler: terminalToolHandlers.interact_with_process,
   },
   {
@@ -660,6 +729,7 @@ export const toolDefinitions = [
       additionalProperties: false,
     },
     annotations: readOnlyNonIdempotent,
+    outputSchema: WAIT_PROCESS_OUTPUT_SCHEMA,
     handler: terminalToolHandlers.wait_for_process_output,
   },
   {
@@ -675,6 +745,7 @@ export const toolDefinitions = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    outputSchema: TERMINATE_PROCESS_OUTPUT_SCHEMA,
     handler: terminalToolHandlers.force_terminate,
   },
   {
@@ -683,6 +754,7 @@ export const toolDefinitions = [
     description: 'List terminal sessions started during this ReMCP runtime session with their status and how long they have been running.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: readOnly,
+    outputSchema: LIST_SESSIONS_OUTPUT_SCHEMA,
     handler: terminalToolHandlers.list_sessions,
   },
   {

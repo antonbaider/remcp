@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.49 — 2026-09-20
+
+- Terminal process tools now return schema-validated structured session state, output ranges, match results and termination facts alongside their human-readable text.
+- The runtime catalog and hosted tool contract align on bounded structured outputs and accurate read-only/destructive/idempotent/open-world annotations for the expanded computer-use surface.
+- Preview references remain optional presentation metadata rather than replacing the source result used for model reasoning.
+- Lockstep patch release with the ReMCP client at `0.2.49`.
+
 ## 0.2.48 — 2026-09-20
 
 - Migrate the local stdio runtime to the official `@modelcontextprotocol/server` v2 serving entry while preserving legacy 2025-era client compatibility.
@@ -13,6 +20,7 @@
 - Added high-level `computer_snapshot` and `computer_action` primitives so agents can prefer semantic Accessibility/DOM targets and fall back to coordinates/screenshots only when necessary.
 - Chrome DevTools Protocol endpoints are restricted to loopback addresses. New filesystem/document operations continue through the existing resolved-path allowlist, and launch/service/power operations reuse the runtime command policy.
 - Fixed metadata output truncation once the JSON tool contract exceeded the operating-system pipe buffer by waiting for stdout writes to flush before exit.
+- Terminal session tools now expose schema-validated structured `pid`, status, exit information, output ranges/matches, and session lists alongside their human-readable text, so hosted agents can chain process calls without parsing prose.
 - No browser/document rendering stack was added; the runtime remains dependency-light and uses native OS facilities plus existing qpdf/poppler/zip helpers when available.
 
 ## 0.2.47 — 2026-09-19

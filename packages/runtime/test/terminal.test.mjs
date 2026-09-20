@@ -6,6 +6,8 @@ freshWorkspace('terminal');
 const { invokeTool } = await import('../src/invoke.mjs');
 
 function pidOf(result) {
+  const structuredPid = Number(result?.structuredContent?.pid);
+  if (Number.isInteger(structuredPid) && structuredPid > 0) return structuredPid;
   const match = body(result).match(/Process (\d+)/);
   assert.ok(match, `expected a pid in ${body(result)}`);
   return Number(match[1]);
@@ -16,15 +18,25 @@ test('start_process runs a command and returns its output', async () => {
   assert.equal(isError(result), false);
   assert.match(body(result), /hello-from-runtime/);
   assert.match(body(result), /finished with code 0/);
+  assert.equal(typeof result.structuredContent?.pid, 'number');
+  assert.equal(result.structuredContent?.status, 'exited (code 0)');
+  assert.equal(result.structuredContent?.exitCode, 0);
+  assert.equal(result.structuredContent?.exited, true);
+  assert.match(result.structuredContent?.output || '', /hello-from-runtime/);
 });
 
 test('read_process_output returns new output and supports tail offsets', async () => {
   const started = await invokeTool('start_process', { command: 'for i in 1 2 3; do echo line-$i; sleep 0.4; done', timeout_ms: 200 });
   const pid = pidOf(started);
   await waitFor(async () => body(await invokeTool('read_process_output', { pid })).includes('line-3'), 8000);
-  const tail = body(await invokeTool('read_process_output', { pid, offset: -2 }));
+  const tailResult = await invokeTool('read_process_output', { pid, offset: -2 });
+  const tail = body(tailResult);
   assert.match(tail, /line-2/);
   assert.match(tail, /line-3/);
+  assert.equal(tailResult.structuredContent?.pid, pid);
+  assert.equal(tailResult.structuredContent?.explicitOffset, true);
+  assert.match(tailResult.structuredContent?.range || '', /of 3/);
+  assert.match(tailResult.structuredContent?.output || '', /line-3/);
 });
 
 test('cursor-consuming output tools do not advertise idempotent retries', async () => {
@@ -46,9 +58,14 @@ test('cursor-consuming output tools do not advertise idempotent retries', async 
 test('interact_with_process sends input and list_sessions reports the session', async () => {
   const started = await invokeTool('start_process', { command: 'node -e "process.stdin.on(\'data\', d => process.stdout.write(\'echo:\' + d.toString()))"', timeout_ms: 300 });
   const pid = pidOf(started);
-  const response = body(await invokeTool('interact_with_process', { pid, input: 'ping', timeout_ms: 2000 }));
+  const responseResult = await invokeTool('interact_with_process', { pid, input: 'ping', timeout_ms: 2000 });
+  const response = body(responseResult);
   assert.match(response, /echo:ping/);
-  assert.match(body(await invokeTool('list_sessions', {})), new RegExp(`pid ${pid}`));
+  assert.equal(responseResult.structuredContent?.pid, pid);
+  assert.match(responseResult.structuredContent?.output || '', /echo:ping/);
+  const sessionsResult = await invokeTool('list_sessions', {});
+  assert.match(body(sessionsResult), new RegExp(`pid ${pid}`));
+  assert.equal(sessionsResult.structuredContent?.sessions?.some(session => session.pid === pid), true);
   assert.equal(isError(await invokeTool('force_terminate', { pid })), false);
 });
 
@@ -78,6 +95,9 @@ test('wait_for_process_output returns as soon as the pattern appears', async () 
   assert.equal(isError(result), false);
   assert.match(body(result), /pattern matched/);
   assert.match(body(result), /READY-MARKER/);
+  assert.equal(result.structuredContent?.pid, pid);
+  assert.equal(result.structuredContent?.matched, true);
+  assert.match(result.structuredContent?.output || '', /READY-MARKER/);
   await invokeTool('force_terminate', { pid });
 });
 
