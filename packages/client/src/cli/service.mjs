@@ -29,9 +29,92 @@ export function npmGlobalInstall(...specs) {
   run(npm.command, [...npm.args, 'install', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
 }
 
-export function npmGlobalInstallForNode(nodePath, ...specs) {
+function pathEntryExists(file) {
+  try {
+    fs.lstatSync(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function globalPackagePath(prefix, packageName) {
+  const name = String(packageName || '').trim();
+  const parts = name.split('/');
+  const validUnscoped = parts.length === 1 && parts[0] && !parts[0].startsWith('@') && parts[0] !== '.' && parts[0] !== '..';
+  const validScoped = parts.length === 2 && /^@[^/]+$/.test(parts[0]) && parts[1] && parts[1] !== '.' && parts[1] !== '..';
+  if (!validUnscoped && !validScoped) throw new Error(`Invalid npm package name for update: ${name || '(empty)'}`);
+  return path.join(prefix, 'lib', 'node_modules', ...parts);
+}
+
+function transactionalMacGlobalInstall({ resolved, prefix, packageNames, specs }) {
+  prefix = String(prefix || '').trim();
+  if (!path.isAbsolute(prefix)) throw new Error(`npm global prefix must be absolute for a macOS update: ${prefix || '(empty)'}`);
+  const backupRoot = path.join(prefix, `.remcp-update-backup-${process.pid}-${Date.now()}`);
+  const moved = [];
+  const moveAside = (source, label) => {
+    if (!pathEntryExists(source)) return;
+    const backup = path.join(backupRoot, label);
+    fs.renameSync(source, backup);
+    moved.push({ source, backup });
+  };
+  const restore = originalError => {
+    let rollbackError = null;
+    for (const item of [...moved].reverse()) {
+      try {
+        if (pathEntryExists(item.source)) fs.rmSync(item.source, { recursive:true, force:true });
+        fs.mkdirSync(path.dirname(item.source), { recursive:true });
+        fs.renameSync(item.backup, item.source);
+      } catch (error) {
+        rollbackError ??= error;
+      }
+    }
+    try { fs.rmSync(backupRoot, { recursive:true, force:true }); } catch (error) { rollbackError ??= error; }
+    if (rollbackError) {
+      throw new Error(
+        `ReMCP update failed and the previous macOS installation could not be fully restored: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        { cause:originalError },
+      );
+    }
+  };
+
+  fs.mkdirSync(prefix, { recursive:true });
+  fs.mkdirSync(backupRoot, { recursive:false, mode:0o700 });
+  try {
+    const uniqueNames = [...new Set(packageNames.map(name => String(name || '').trim()).filter(Boolean))];
+    uniqueNames.forEach((name, index) => moveAside(globalPackagePath(prefix, name), `package-${index}`));
+    if (uniqueNames.includes(PACKAGE_NAME)) moveAside(path.join(prefix, 'bin', 'remcp'), 'bin-remcp');
+
+    run(resolved.command, [...resolved.args, 'install', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
+  } catch (error) {
+    restore(error);
+    throw error;
+  }
+
+  try {
+    fs.rmSync(backupRoot, { recursive:true, force:true });
+  } catch (error) {
+    console.error(`ReMCP update: could not remove macOS rollback backup ${backupRoot}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+export function npmGlobalUpdate(packageNames, ...specs) {
+  if (servicePlatform() !== 'darwin') {
+    npmGlobalInstall(...specs);
+    return;
+  }
+  const prefix = globalPrefix();
+  transactionalMacGlobalInstall({ resolved:npm, prefix, packageNames, specs });
+}
+
+export function npmGlobalUpdateForNode(nodePath, packageNames, ...specs) {
   const resolved = resolveNpm({ nodePath, home, platform:servicePlatform() });
-  run(resolved.command, [...resolved.args, 'install', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
+  if (servicePlatform() !== 'darwin') {
+    run(resolved.command, [...resolved.args, 'install', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
+    return;
+  }
+  const prefix = output(resolved.command, [...resolved.args, 'prefix', '--global']);
+  transactionalMacGlobalInstall({ resolved, prefix, packageNames, specs });
 }
 
 export function quoteSystemd(value) {
@@ -337,7 +420,7 @@ export function syncKnownInstallations(config, ...specs) {
     seen.add(resolvedNode);
     const required = Boolean(candidate?.service) || resolvedNode === serviceInfo.nodePath;
     try {
-      npmGlobalInstallForNode(resolvedNode, ...specs);
+      npmGlobalUpdateForNode(resolvedNode, [PACKAGE_NAME, config.runtime.packageName], ...specs);
       results.push({ nodePath:resolvedNode, ok:true, required });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

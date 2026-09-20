@@ -11,7 +11,7 @@ import { PACKAGE_NAME, VERSION } from '../version.mjs';
 import { loadConfig, saveConfig } from './config.mjs';
 import { installedVersion } from './doctor.mjs';
 import { linuxServiceFile, macServiceFile, officialOrigin } from './env.mjs';
-import { currentInstallationInfo, ensureServiceIfRecorded, installationVersionsAtCliPath, npmGlobalInstall, persistentServiceExpected, rememberCurrentInstallation, restartPersistentServiceIfInstalled, serviceInstallationInfo, syncKnownInstallations } from './service.mjs';
+import { currentInstallationInfo, ensureServiceIfRecorded, installationVersionsAtCliPath, npmGlobalUpdate, persistentServiceExpected, rememberCurrentInstallation, restartPersistentServiceIfInstalled, serviceInstallationInfo, syncKnownInstallations } from './service.mjs';
 
 const UPDATE_DISCOVERY_TIMEOUT_MS = 5000;
 
@@ -242,7 +242,7 @@ export async function updateCommand(flags) {
 
   const before = { cli: VERSION, runtime: installedVersion(cfg.runtime.packageName) };
   console.log(`Updating ReMCP to ${targets.clientSpec} with ${targets.runtimeSpec}…`);
-  npmGlobalInstall(targets.clientSpec, targets.runtimeSpec);
+  npmGlobalUpdate([PACKAGE_NAME, cfg.runtime.packageName], targets.clientSpec, targets.runtimeSpec);
 
   // Converge every ReMCP installation this account has actually used on this machine. The canonical
   // service installation is mandatory; secondary nvm/Hermes/Homebrew copies are best-effort and
