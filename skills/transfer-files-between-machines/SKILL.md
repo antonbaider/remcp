@@ -1,6 +1,6 @@
 ---
 name: transfer-files-between-machines
-description: Use when the user wants a file or a directory copied from one paired computer to another, moved between machines, or backed up from a laptop to a server through ReMCP.
+description: Use when the primary task is copying, moving, or backing up files/directories between two paired computers. This skill owns the transfer/chunk/hash workflow; use destructive-operation guidance additionally only when the user explicitly asks to remove or overwrite source/destination data.
 ---
 
 # Transfer files between machines

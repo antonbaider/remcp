@@ -1,6 +1,6 @@
 ---
 name: change-code-and-verify
-description: Use when the user asks to fix, implement, refactor, or update code on a paired computer and wants the result verified with the repository's own checks plus real rendered evidence when the change is visible.
+description: Use when the primary task is to fix, implement, refactor, or update source code on a paired computer and verify that change. Do not select a process-management or destructive-files skill merely because normal code verification runs tests/builds or edits source files.
 ---
 
 # Change code and verify it

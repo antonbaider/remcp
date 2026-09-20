@@ -1,6 +1,6 @@
 ---
 name: safe-destructive-operations
-description: Use when the user asks to delete, overwrite, move, rename or bulk-replace files on a paired computer, or when a task would remove data that cannot be recovered.
+description: Use when the primary task is destructive filesystem work on a paired computer: delete/trash, risky overwrite of user data, move/rename with loss risk, or broad replacement that needs a recovery plan. Do not select it for ordinary source-code edits covered by the code-change skill.
 ---
 
 # Safe destructive operations

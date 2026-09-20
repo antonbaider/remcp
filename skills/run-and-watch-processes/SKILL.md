@@ -1,6 +1,6 @@
 ---
 name: run-and-watch-processes
-description: Use when the user wants to start a server, build, test suite, log tail or any long-running command on a paired computer and watch or interact with its output.
+description: Use when running, watching, or interacting with a server, build, test suite, log tail, or other long-running command is the primary task on a paired computer. Do not select it merely because a code-change workflow runs verification commands.
 ---
 
 # Run and watch processes

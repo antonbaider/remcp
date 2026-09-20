@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.62 — 2026-09-20
+
+- Lockstep skill-routing metadata release with the ReMCP client at `0.2.62`; runtime tool behavior is unchanged from `0.2.61`.
+
 ## 0.2.61 — 2026-09-20
 
 - Lockstep plugin/web branding release with the ReMCP client at `0.2.61`; runtime tool behavior is unchanged from `0.2.60`.
