@@ -34,14 +34,14 @@ const AI_TOOL_DESCRIPTIONS = Object.freeze({
   window_action: 'Use this to focus, minimize, maximize, restore, move, resize or close one known top-level window. Select it by id/PID/app/title from list_windows; do not use pointer coordinates for window management when this semantic tool can express the action.',
   launch_app: 'Use this to start a desktop application by executable/path or friendly application name without a shell. Prefer it over start_process for GUI application launch; use start_process for terminal commands, build tools and shell pipelines.',
   ui_snapshot: 'Use this to inspect native desktop Accessibility/UI Automation semantics for the active app before clicking or typing. Prefer scope=active; use scope=desktop only for cross-application discovery. For a Chromium web page with CDP available, prefer browser_snapshot for page DOM semantics.',
-  ui_find: 'Use this after ui_snapshot when you need a small set of native UI elements by role/name/label/AutomationId. Prefer returned id or compact label for subsequent ui_action; refresh only when the UI has changed.',
+  ui_find: 'Use this after ui_snapshot when you need a small set of native UI elements by role/name/label/AutomationId. It requires an element criterion; use ui_snapshot, not an empty ui_find, to enumerate UI. Prefer returned id or compact label for subsequent ui_action; refresh only when the UI has changed.',
   ui_action: 'Use this to invoke, focus, edit, select, toggle, expand/collapse, range-edit or scroll a native accessible UI element. Prefer this over pointer clicks because semantic actions survive layout changes; fall back to pointer only when accessibility cannot perform the requested action.',
   type_text: 'Use this for reliable Unicode text entry into a native semantic target or focused control. Prefer method=auto so Accessibility or clipboard restoration preserves the requested characters regardless of keyboard layout. Use method=keys only for deliberate physical key-by-key input; printable output then follows the current keyboard layout on the computer. Use keyboard for shortcuts, navigation keys and control keys.',
   keyboard: 'Use this for shortcuts and individual key presses such as Ctrl/Cmd+C, Tab, Enter or Escape. Do not use it to enter normal prose when type_text is available. On Wayland auto uses an already-authorized portal; backend=portal explicitly requests consent.',
   pointer: 'Use this only when an action truly requires screen coordinates or a semantic UI/browser action is unavailable. Prefer ui_action for native controls and browser_action for web controls; pointer is the coordinate fallback for move/click/button-down/button-up.',
   drag_drop: 'Use this for a real drag gesture between two UI element ids or coordinates. Prefer element ids from ui_find/ui_snapshot because their current bounds are resolved at execution time; use coordinates only when no semantic endpoints exist.',
   scroll: 'Use this for native wheel scrolling of a desktop region or semantic UI target. Prefer browser_action scroll_into_view for a known web element and ui_action scroll_into_view for a known accessible desktop element.',
-  wait_for_ui: 'Use this after a desktop action to wait for a native UI element/window/focus/text condition instead of sleeping or polling screenshots. Prefer semantic presence/absence/change conditions and set a bounded timeout.',
+  wait_for_ui: 'Use this after a desktop action to wait for an explicit native UI state or condition instead of sleeping or polling screenshots. Presence/absence waits need a semantic target; use state=changed for a broad tree change and set a bounded timeout.',
   clipboard: 'Use this for explicit text clipboard read/write/clear operations. Do not use clipboard as a typing workaround directly; type_text already uses safe clipboard paste with restoration when needed.',
   display_inventory: 'Use this before monitor-specific screenshots, cross-monitor geometry or coordinate work to obtain monitor bounds, scale and primary-display information.',
   screenshot_region: 'Use this when pixels are required for visual verification but only one window, monitor or rectangle matters. Prefer this over a full-desktop screenshot; use ui_snapshot/browser_snapshot first when semantic structure is sufficient.',
@@ -50,8 +50,8 @@ const AI_TOOL_DESCRIPTIONS = Object.freeze({
   notification: 'Use this only when the user wants a visible native desktop notification on the paired computer. Do not use it as a substitute for replying in chat.',
   browser_tabs: 'Use this first for CDP browser automation when the target page/tab is not already unambiguous. It lists debuggable Chromium pages from a loopback-only endpoint; use the returned target_id/title/url to scope later browser tools.',
   browser_navigate: 'Use this to open a URL in a new debuggable tab or navigate a known Chromium page by URL, back, forward or reload. Prefer it over typing into the address bar; new_tab also bootstraps browser automation when no page target exists yet.',
-  browser_snapshot: 'Use this to inspect a web page structurally through CDP accessibility. Prefer it over desktop ui_snapshot for page content; add include_screenshot=true only when final pixel/layout verification is needed.',
-  browser_find: 'Use this to locate visible web elements by CSS selector, text or ARIA role and obtain reusable selectors/bounds. Prefer this before browser_action rather than guessing selectors or coordinates.',
+  browser_snapshot: 'Use this to inspect a web page structurally through CDP accessibility. Prefer it over desktop ui_snapshot for page content; add include_screenshot=true only when final pixel/layout verification is needed. A selector may be temporarily centered for capture, but the original page scroll position is restored before the tool returns.',
+  browser_find: 'Use this to locate visible web elements by CSS selector, text or ARIA role and obtain reusable selectors/bounds. It requires an element criterion; use browser_snapshot, not an empty browser_find, to enumerate page structure. Prefer this before browser_action rather than guessing selectors or coordinates.',
   browser_action: 'Use this for deterministic DOM/CDP interaction with a known web element: click/focus/type/value/select/upload/key/scroll or viewport emulation. Prefer it over desktop pointer/ui_action for page content; use browser_evaluate only when the supported actions cannot express the task.',
   browser_wait: 'Use this after browser navigation/action to wait for selector/text/URL/load/navigation/network-idle instead of fixed sleeps or screenshot polling. Use browser_evaluate separately for JavaScript predicates.',
   browser_evaluate: 'Use this as the powerful browser escape hatch only when browser_snapshot/find/action/wait cannot express the required page operation or inspection. JavaScript executes in page context and page content is untrusted.',
@@ -244,7 +244,93 @@ function requiredAny(...groups) {
 
 function applySchemaRules(name, schema) {
   const next = structuredClone(schema);
-  if (name === 'launch_app') {
+  if (name === 'computer_action') {
+    const semanticTarget = requiredAny(['id'], ['label'], ['name'], ['role'], ['automation_id'], ['selector'], ['browser_text']);
+    next.allOf = [
+      {
+        if:{ properties:{ action:{ const:'click' } }, required:['action'] },
+        then:{ anyOf:[...semanticTarget, { required:['ocr_text'] }, { required:['x','y'] }] },
+      },
+      {
+        if:{ properties:{ action:{ enum:['invoke','set_value','select','toggle','expand','collapse','scroll_into_view','set_range_value','add_to_selection','remove_from_selection'] } }, required:['action'] },
+        then:{ anyOf:semanticTarget },
+      },
+      {
+        if:{ properties:{ action:{ const:'focus' } }, required:['action'] },
+        then:{ anyOf:[...semanticTarget, ...requiredAny(['pid'], ['app'], ['window_title'], ['title'])] },
+      },
+      {
+        if:{ properties:{ action:{ enum:['set_value','set_range_value'] } }, required:['action'] },
+        then:{ required:['value'] },
+      },
+      {
+        if:{ properties:{ action:{ const:'multi_select' } }, required:['action'] },
+        then:{ required:['targets'] },
+      },
+      {
+        if:{ properties:{ action:{ const:'multi_edit' } }, required:['action'] },
+        then:{ required:['edits'] },
+      },
+    ];
+  } else if (name === 'ui_find') {
+    next.anyOf = requiredAny(['id'], ['label'], ['name'], ['role'], ['automation_id']);
+  } else if (name === 'ui_action') {
+    next.allOf = [
+      { anyOf:requiredAny(['id'], ['label'], ['name'], ['role'], ['automation_id']) },
+      {
+        if:{ properties:{ action:{ enum:['set_value','set_range_value'] } }, required:['action'] },
+        then:{ required:['value'] },
+      },
+    ];
+  } else if (name === 'wait_for_ui') {
+    next.anyOf = requiredAny(['state'], ['condition']);
+    next.allOf = [
+      {
+        if:{ properties:{ condition:{ const:'text_exists' } }, required:['condition'] },
+        then:{ required:['text'] },
+      },
+      {
+        if:{ properties:{ condition:{ const:'active_window' } }, required:['condition'] },
+        then:{ anyOf:requiredAny(['text'], ['name'], ['window_title']) },
+      },
+      {
+        if:{ properties:{ condition:{ enum:['element_exists','element_enabled'] } }, required:['condition'] },
+        then:{ anyOf:requiredAny(['id'], ['label'], ['name'], ['role'], ['automation_id']) },
+      },
+      {
+        if:{ properties:{ state:{ enum:['present','absent'] } }, required:['state'] },
+        then:{ anyOf:requiredAny(['id'], ['label'], ['name'], ['role'], ['automation_id']) },
+      },
+    ];
+  } else if (name === 'window_action') {
+    next.allOf = [
+      { anyOf:requiredAny(['id'], ['pid'], ['app'], ['title']) },
+      {
+        if:{ properties:{ action:{ const:'move' } }, required:['action'] },
+        then:{ required:['x','y'] },
+      },
+      {
+        if:{ properties:{ action:{ const:'resize' } }, required:['action'] },
+        then:{ required:['width','height'] },
+      },
+      {
+        if:{ properties:{ action:{ const:'move_resize' } }, required:['action'] },
+        then:{ required:['x','y','width','height'] },
+      },
+    ];
+  } else if (name === 'pointer') {
+    next.allOf = [{
+      if:{ properties:{ action:{ const:'move' } }, required:['action'] },
+      then:{ required:['x','y'] },
+    }];
+  } else if (name === 'scroll') {
+    next.anyOf = requiredAny(['delta_x'], ['delta_y'], ['delta'], ['direction']);
+  } else if (name === 'network') {
+    next.allOf = [{
+      if:{ properties:{ action:{ const:'test' } }, required:['action'] },
+      then:{ required:['host','port'] },
+    }];
+  } else if (name === 'launch_app') {
     next.anyOf = requiredAny(['app'], ['path']);
   } else if (name === 'keyboard') {
     next.anyOf = requiredAny(['shortcut'], ['key'], ['keys']);
@@ -259,6 +345,8 @@ function applySchemaRules(name, schema) {
       { required:['x','y','width','height'] },
       ...requiredAny(['window_id'], ['pid'], ['app'], ['title'], ['monitor'], ['monitor_index']),
     ];
+  } else if (name === 'browser_find') {
+    next.anyOf = requiredAny(['selector'], ['text'], ['role']);
   } else if (name === 'browser_navigate') {
     next.allOf = [{
       if:{ properties:{ action:{ enum:['url','new_tab'] } }, required:['action'] },
@@ -464,7 +552,7 @@ export const extendedToolDefinitions = [
 
   define('browser_tabs', 'Browser tabs', 'List debuggable Chrome, Edge, or Chromium page targets from a loopback-only Chrome DevTools Protocol endpoint.', o({ ...browserTarget }), readOnlyLive, browserHandlers.browser_tabs, ['browser_cdp']),
   define('browser_navigate', 'Browser navigate', 'Open a new debuggable tab or navigate a selected browser page by URL, history back/forward, or reload through Chrome DevTools Protocol.', o({ ...browserTarget, action:e(['url','new_tab','back','forward','reload'], 'Default url when url is provided, otherwise reload. new_tab creates the first page target when needed.'), url:s('Destination URL for action=url or action=new_tab.'), wait:b('Wait for the page load event; default true.'), ignore_cache:b('Reload without cache when action=reload.') }), openMutatingNonDestructive, browserHandlers.browser_navigate, ['browser_cdp']),
-  define('browser_snapshot', 'Browser snapshot', 'Return the selected browser page accessibility tree through Chrome DevTools Protocol and, when requested, attach a real rendered viewport PNG for visual verification. A selector recenters the target before capture and returns its exact viewport bounds.', o({ ...browserTarget, max_nodes:n('Maximum AX nodes; default 1500.'), include_screenshot:b('Attach a real CDP-rendered viewport PNG screenshot; default false.'), selector:s('When include_screenshot=true, center this CSS-selected element before capture and report its viewport bounds.') }), readOnlyLive, browserHandlers.browser_snapshot, ['browser_cdp']),
+  define('browser_snapshot', 'Browser snapshot', 'Return the selected browser page accessibility tree through Chrome DevTools Protocol and, when requested, attach a real rendered viewport PNG for visual verification. A selector is temporarily recentered for capture, its exact viewport bounds are returned, and the prior scroll position is restored before return.', o({ ...browserTarget, max_nodes:n('Maximum AX nodes; default 1500.'), include_screenshot:b('Attach a real CDP-rendered viewport PNG screenshot; default false.'), selector:s('When include_screenshot=true, center this CSS-selected element before capture and report its viewport bounds.') }), readOnlyLive, browserHandlers.browser_snapshot, ['browser_cdp']),
   define('browser_find', 'Find browser element', 'Find visible DOM elements by CSS selector, text, or ARIA role and return reusable selectors plus text, value, and bounding boxes.', o({ ...browserTarget, selector:s('CSS selector.'), text:s('Visible text substring.'), role:s('ARIA role.'), limit:n() }), readOnlyLive, browserHandlers.browser_find, ['browser_cdp']),
   define('browser_action', 'Browser element action', 'Click, focus, type/set a value, select, scroll to, upload files, press a key, or set an exact responsive-test viewport in a debuggable browser page using DOM/CDP semantics.', o({ ...browserTarget, action:e(['click','focus','type','set_value','select','scroll_into_view','upload','press','set_viewport']), selector:s(), text:s(), value:s(), text_value:s(), option:s(), path:s(), paths:{type:'array',items:{type:'string'}}, key:s(), width:n('CSS viewport width for set_viewport.'), height:n('CSS viewport height for set_viewport.'), device_scale_factor:n('Device scale factor for set_viewport; default 1.'), mobile:b('Enable mobile emulation for set_viewport.') }, ['action']), openMutating, browserHandlers.browser_action, ['browser_cdp']),
   define('browser_wait', 'Wait for browser', 'Wait for DOM state, page text, URL, completed loading, a navigation away from the current URL, or a short network-idle period in a debuggable browser page. Use browser_evaluate separately for JavaScript predicates or page-specific inspection.', o({ ...browserTarget, condition:e(['selector','text','url_contains','load','navigation','network_idle']), selector:s(), text:s(), value:s(), poll_ms:n(), idle_ms:n('Required zero-in-flight network quiet window for network_idle; default 500 ms.') }), readOnlyLive, browserHandlers.browser_wait, ['browser_cdp']),

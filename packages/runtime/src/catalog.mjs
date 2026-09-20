@@ -109,7 +109,7 @@ export const toolDefinitions = [
   {
     name: 'read_files',
     title: 'Read files by glob',
-    description: 'Read every file matching a glob under a directory in one call, each section prefixed with its path and line count. Use this to load a whole project area into context quickly instead of one read per file.',
+    description: 'Read files discovered by one glob under a directory, each section prefixed with its path and line count. Use this when the exact file list is not already known. If you already know the exact paths, use read_multiple_files; for one known path use read_file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -127,7 +127,7 @@ export const toolDefinitions = [
   {
     name: 'read_multiple_files',
     title: 'Read multiple files',
-    description: 'Read several text files in one call. Each file is returned separately and a failure to read one file does not stop the others.',
+    description: 'Read several explicitly named text files in one call. Use this when the exact paths are already known; each file is returned separately and one failure does not stop the others. Do not use this for glob discovery: use read_files instead. For one path use read_file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -239,7 +239,7 @@ export const toolDefinitions = [
   {
     name: 'write_file',
     title: 'Write file',
-    description: 'Create a file or change its full content. Parent directories are created automatically. Replaces the file by default; use mode "append" to add to the end. For binary data pass encoding-free base64 through write_binary instead.',
+    description: 'Create or replace exactly one text file. Parent directories are created automatically; mode "append" adds to the end. Use write_files for two or more independent files, and write_binary for binary bytes.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -256,7 +256,7 @@ export const toolDefinitions = [
   {
     name: 'write_files',
     title: 'Write multiple files',
-    description: 'Create or replace many files in one call, each with its own path, content, and optional mode. Use this to scaffold a project or apply a multi-file change without one round trip per file.',
+    description: 'Create or replace two or more text files in one batch, each with its own path, content, and optional mode. Use this for scaffolding or coherent multi-file writes; for one path use write_file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -427,7 +427,7 @@ export const toolDefinitions = [
   {
     name: 'move_file',
     title: 'Move or rename',
-    description: 'Move or rename a file or directory. Replaces an existing destination file by default; pass overwrite false to refuse instead.',
+    description: 'Move or rename exactly one file or directory from one source to one destination. Replaces an existing destination file by default; pass overwrite false to refuse instead. Use move_paths for two or more moves.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -444,7 +444,7 @@ export const toolDefinitions = [
   {
     name: 'copy_file',
     title: 'Copy file',
-    description: 'Copy one file to a new path, replacing the destination by default. Pass overwrite false to refuse an existing destination. Directories are not copied recursively.',
+    description: 'Copy exactly one regular file to a new path. Directories are not copied recursively. Use copy_paths for directories or two or more copy operations; pass overwrite false to refuse an existing destination.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -461,7 +461,7 @@ export const toolDefinitions = [
   {
     name: 'copy_paths',
     title: 'Copy paths',
-    description: 'Copy many files or whole directories in one call, each with its own source and destination. Directories are copied recursively.',
+    description: 'Copy two or more paths, or copy a directory recursively, in one call. Each item has its own source and destination. For exactly one regular file use copy_file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -489,7 +489,7 @@ export const toolDefinitions = [
   {
     name: 'move_paths',
     title: 'Move paths',
-    description: 'Move or rename many files or whole directories in one call, each with its own source and destination. Falls back to copy-and-delete across filesystems.',
+    description: 'Move or rename two or more files/directories in one batch, each with its own source and destination. Falls back to copy-and-delete across filesystems. For one source/destination pair use move_file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -517,7 +517,7 @@ export const toolDefinitions = [
   {
     name: 'delete_path',
     title: 'Delete path',
-    description: 'Delete a file or a directory on the computer. Directories are removed with their contents unless recursive is false. The filesystem root is refused.',
+    description: 'Delete exactly one file or directory. Directories are removed with their contents unless recursive is false; the filesystem root is refused. Use delete_paths for two or more targets, or move_to_trash when deletion should be reversible.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -533,7 +533,7 @@ export const toolDefinitions = [
   {
     name: 'delete_paths',
     title: 'Delete paths',
-    description: 'Delete many files and directories in one call, reporting each result. Use move_to_trash instead when the deletion should be reversible.',
+    description: 'Delete two or more files/directories in one batch and report each result. For one target use delete_path. Use move_to_trash instead when deletion should be reversible.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -582,7 +582,7 @@ export const toolDefinitions = [
   {
     name: 'take_screenshot',
     title: 'Take screenshot',
-    description: 'Capture the screen of the paired computer and return it as an image, for GUI work, visual checks, and demonstrating what is on screen. Uses the standard desktop screenshot portal on Wayland, with grim, gnome-screenshot, spectacle, scrot, ImageMagick import, screencapture, or PowerShell fallbacks depending on the platform.',
+    description: 'Capture the entire desktop only when full-screen pixels are actually needed. Prefer ui_snapshot or browser_snapshot for semantic inspection, and screenshot_region for one window, monitor, or rectangle. This tool uses the platform screenshot portal/utility and returns an image.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -591,7 +591,8 @@ export const toolDefinitions = [
       },
       additionalProperties: false,
     },
-    annotations: readOnly,
+    // keep=true and oversized fallbacks persist a timestamped PNG, so a repeated call can add files.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     handler: fileToolHandlers.take_screenshot,
   },
   {
@@ -813,7 +814,7 @@ export const toolDefinitions = [
   {
     name: 'set_config_value',
     title: 'Change runtime setting',
-    description: 'Change one of this runtime’s own preferences on this computer: telemetryEnabled, maxReadLines, maxBufferedLines or maxOutputBytes. The change applies immediately and is saved to runtime.json. Access roots, blocked commands, the command guardrail, the shell and the write limit cannot be set through MCP — they stay with the person at this computer.',
+    description: 'Change one of this local runtime’s own preferences on the selected computer: telemetryEnabled, maxReadLines, maxBufferedLines or maxOutputBytes. This does not rename the paired device; use hosted rename_device for that label. Access roots, blocked commands, shell/guardrails and the write limit remain local-only.',
     inputSchema: {
       type: 'object',
       properties: {

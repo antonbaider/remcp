@@ -10,8 +10,8 @@ Choose the narrowest read that answers the question:
 - `render_file_preview` only when `read_file` returned `structuredContent.preview` and interactive preview/editing is useful. Pass `structuredContent.preview.id`; the render tool uses that short-lived account-scoped server reference and never re-reads the computer.
 - `render_image_preview` only when an image/screenshot data tool returned a preview reference and an interactive viewer helps; model vision still uses the native MCP `image` content.
 - `render_terminal_preview` only when a process data tool returned a preview reference and an interactive terminal viewer helps; it renders already-returned output and its refresh control reads the same PID instead of rerunning the command.
-- `read_multiple_files` for a handful of named files.
-- `read_files` for one glob over many files.
+- `read_multiple_files` for two or more exact paths you already know; use `read_file` for one path.
+- `read_files` only when the files should be discovered by one glob; do not use it for an explicit path list.
 - `list_directory` with `depth`/`pattern` instead of shell `find`/`ls`.
 - `start_search` for name/content search; page with `get_more_search_results` and stop long searches with `stop_search`.
 - `read_image` for images already on the device.
@@ -26,10 +26,13 @@ Use the narrowest editor:
 - `edit_block` for one exact block.
 - `replace_lines` for a known line range.
 - `replace_in_files` for one literal/regex change across many files.
-- `write_file`/`write_files` for complete replacement or creation.
+- `write_file` for one complete replacement/creation; `write_files` for two or more independent files.
+- `copy_file` for one regular file; `copy_paths` for directories or multiple copies.
+- `move_file` for one source/destination pair; `move_paths` for two or more moves.
+- `delete_path` for one target; `delete_paths` for two or more; prefer `move_to_trash` when reversibility matters.
 - `set_permissions` for mode/ownership changes.
 
-Batch independent operations instead of repeating single-file calls.
+Do not choose a batch tool for one item just because it can technically represent it. Batch independent operations only when there are genuinely multiple targets.
 
 ## Transfers and archives
 

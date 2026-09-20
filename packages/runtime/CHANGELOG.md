@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.50 — 2026-09-20
+
+- Lockstep release with the ReMCP client after the hosted MCP/plugin contract was hardened for current OpenAI/MCP Apps requirements.
+- Computer-use tools retain the 83-tool runtime surface with AI-oriented descriptions, conditional JSON Schema validation, structured outputs, dynamic capability advertising, and semantic Accessibility/DOM-first routing.
+- `browser_navigate` adds `action=new_tab` so CDP automation can create the first page target without a shell/browser-address-bar workaround.
+- Live Linux verification covers Tesseract OCR targeting, XDG RemoteDesktop keyboard/pointer input, Unicode `type_text`, and the complete 39-tool computer-use smoke.
+
 ## 0.2.49 — 2026-09-20
 
 - Terminal process tools now return schema-validated structured session state, output ranges, match results and termination facts alongside their human-readable text.
@@ -21,6 +28,9 @@
 - Chrome DevTools Protocol endpoints are restricted to loopback addresses. New filesystem/document operations continue through the existing resolved-path allowlist, and launch/service/power operations reuse the runtime command policy.
 - Fixed metadata output truncation once the JSON tool contract exceeded the operating-system pipe buffer by waiting for stdout writes to flush before exit.
 - Terminal session tools now expose schema-validated structured `pid`, status, exit information, output ranges/matches, and session lists alongside their human-readable text, so hosted agents can chain process calls without parsing prose.
+- Tool descriptions now state the intended routing boundary for exact-path vs glob reads, singular vs batch filesystem operations, full-screen vs targeted/semantic screenshots, and local runtime settings vs hosted device labels.
+- Desktop action schemas and common guards now reject targetless `ui_action`/`window_action`, coordinate-less pointer moves, zero-motion scrolls, incomplete cross-backend `computer_action` targets, and connectivity tests without host/port before platform adapters can act. Empty `ui_find`/`browser_find` calls are redirected to their snapshot tools, and `wait_for_ui` requires an explicit state/condition instead of silently acting as a no-op.
+- `take_screenshot` is correctly advertised as non-read-only/non-idempotent because kept or oversized captures can persist timestamped files; selector-scoped `browser_snapshot` screenshots restore the original page scroll position before returning so the inspection path remains read-only.
 - No browser/document rendering stack was added; the runtime remains dependency-light and uses native OS facilities plus existing qpdf/poppler/zip helpers when available.
 
 ## 0.2.47 — 2026-09-19

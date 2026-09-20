@@ -273,7 +273,15 @@ export async function listWindows(args = {}) {
     return { ...window, monitor: monitor?.name ?? null, monitor_index: monitor?.index ?? null };
   }));
 }
-export async function windowAction(args = {}) { return adapter.windowAction(args); }
+export async function windowAction(args = {}) {
+  const hasTarget = Boolean(args.id || Number.isInteger(Number(args.pid)) || args.app || args.title);
+  if (!hasTarget) throw new Error('window_action requires id, pid, app, or title');
+  const action = optionalString(args.action);
+  if (action === 'move' && ![args.x,args.y].every(value => Number.isFinite(Number(value)))) throw new Error('window_action move requires x and y');
+  if (action === 'resize' && ![args.width,args.height].every(value => Number.isFinite(Number(value)))) throw new Error('window_action resize requires width and height');
+  if (action === 'move_resize' && ![args.x,args.y,args.width,args.height].every(value => Number.isFinite(Number(value)))) throw new Error('window_action move_resize requires x, y, width and height');
+  return adapter.windowAction(args);
+}
 export async function uiSnapshot(args = {}) {
   const explicitlyScoped = args.pid != null || args.app || args.window_title || args.windowTitle;
   const activeOnly = args.active_only != null
@@ -285,10 +293,18 @@ export async function uiSnapshot(args = {}) {
   return jsonResult(enrichUiPayload(value, effective));
 }
 export async function uiAction(args = {}) {
-  return adapter.uiAction(withResolvedUiLabel(args));
+  const resolved = withResolvedUiLabel(args);
+  const hasTarget = Boolean(resolved.id || resolved.label != null || resolved.name || resolved.role || resolved.automation_id || resolved.automationId);
+  if (!hasTarget) throw new Error('ui_action requires id, label, name, role, or automation_id');
+  const action = optionalString(resolved.action);
+  if (['set_value','set_range_value'].includes(action) && resolved.value == null) throw new Error(`ui_action ${action} requires value`);
+  return adapter.uiAction(resolved);
 }
 export async function keyboard(args = {}) { return adapter.keyboard(args); }
-export async function pointer(args = {}) { return adapter.pointer(args); }
+export async function pointer(args = {}) {
+  if (args.action === 'move' && ![args.x,args.y].every(value => Number.isFinite(Number(value)))) throw new Error('pointer move requires x and y');
+  return adapter.pointer(args);
+}
 export async function clipboard(args = {}) { return adapter.clipboard(args); }
 export async function displayInventory(args = {}) { return adapter.displayInventory(args); }
 export async function cursorPosition(args = {}) { return typeof adapter.cursorPosition === 'function' ? adapter.cursorPosition(args) : jsonResult({ x:null, y:null }); }
@@ -334,6 +350,8 @@ export async function screenshotRegion(args = {}) {
 export async function notification(args = {}) { return adapter.notification(args); }
 export async function scroll(args = {}) {
   const direction = optionalString(args.direction);
+  const hasDelta = [args.delta_x,args.delta_y,args.delta].some(value => value != null && Number.isFinite(Number(value)));
+  if (!direction && !hasDelta) throw new Error('scroll requires direction or a delta');
   const times = clamp(args.wheel_times, 1, 1, 50);
   let deltaX = Number(args.delta_x || 0);
   let deltaY = Number(args.delta_y ?? args.delta ?? 0);
@@ -403,6 +421,8 @@ async function uiMatches(args = {}) {
 }
 
 export async function uiFind(args = {}) {
+  const hasSelector = Boolean(args.id || args.label != null || args.name || args.role || args.automation_id || args.automationId);
+  if (!hasSelector) throw new Error('ui_find requires id, label, name, role, or automation_id; use ui_snapshot to enumerate UI');
   const nodes = await uiMatches(args);
   return jsonResult({ count: nodes.length, nodes });
 }
@@ -473,11 +493,17 @@ export async function waitForUi(args = {}) {
   const timeoutMs = clamp(args.timeout_ms, 10_000, 100, 120_000);
   const pollMs = clamp(args.poll_ms, 250, 50, 5000);
   const rawCondition = optionalString(args.condition);
+  const rawState = optionalString(args.state);
+  if (!rawCondition && !rawState) throw new Error('wait_for_ui requires state or condition');
   const aliases = { text:'text_exists', window:'active_window', element:'element_exists', enabled:'element_enabled', focused:'focused_element' };
   const condition = rawCondition
     ? requireEnum(aliases[rawCondition] || rawCondition, 'condition', ['text_exists','active_window','element_exists','element_enabled','focused_element'])
     : null;
-  const state = condition ? null : requireEnum(args.state || 'present', 'state', ['present', 'absent', 'changed']);
+  const state = condition ? null : requireEnum(rawState, 'state', ['present', 'absent', 'changed']);
+  const hasSelector = Boolean(args.id || args.label != null || args.name || args.role || args.automation_id || args.automationId);
+  if (['element_exists','element_enabled'].includes(condition) && !hasSelector) throw new Error(`wait_for_ui condition=${condition} requires a semantic target`);
+  if (condition === 'active_window' && !(args.text || args.name || args.window_title || args.windowTitle)) throw new Error('wait_for_ui condition=active_window requires text, name, or window_title');
+  if (['present','absent'].includes(state) && !hasSelector) throw new Error(`wait_for_ui state=${state} requires a semantic target`);
   const deadline = Date.now() + timeoutMs;
   const startedAt = Date.now();
   let attempts = 0;

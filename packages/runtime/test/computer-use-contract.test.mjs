@@ -4,7 +4,8 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { extendedToolDefinitions } from '../src/extended/catalog.mjs';
-import { computerAction } from '../src/extended/desktop.mjs';
+import { computerAction, pointer, scroll, uiAction, uiFind, waitForUi, windowAction } from '../src/extended/desktop.mjs';
+import { browserFind } from '../src/extended/browser.mjs';
 import * as linux from '../src/extended/desktop-linux.mjs';
 
 const tool = name => {
@@ -56,6 +57,39 @@ test('computer_action stays a narrow cross-backend fallback instead of duplicati
   const find = tool('ui_find').inputSchema.properties;
   assert.equal(find.label.type, 'number');
   assert.equal(find.refresh.type, 'boolean');
+});
+
+test('desktop action schemas reject targetless or no-op calls before execution', async () => {
+  const uiSchema = tool('ui_action').inputSchema;
+  assert.ok(Array.isArray(uiSchema.allOf) && uiSchema.allOf.length >= 2, 'ui_action declares target/value conditions');
+
+  const windowSchema = tool('window_action').inputSchema;
+  assert.ok(Array.isArray(windowSchema.allOf) && windowSchema.allOf.length >= 4, 'window_action declares target and geometry conditions');
+
+  const pointerSchema = tool('pointer').inputSchema;
+  assert.ok(Array.isArray(pointerSchema.allOf) && pointerSchema.allOf.length >= 1, 'pointer move declares coordinate requirements');
+
+  const scrollSchema = tool('scroll').inputSchema;
+  assert.ok(Array.isArray(scrollSchema.anyOf) && scrollSchema.anyOf.length >= 4, 'scroll requires direction or delta');
+
+  const computerSchema = tool('computer_action').inputSchema;
+  assert.ok(Array.isArray(computerSchema.allOf) && computerSchema.allOf.length >= 6, 'computer_action declares action-specific target requirements');
+
+  assert.ok(Array.isArray(tool('ui_find').inputSchema.anyOf), 'ui_find declares an element selector requirement');
+  assert.ok(Array.isArray(tool('browser_find').inputSchema.anyOf), 'browser_find declares a page-element selector requirement');
+  assert.ok(Array.isArray(tool('wait_for_ui').inputSchema.anyOf), 'wait_for_ui requires an explicit state or condition');
+
+  await assert.rejects(() => uiFind({}), /use ui_snapshot to enumerate UI/);
+  await assert.rejects(() => browserFind({}), /use browser_snapshot to enumerate page structure/);
+  await assert.rejects(() => waitForUi({}), /requires state or condition/);
+  await assert.rejects(() => waitForUi({ state:'present' }), /requires a semantic target/);
+  await assert.rejects(() => waitForUi({ condition:'active_window' }), /requires text, name, or window_title/);
+  await assert.rejects(() => uiAction({ action:'click' }), /requires id, label, name, role, or automation_id/);
+  await assert.rejects(() => uiAction({ action:'set_value', name:'Search' }), /requires value/);
+  await assert.rejects(() => windowAction({ action:'focus' }), /requires id, pid, app, or title/);
+  await assert.rejects(() => windowAction({ action:'move', id:'window-1' }), /requires x and y/);
+  await assert.rejects(() => pointer({ action:'move' }), /requires x and y/);
+  await assert.rejects(() => scroll({}), /requires direction or a delta/);
 });
 
 test('computer_action wait is bounded and batch executes sequential grouped actions', async () => {

@@ -141,6 +141,7 @@ development workflows remain documented separately:
 
 - [**ChatGPT & Codex developer guide →**](docs/OPENAI_PLUGIN.md)
 - [**Claude Code developer guide →**](docs/CLAUDE_CODE_PLUGIN.md)
+- [**AI tool-selection evaluation →**](docs/TOOL_SELECTION_EVAL.md)
 
 The OpenAI files and Claude files deliberately do not overwrite each other. Release checks fail if
 either host-specific contract drifts from the shared ReMCP version or production endpoint.

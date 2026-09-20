@@ -44,6 +44,11 @@ test('runtime advertises a fully annotated tool surface', async () => {
       assert.ok(tool.description.length > 20, `${tool.name} needs a real description`);
       assert.doesNotMatch(tool.description, /execute_command|analysis tool|Desktop Commander/i, `${tool.name} leaks upstream wording`);
     }
+    const screenshot = tools.find(tool => tool.name === 'take_screenshot');
+    assert.equal(screenshot.annotations.readOnlyHint, false, 'take_screenshot may persist a PNG');
+    assert.equal(screenshot.annotations.destructiveHint, false, 'persisting a screenshot is additive rather than destructive');
+    assert.equal(screenshot.annotations.idempotentHint, false, 'repeating a kept/oversized screenshot may create another timestamped file');
+
     // The one configuration tool, and it is narrow by construction: a model may change a preference
     // and the context limits, never the settings that decide what this computer exposes.
     const setter = tools.find(tool => tool.name === 'set_config_value');

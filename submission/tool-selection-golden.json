@@ -1,0 +1,501 @@
+{
+  "version": 1,
+  "purpose": "Golden prompt set for ReMCP tool-selection regression testing in ChatGPT Developer mode. Record actual selected tools and compare with expected sequences before releases.",
+  "categories": [
+    "direct",
+    "indirect",
+    "negative"
+  ],
+  "cases": [
+    {
+      "id": "direct-native-ui-snapshot",
+      "kind": "direct",
+      "prompt": "On my paired laptop, use the native accessibility tree to inspect the active app before doing anything.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "ui_snapshot"
+        ],
+        "must_not_call": [
+          "take_screenshot",
+          "pointer"
+        ]
+      },
+      "rationale": "Native semantic inspection should precede pixels or coordinates."
+    },
+    {
+      "id": "direct-browser-dom",
+      "kind": "direct",
+      "prompt": "Use ReMCP browser DOM tools to find the Save button in the open Chromium page and click it, then wait until Saved appears.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "browser_tabs",
+          "browser_find",
+          "browser_action",
+          "browser_wait"
+        ],
+        "must_not_call": [
+          "pointer",
+          "ui_action",
+          "browser_evaluate"
+        ]
+      },
+      "rationale": "Known web-page task should stay in CDP/DOM and use semantic wait."
+    },
+    {
+      "id": "direct-type-text",
+      "kind": "direct",
+      "prompt": "Type this exact Unicode text into the focused editor on my laptop: Zażółć gęślą jaźń 👋",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "type_text"
+        ],
+        "must_not_call": [
+          "keyboard",
+          "clipboard"
+        ]
+      },
+      "rationale": "Normal Unicode prose belongs to type_text, not key-by-key shortcuts."
+    },
+    {
+      "id": "direct-keyboard-shortcut",
+      "kind": "direct",
+      "prompt": "On my paired computer press Ctrl+L, then Escape.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "keyboard"
+        ],
+        "must_not_call": [
+          "type_text"
+        ]
+      },
+      "rationale": "Shortcuts and control keys belong to keyboard."
+    },
+    {
+      "id": "direct-coordinate-pointer",
+      "kind": "direct",
+      "prompt": "Click exactly at screen coordinates 640, 420 on my paired computer.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "pointer"
+        ],
+        "must_not_call": [
+          "ui_action",
+          "browser_action"
+        ]
+      },
+      "rationale": "The user explicitly requested a coordinate action."
+    },
+    {
+      "id": "direct-drag-drop",
+      "kind": "direct",
+      "prompt": "Drag the accessible item named Report.pdf onto the accessible folder named Archive.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "ui_find",
+          "drag_drop"
+        ],
+        "must_not_call": [
+          "pointer"
+        ]
+      },
+      "rationale": "Semantic drag endpoints are more stable than coordinate mouse choreography."
+    },
+    {
+      "id": "direct-window-management",
+      "kind": "direct",
+      "prompt": "Find the Chrome window on my paired laptop and maximize it.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "list_windows",
+          "window_action"
+        ],
+        "must_not_call": [
+          "pointer"
+        ]
+      },
+      "rationale": "Window operations should use window ids rather than desktop coordinates."
+    },
+    {
+      "id": "direct-browser-new-tab",
+      "kind": "direct",
+      "prompt": "Open https://example.com as a new debuggable Chrome tab through ReMCP.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "browser_navigate"
+        ],
+        "arguments": {
+          "browser_navigate": {
+            "action": "new_tab"
+          }
+        },
+        "must_not_call": [
+          "keyboard",
+          "pointer"
+        ]
+      },
+      "rationale": "new_tab bootstraps CDP even when no page target exists."
+    },
+    {
+      "id": "direct-render-file-preview",
+      "kind": "direct",
+      "prompt": "Read README.md from my paired computer, summarize it, then show the interactive file preview.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "read_file",
+          "render_file_preview"
+        ],
+        "must_not_call": [
+          "open_path"
+        ],
+        "component": "file-preview"
+      },
+      "rationale": "Data-first read should precede the presentation-only renderer."
+    },
+    {
+      "id": "direct-render-image-preview",
+      "kind": "direct",
+      "prompt": "Take a screenshot of my paired computer and show it in the interactive image viewer.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "take_screenshot",
+          "render_image_preview"
+        ],
+        "component": "image-preview"
+      },
+      "rationale": "Image capture stays data-first; the render tool only presents returned bytes."
+    },
+    {
+      "id": "direct-terminal-preview",
+      "kind": "direct",
+      "prompt": "Run npm test on my paired laptop and then show the terminal output in the interactive terminal viewer.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "start_process",
+          "render_terminal_preview"
+        ],
+        "component": "terminal-preview"
+      },
+      "rationale": "The command runs once; the renderer uses cached output and must not rerun it."
+    },
+    {
+      "id": "indirect-first-look",
+      "kind": "indirect",
+      "prompt": "What is open on my laptop right now, and what can I interact with?",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "computer_snapshot"
+        ],
+        "must_not_call": [
+          "take_screenshot"
+        ]
+      },
+      "rationale": "An unfamiliar mixed desktop state is the intended computer_snapshot use case."
+    },
+    {
+      "id": "indirect-native-settings-toggle",
+      "kind": "indirect",
+      "prompt": "Open the Settings app on my laptop, find the Bluetooth switch, turn it on, and tell me when it is enabled.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "launch_app",
+          "ui_find",
+          "ui_action",
+          "wait_for_ui"
+        ],
+        "must_not_call": [
+          "pointer",
+          "take_screenshot"
+        ]
+      },
+      "rationale": "Native app semantics should drive the task end to end."
+    },
+    {
+      "id": "indirect-web-form",
+      "kind": "indirect",
+      "prompt": "In the open browser page, put Anton in the Name field, choose Poland, submit, and wait for the confirmation message.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "browser_tabs",
+          "browser_find",
+          "browser_action",
+          "browser_wait"
+        ],
+        "must_not_call": [
+          "type_text",
+          "pointer",
+          "browser_evaluate"
+        ]
+      },
+      "rationale": "Page content should stay in DOM/CDP when available."
+    },
+    {
+      "id": "indirect-wait-native",
+      "kind": "indirect",
+      "prompt": "Click the native Export button and continue only after the Export complete text appears.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "ui_find",
+          "ui_action",
+          "wait_for_ui"
+        ],
+        "must_not_call": [
+          "pointer",
+          "take_screenshot"
+        ]
+      },
+      "rationale": "Semantic wait is preferred to sleeps or screenshot polling."
+    },
+    {
+      "id": "indirect-visual-proof",
+      "kind": "indirect",
+      "prompt": "After fixing the visible layout, verify that the final card is not clipped on screen.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "screenshot_region"
+        ],
+        "must_not_call": [
+          "record_screen"
+        ]
+      },
+      "rationale": "Static pixel/layout proof belongs to a targeted screenshot."
+    },
+    {
+      "id": "indirect-motion-proof",
+      "kind": "indirect",
+      "prompt": "The menu animation jitters during opening. Capture a short recording so we can debug the timing.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "record_screen"
+        ],
+        "must_not_call": [
+          "screenshot_region"
+        ]
+      },
+      "rationale": "Motion/timing debugging requires recording, not a static image."
+    },
+    {
+      "id": "indirect-read-spreadsheet",
+      "kind": "indirect",
+      "prompt": "Tell me the values and formulas in Sheet1 of budget.xlsx on my paired computer without opening Excel.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "read_document"
+        ],
+        "must_not_call": [
+          "launch_app",
+          "open_path"
+        ]
+      },
+      "rationale": "Structured document content should not drive a GUI app."
+    },
+    {
+      "id": "indirect-edit-spreadsheet",
+      "kind": "indirect",
+      "prompt": "Change B2 in budget.xlsx to 1250 and set C2 to =B2*1.23, then verify the cells.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "edit_spreadsheet",
+          "read_document"
+        ],
+        "must_not_call": [
+          "launch_app",
+          "ui_action"
+        ]
+      },
+      "rationale": "Direct XLSX editing is deterministic and should be read back."
+    },
+    {
+      "id": "indirect-pdf-pages",
+      "kind": "indirect",
+      "prompt": "Extract pages 2 through 4 from report.pdf into report-excerpt.pdf.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "pdf_action"
+        ],
+        "must_not_call": [
+          "launch_app",
+          "start_process"
+        ]
+      },
+      "rationale": "PDF structure operation should use pdf_action."
+    },
+    {
+      "id": "indirect-service-restart",
+      "kind": "indirect",
+      "prompt": "Check whether nginx is running on my server and restart it if it is unhealthy.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "service"
+        ],
+        "must_not_call": [
+          "start_process"
+        ]
+      },
+      "rationale": "Service-manager operations should use the service tool."
+    },
+    {
+      "id": "indirect-network-test",
+      "kind": "indirect",
+      "prompt": "From my paired server, check whether db.internal.example on TCP port 5432 is reachable.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "network"
+        ],
+        "must_not_call": [
+          "start_process"
+        ]
+      },
+      "rationale": "Bounded connectivity test is structured and safer than shell networking commands."
+    },
+    {
+      "id": "indirect-browser-js-escape-hatch",
+      "kind": "indirect",
+      "prompt": "On the current debug page, return the value of window.__APP_BUILD__ which is not exposed in the DOM.",
+      "expected": {
+        "action": "call",
+        "sequence": [
+          "list_devices",
+          "browser_tabs",
+          "browser_evaluate"
+        ],
+        "must_not_call": [
+          "pointer"
+        ]
+      },
+      "rationale": "browser_evaluate is justified only because supported DOM tools cannot expose the JS-only value."
+    },
+    {
+      "id": "negative-weather",
+      "kind": "negative",
+      "prompt": "What is the weather in Rzeszów tomorrow?",
+      "expected": {
+        "action": "alternative",
+        "alternative": "weather",
+        "sequence": [],
+        "must_not_call": [
+          "list_devices",
+          "computer_snapshot"
+        ]
+      },
+      "rationale": "Use the platform weather capability; ReMCP is unrelated."
+    },
+    {
+      "id": "negative-web-search",
+      "kind": "negative",
+      "prompt": "Search the web for the latest OpenAI plugin documentation.",
+      "expected": {
+        "action": "alternative",
+        "alternative": "web_search",
+        "sequence": [],
+        "must_not_call": [
+          "list_devices",
+          "browser_navigate"
+        ]
+      },
+      "rationale": "General web research should use web search, not a user's paired computer."
+    },
+    {
+      "id": "negative-pasted-text",
+      "kind": "negative",
+      "prompt": "Summarize the paragraph I pasted above.",
+      "expected": {
+        "action": "none",
+        "sequence": [],
+        "must_not_call": [
+          "list_devices",
+          "read_file"
+        ]
+      },
+      "rationale": "The conversation already contains the data."
+    },
+    {
+      "id": "negative-image-generation",
+      "kind": "negative",
+      "prompt": "Generate a watercolor illustration of a lighthouse.",
+      "expected": {
+        "action": "alternative",
+        "alternative": "image_generation",
+        "sequence": [],
+        "must_not_call": [
+          "list_devices",
+          "open_path"
+        ]
+      },
+      "rationale": "Image generation is a platform capability, not remote computer control."
+    },
+    {
+      "id": "negative-reminder",
+      "kind": "negative",
+      "prompt": "Remind me tomorrow at 9 AM to call the dentist.",
+      "expected": {
+        "action": "alternative",
+        "alternative": "automation",
+        "sequence": [],
+        "must_not_call": [
+          "list_devices",
+          "notification"
+        ]
+      },
+      "rationale": "A future reminder is not a native notification on a paired device."
+    },
+    {
+      "id": "negative-calculation",
+      "kind": "negative",
+      "prompt": "What is 17% of 840?",
+      "expected": {
+        "action": "alternative",
+        "alternative": "calculator",
+        "sequence": [],
+        "must_not_call": [
+          "list_devices",
+          "start_process"
+        ]
+      },
+      "rationale": "Simple arithmetic should not invoke a remote machine."
+    }
+  ]
+}

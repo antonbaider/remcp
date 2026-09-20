@@ -36,6 +36,8 @@ const RUNTIME_STDIO_BUFFER_BYTES = 24 * 1024 * 1024;
 const RECONNECT_MAX_MS = 60_000;
 const RUNTIME_RESTART_BASE_MS = 1_000;
 const RUNTIME_RESTART_MAX_MS = 30_000;
+const RUNTIME_TOOLS_RETRY_BASE_MS = 1_000;
+const RUNTIME_TOOLS_RETRY_MAX_MS = 30_000;
 // Below the relay's RPC timeout so the model gets a real error instead of a client-side
 // timeout while the device keeps working invisibly.
 const CALL_TIMEOUT_MARGIN_MS = 10_000;
@@ -109,6 +111,8 @@ export async function runAgent(options) {
   let transport = null;
   let runtimeRestartDelay = RUNTIME_RESTART_BASE_MS;
   let runtimeRestartTimer = null;
+  let runtimeToolsRetryDelay = RUNTIME_TOOLS_RETRY_BASE_MS;
+  let runtimeToolsRetryTimer = null;
   let stopPromise = null;
 
   function runtimeEnv() {
@@ -125,16 +129,31 @@ export async function runAgent(options) {
     return [...new Set(tools.map(tool => String(tool?.name || '').trim().slice(0, 128)).filter(Boolean))].slice(0, 256);
   }
 
+  function scheduleRuntimeToolsRetry(client) {
+    if (stopping || runtimeDown || mcp !== client || runtimeToolsRetryTimer) return;
+    const delay = jitter(runtimeToolsRetryDelay);
+    runtimeToolsRetryDelay = Math.min(RUNTIME_TOOLS_RETRY_MAX_MS, runtimeToolsRetryDelay * 2);
+    runtimeToolsRetryTimer = setTimeout(() => {
+      runtimeToolsRetryTimer = null;
+      void refreshRuntimeTools(client);
+    }, delay);
+    runtimeToolsRetryTimer.unref?.();
+  }
+
   async function refreshRuntimeTools(client = mcp, { announce = true } = {}) {
     if (!client || runtimeDown) return runtimeTools;
     try {
       const listed = await client.listTools(undefined, { timeout: 3000 });
+      if (runtimeToolsRetryTimer) clearTimeout(runtimeToolsRetryTimer);
+      runtimeToolsRetryTimer = null;
+      runtimeToolsRetryDelay = RUNTIME_TOOLS_RETRY_BASE_MS;
       const next = toolNames(listed);
       if (next.length === runtimeTools.length && next.every((name, index) => name === runtimeTools[index])) return runtimeTools;
       runtimeTools = next;
       if (announce) send({ type: 'capabilities', runtimeTools });
     } catch (error) {
       console.error(`ReMCP could not refresh runtime capabilities: ${error instanceof Error ? error.message : String(error)}`);
+      scheduleRuntimeToolsRetry(client);
     }
     return runtimeTools;
   }
@@ -143,6 +162,9 @@ export async function runAgent(options) {
     if (stopping) return;
     clearTimeout(runtimeRestartTimer);
     runtimeRestartTimer = null;
+    if (runtimeToolsRetryTimer) clearTimeout(runtimeToolsRetryTimer);
+    runtimeToolsRetryTimer = null;
+    runtimeToolsRetryDelay = RUNTIME_TOOLS_RETRY_BASE_MS;
     runtimeDown = true;
     const previous = mcp;
     mcp = null;
@@ -197,6 +219,9 @@ export async function runAgent(options) {
 
   function handleRuntimeExit(reason) {
     if (stopping || runtimeRestartTimer) return;
+    if (runtimeToolsRetryTimer) clearTimeout(runtimeToolsRetryTimer);
+    runtimeToolsRetryTimer = null;
+    runtimeToolsRetryDelay = RUNTIME_TOOLS_RETRY_BASE_MS;
     runtimeDown = true;
     runtimeTools = [];
     send({ type: 'capabilities', runtimeTools });
@@ -520,6 +545,8 @@ export async function runAgent(options) {
     if (stopPromise) return stopPromise;
     stopping = true;
     clearTimeout(runtimeRestartTimer);
+    clearTimeout(runtimeToolsRetryTimer);
+    runtimeToolsRetryTimer = null;
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
     if (telemetryTimer) clearInterval(telemetryTimer);

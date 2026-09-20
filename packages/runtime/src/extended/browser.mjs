@@ -310,10 +310,12 @@ export async function browserSnapshot(args) {
 
     await session.send('Page.enable');
     const selector = optionalString(args.selector);
+    let restoreScroll = null;
     if (selector) {
       const bounds = await evaluate(session, `new Promise((resolve,reject) => {
         const el=document.querySelector(${JSON.stringify(selector)});
         if(!el){reject(new Error('Screenshot element not found'));return;}
+        const originalScrollX=scrollX, originalScrollY=scrollY;
         const initial=el.getBoundingClientRect();
         const desiredTop=Math.max(0, scrollY + initial.top - Math.max(0,(innerHeight-initial.height)/2));
         window.scrollTo({top:desiredTop,left:scrollX,behavior:'instant'});
@@ -328,6 +330,8 @@ export async function browserSnapshot(args) {
             viewport_height:innerHeight,
             scroll_x:scrollX,
             scroll_y:scrollY,
+            original_scroll_x:originalScrollX,
+            original_scroll_y:originalScrollY,
             fully_visible:r.x>=0 && r.y>=0 && r.right<=innerWidth && r.bottom<=innerHeight
           });
         }));
@@ -335,7 +339,9 @@ export async function browserSnapshot(args) {
       if (!bounds || !Number.isFinite(Number(bounds.width)) || !Number.isFinite(Number(bounds.height)) || bounds.width <= 0 || bounds.height <= 0) {
         throw new Error('Screenshot element has invalid bounds');
       }
-      payload.screenshot_target = { selector, ...bounds };
+      restoreScroll = { x:Number(bounds.original_scroll_x || 0), y:Number(bounds.original_scroll_y || 0) };
+      const { original_scroll_x: _originalX, original_scroll_y: _originalY, ...reportedBounds } = bounds;
+      payload.screenshot_target = { selector, ...reportedBounds };
     }
     payload.screenshot = {
       scope: 'viewport',
@@ -343,11 +349,18 @@ export async function browserSnapshot(args) {
       height: await evaluate(session, 'innerHeight').catch(() => null),
     };
     const result = jsonResult(payload);
-    const captured = await session.send('Page.captureScreenshot', {
-      format: 'png',
-      fromSurface: true,
-      captureBeyondViewport: false,
-    });
+    let captured;
+    try {
+      captured = await session.send('Page.captureScreenshot', {
+        format: 'png',
+        fromSurface: true,
+        captureBeyondViewport: false,
+      });
+    } finally {
+      if (restoreScroll) {
+        await evaluate(session, `window.scrollTo({left:${restoreScroll.x},top:${restoreScroll.y},behavior:'instant'})`).catch(() => {});
+      }
+    }
     const data = String(captured?.data || '');
     if (!data) throw new Error('CDP returned no screenshot data');
     if (Buffer.byteLength(data, 'base64') > 8 * 1024 * 1024) throw new Error('Browser screenshot exceeds the 8 MiB inline image limit');
@@ -393,6 +406,7 @@ function findExpression(args) {
 }
 
 export async function browserFind(args) {
+  if (!(args.selector || args.text || args.role)) throw new Error('browser_find requires selector, text, or role; use browser_snapshot to enumerate page structure');
   return withTarget(args, async (session, target) => {
     const matches = await evaluate(session, findExpression(args));
     return jsonResult({ target_id: target.id, count: Array.isArray(matches) ? matches.length : 0, matches: Array.isArray(matches) ? matches : [] });

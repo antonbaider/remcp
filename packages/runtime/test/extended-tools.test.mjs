@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   allExtendedTools,
   advertisedExtendedTools,
@@ -65,6 +66,7 @@ test('extended tool schemas are written for agent selection rather than name gue
   assert.match(byName.get('pointer').description, /ui_action.*browser_action|browser_action.*ui_action/i);
   assert.match(byName.get('browser_action').description, /pointer|desktop/i);
   assert.match(byName.get('browser_evaluate').description, /escape hatch/i);
+  assert.match(byName.get('browser_snapshot').description, /scroll position is restored/i);
   assert.match(byName.get('read_document').description, /without opening|launching/i);
   for (const name of ['computer_snapshot','browser_tabs','browser_snapshot','browser_find','browser_wait','scroll','display_inventory','installed_apps','environment','read_document']) {
     assert.equal(byName.get(name).annotations.openWorldHint, false, name + ' stays within local/private state');
@@ -101,6 +103,15 @@ test('MCP SDK enforces conditional argument requirements before extended handler
     ['launch_app', {}, { app:'zenity' }],
     ['keyboard', {}, { key:'TAB' }],
     ['drag_drop', { from_id:'a' }, { from_id:'a', to_id:'b' }],
+    ['ui_find', {}, { name:'Save' }],
+    ['browser_find', {}, { role:'button' }],
+    ['wait_for_ui', {}, { state:'changed' }],
+    ['ui_action', { action:'click' }, { action:'click', name:'Save' }],
+    ['window_action', { action:'focus' }, { action:'focus', app:'Editor' }],
+    ['pointer', { action:'move' }, { action:'move', x:10, y:20 }],
+    ['scroll', {}, { direction:'down' }],
+    ['computer_action', { action:'click' }, { action:'click', x:10, y:20 }],
+    ['network', { action:'test', host:'127.0.0.1' }, { action:'test', host:'127.0.0.1', port:443 }],
     ['browser_action', { action:'press' }, { action:'press', key:'Enter' }],
     ['browser_wait', { condition:'text' }, { condition:'text', text:'ready' }],
     ['service', { action:'restart' }, { action:'restart', name:'demo.service' }],
@@ -135,6 +146,13 @@ test('capability-aware live advertising is a subset of the full release contract
   for (const browserTool of ['browser_tabs','browser_navigate','browser_snapshot','browser_find','browser_action','browser_wait','browser_evaluate']) {
     assert.equal(advertised.some(tool => tool.name === browserTool), Boolean(capabilities.browser_cdp), `${browserTool} should follow the live CDP capability`);
   }
+});
+
+test('browser_snapshot restores page scroll after selector screenshot capture', async () => {
+  const source = await readFile(new URL('../src/extended/browser.mjs', import.meta.url), 'utf8');
+  assert.match(source, /originalScrollX=scrollX, originalScrollY=scrollY/);
+  assert.match(source, /finally\s*\{/);
+  assert.match(source, /window\.scrollTo\(\{left:\$\{restoreScroll\.x\},top:\$\{restoreScroll\.y\}/);
 });
 
 test('browser_navigate new_tab bootstraps CDP when no page target exists', async () => {
