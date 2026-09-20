@@ -13,10 +13,27 @@
   <a href="https://github.com/antonbaider/remcp/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/antonbaider/remcp?style=flat-square"></a>
 </p>
 
+<!-- Canonical distribution badges: scripts/build-public-repo.mjs projects this block into the public README. -->
+<p align="center">
+  <a href="https://remcp.site/install/chatgpt"><img alt="ChatGPT plugin" src="https://img.shields.io/badge/ChatGPT-plugin-1f2328?style=flat-square"></a>
+  <a href="https://remcp.site/install/chatgpt"><img alt="Codex plugin" src="https://img.shields.io/badge/Codex-plugin-1f2328?style=flat-square"></a>
+  <a href="https://remcp.site/install/claude"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-1f2328?style=flat-square"></a>
+  <a href="https://cursor.com/marketplace"><img alt="Cursor Marketplace" src="https://img.shields.io/badge/Cursor-marketplace-1f2328?style=flat-square"></a>
+  <a href="docs/PLUGINS.md#gemini-cli"><img alt="Gemini CLI extension" src="https://img.shields.io/badge/Gemini%20CLI-extension-1f2328?style=flat-square"></a>
+  <a href="https://github.com/github/awesome-copilot/issues/3326"><img alt="GitHub Copilot CLI plugin" src="https://img.shields.io/badge/Copilot%20CLI-plugin-1f2328?style=flat-square"></a>
+  <a href="https://github.com/github/awesome-copilot/issues/3326"><img alt="VS Code Agent Plugin" src="https://img.shields.io/badge/VS%20Code-agent%20plugin-1f2328?style=flat-square"></a>
+  <a href="https://kiro.dev/powers/"><img alt="Kiro Power" src="https://img.shields.io/badge/Kiro-power-1f2328?style=flat-square"></a>
+  <a href="https://github.com/cline/mcp-marketplace/issues/2573"><img alt="Cline MCP Marketplace" src="https://img.shields.io/badge/Cline-MCP-1f2328?style=flat-square"></a>
+  <a href="https://smithery.ai/servers/antonbaider/remcp"><img alt="Smithery directory" src="https://img.shields.io/badge/Smithery-directory-1f2328?style=flat-square"></a>
+  <a href="https://glama.ai/mcp/servers/antonbaider/remcp"><img alt="Glama quality score" src="https://glama.ai/mcp/servers/antonbaider/remcp/badges/score.svg"></a>
+  <a href="docs/PLUGINS.md#smithery-glama-and-the-official-mcp-registry"><img alt="Official MCP Registry" src="https://img.shields.io/badge/MCP%20Registry-published-1f2328?style=flat-square"></a>
+</p>
+
 <p align="center">
   <a href="https://remcp.site">Website</a> ·
   <a href="https://remcp.site/plugins">Plugins</a> ·
   <a href="https://remcp.site/docs">Docs</a> ·
+  <a href="docs/TOOLS.md">Tool reference</a> ·
   <a href="https://remcp.site/security">Security</a> ·
   <a href="https://remcp.site/privacy">Privacy</a> ·
   <a href="https://remcp.site/support">Support</a>
@@ -150,7 +167,9 @@ either host-specific contract drifts from the shared ReMCP version or production
 with, [DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) or any other MCP
 server.
 
-**83 tools:**
+**83 device tools.** The hosted UI-capable catalog adds 8 account/fleet tools and 3 chat-presentation tools for **94 tools total**; clients without MCP Apps receive the 91-tool native surface. See the generated **[full tool reference](docs/TOOLS.md)**.
+
+**Device runtime surface:**
 
 | Area | Tools |
 | --- | --- |
@@ -168,7 +187,7 @@ server.
 | Diagnostics | `service`, `event_log`, `network`, `installed_apps`, `environment`, `audio`, `power_action`, `record_screen` |
 | Documents | `read_document`, `edit_spreadsheet`, `edit_document`, `pdf_action` |
 
-The hosted ReMCP endpoint adds eight account tools to the 83 device tools, for a **91-tool default native-first catalog**. ChatGPT receives standard MCP text/structured results and native MCP image content; custom file/image/terminal widgets are not advertised by default. An operator can explicitly enable the three optional presentation-only MCP Apps, but they appear only for clients that negotiate `io.modelcontextprotocol/ui`, producing a 94-tool UI mode. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
+The hosted ReMCP endpoint has eleven hosted account/presentation tools in its full UI-capable catalog, for **94 tools**. Clients that do not negotiate MCP Apps receive 91 tools because the three presentation-only render tools are omitted. File/image/terminal data tools stay useful without UI and may return a short-lived `structuredContent.preview` only in negotiated UI sessions; the named render tool accepts that id and renders the exact already-returned payload without a second device RPC. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
 
 ### Tool selection for AI agents
 

@@ -14,6 +14,7 @@ You do **not** need to paste an MCP server URL, edit a manifest, clone the repos
 Shareable install guides:
 
 - All integrations and current status: <https://remcp.site/plugins>
+- [Complete tool reference](TOOLS.md): 83 device tools + 8 account/fleet tools in the default 91-tool hosted catalog; UI-capable MCP Apps clients can additionally negotiate three presentation-only render tools.
 - ChatGPT & Codex: <https://remcp.site/install/chatgpt>
 - Claude Code: <https://remcp.site/install/claude>
 - Cursor Marketplace: <https://cursor.com/marketplace>

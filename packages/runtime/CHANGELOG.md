@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.63 — 2026-09-20
+
+- Lockstep MCP Apps production-surface release with the ReMCP client/server at `0.2.63`; device runtime tool behavior is unchanged from `0.2.62`.
+
 ## 0.2.62 — 2026-09-20
 
 - Lockstep skill-routing metadata release with the ReMCP client at `0.2.62`; runtime tool behavior is unchanged from `0.2.61`.

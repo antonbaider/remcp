@@ -19,7 +19,7 @@ plugin name.
 The rest of this document is for **developers and reviewers**.
 
 ReMCP ships a production OpenAI Plugins package for ChatGPT and Codex. It combines the hosted remote
-MCP server with five shared operational skills and review metadata. The default production contract is native-first: it exposes standard MCP text/structured results and native MCP image content without advertising custom UI. Three self-contained MCP Apps remain shipped only as an explicit operator opt-in for development or a separately reviewed UI mode.
+MCP server with five shared operational skills, review metadata, and three self-contained MCP Apps: a file editor/diff with syntax highlighting and in-chat save, a fullscreen image viewer layered on native MCP image/screenshot content, and a compact terminal-output viewer. Source tools remain data-first; presentation-only render tools mount the corresponding app after the source result already exists.
 
 This is the **OpenAI-specific** package. Claude Code packaging lives beside it and does not replace,
 rename, or regenerate the files described here.
@@ -32,10 +32,11 @@ rename, or regenerate the files described here.
 | Manifest | `plugin.json` |
 | MCP configuration | `mcp.json` |
 | Shared skills | 5 |
-| Hosted tool surface | 91 tools by default: 83 device tools + 8 hosted account tools |
-| Rich UI | Native ChatGPT/host rendering by default. Optional custom MCP Apps require `REMCP_CUSTOM_WIDGETS_ENABLED=true` **and** client negotiation of `io.modelcontextprotocol/ui`; that mode adds 3 presentation-only render tools (94 total) |
+| Hosted tool surface | 94 tools for MCP Apps clients; 91 for clients without the UI extension |
+| Rich UI | Production file editor/diff with syntax highlighting and save, fullscreen image viewer, and terminal output viewer. The three presentation-only render tools require client negotiation of `io.modelcontextprotocol/ui` and consume short-lived preview references without rerunning source actions |
 | Authentication | OAuth authorization code + PKCE, OIDC/UserInfo metadata |
 | Public overview | [`docs/PLUGINS.md`](PLUGINS.md) |
+| Full tool reference | [`docs/TOOLS.md`](TOOLS.md) — generated from the default 91-tool production catalog |
 
 ## Package layout
 
@@ -71,11 +72,11 @@ rename, or regenerate the files described here.
 8. In the portal choose **With MCP → Universal**, enter `https://remcp.site/mcp`, configure OAuth, then **Scan Tools**.
 9. Let **Scan Tools** import the five skills from the MCP skills extension. If the portal explicitly asks for a bundle instead, upload `submission/remcp-plugin.zip`.
 10. Enter the three starter prompts and the 5 positive / 3 negative test cases from `chatgpt-app-submission.json`.
-11. Screenshots are currently omitted. They are optional. If you add them while the listing has three starter prompts, provide exactly 3 current ChatGPT PNG/JPEG captures (one per prompt), each exactly 706 px wide and 400–860 px high. Capture the default native ChatGPT tool-result experience using only synthetic `review-sandbox` data so no private computer screen appears in submission materials.
+11. Screenshots are currently omitted. They are optional. If you add them while the listing has three starter prompts, provide exactly 3 current ChatGPT PNG/JPEG captures (one per prompt), each exactly 706 px wide and 400–860 px high. Show the deployed file editor/diff, fullscreen image viewer, or terminal viewer as appropriate, using only synthetic `review-sandbox` data so no private computer screen appears in submission materials.
 12. Select only regions where the hosted service, support, privacy policy, and terms are ready.
 13. Review the final policy attestations manually and submit for review.
 
-Optional custom UI is implemented with three self-contained MCP Apps: file preview/editor, image viewer, and terminal output viewer. They use no external assets or network fetches and follow the decoupled data-tool then render-tool pattern. They are disabled by default. When explicitly enabled, the server advertises them only after the client negotiates `io.modelcontextprotocol/ui`; only then may file/image/terminal source tools return a short-lived `structuredContent.preview`, and only the three `render_*` tools own `ui://` resources. Native MCP `image` content remains authoritative for model vision. Legacy component URIs are readable only inside an enabled, negotiated UI session and are not newly advertised.
+ReMCP has three production self-contained MCP Apps: file preview/editor, image viewer, and terminal output viewer. They use no external assets or network fetches and follow the decoupled data-tool then render-tool pattern. The server advertises them only after the client negotiates `io.modelcontextprotocol/ui`; only then may file/image/terminal source tools return a short-lived `structuredContent.preview`, and only the three `render_*` tools own `ui://` resources. Native MCP `image` content remains authoritative for model vision. File preview renders the actual file text with syntax highlighting, source/edit/diff tabs and save through `write_file`; image preview renders the exact already-returned raster bytes; terminal preview renders already-returned process output and refreshes only that same process. Operators can explicitly disable custom UI with `REMCP_CUSTOM_WIDGETS_ENABLED=false`.
 
 ## Review-sensitive behavior
 

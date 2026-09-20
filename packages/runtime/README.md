@@ -67,7 +67,14 @@ system tools such as qpdf/poppler when present. PDF text reading uses the built-
 `sharp`, or `exceljs`.
 
 `--print-tools` prints the exact JSON contract (schemas and annotations) the runtime advertises, and
-`src/catalog.mjs` is the single source of truth for it.
+`src/catalog.mjs` plus `src/extended/catalog.mjs` are the source of truth for the 83-tool release surface.
+A running device can advertise a smaller capability-aware subset; the runtime declares
+`tools.listChanged`, emits `notifications/tools/list_changed` when dynamic capabilities change, and the
+agent forwards the refreshed tool names to the hosted relay. Browser/CDP tools are the primary dynamic
+example: they are enabled only while the runtime can use a supported loopback browser endpoint.
+
+The complete hosted 91-tool reference (83 device + 8 account/fleet) is generated from the production
+catalog at https://remcp.site/docs#tools and in the public repository as `docs/TOOLS.md`.
 
 ## No approval staircase
 

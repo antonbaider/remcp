@@ -24,6 +24,8 @@ For ordinary users, the product flow is always:
 
 The production MCP URL and host-specific manifests are implementation details, not normal installation steps.
 
+Every host reaches the same capability-aware ReMCP tool contract. See the [full generated tool contract](TOOLS.md) for all 83 device tools, the 8 default account/fleet tools, dynamic `tools/list_changed` behavior, schemas, and safety hints.
+
 ## Portable core
 
 The root `plugin.json` is the canonical Agent Plugins 1.0 manifest and the root `mcp.json` contains the portable remote MCP definition. OpenAI/Codex workspace imports can discover this same root package through `.agents/plugins/marketplace.json`; the Claude-compatible `.claude-plugin/marketplace.json` remains alongside it for hosts that read that format. Cursor, GitHub Copilot, VS Code, and Kiro can consume the portable package directly.
