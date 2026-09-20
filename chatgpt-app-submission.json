@@ -92,42 +92,6 @@
         "destructive_justification": "Not destructive: returns configuration; nothing is created, changed or removed."
       }
     },
-    "render_file_preview": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it resolves one short-lived preview id created by read_file and presents that already-read text through the file-preview MCP App without contacting the paired computer again and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads only the bounded account-scoped ReMCP preview store; the presentation layer has no external network allow-list.",
-        "destructive_justification": "Not destructive: renders previously read text without changing the file; editing is a separate write_file call initiated by the user in the app."
-      }
-    },
-    "render_image_preview": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it resolves one short-lived image preview id created by read_image or a screenshot tool and presents the already-validated raster bytes through the image-preview MCP App without contacting the paired computer again and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads only the bounded account-scoped ReMCP preview store; the presentation layer has no external network allow-list.",
-        "destructive_justification": "Not destructive: renders previously returned image bytes without capturing, reading, writing, or changing the computer."
-      }
-    },
-    "render_terminal_preview": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it resolves one short-lived terminal preview id created by a process-output tool and presents the already-returned output through the terminal MCP App without rerunning the command and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads only the bounded account-scoped ReMCP preview store; the presentation layer has no external network allow-list.",
-        "destructive_justification": "Not destructive: renders previously returned process output without starting, stopping, or interacting with the process; refresh is a separate read_process_output call."
-      }
-    },
     "rename_device": {
       "annotations": {
         "readOnlyHint": false,

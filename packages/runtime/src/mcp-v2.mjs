@@ -64,15 +64,23 @@ export async function startRuntimeMcpServer({ version, instructions, onError = (
       if (closed) return;
       try {
         const next = new Set((await advertisedExtendedTools()).map(tool => tool.name));
+        let changed = false;
         for (const definition of extendedToolDefinitions) {
           const before = lastSupported.has(definition.name);
           const after = next.has(definition.name);
           if (before === after) continue;
           const registered = registrations.get(definition.name);
-          if (after) registered?.enable();
-          else registered?.disable();
+          if (!registered) continue;
+          // The SDK's enable()/disable() helper emits tools/list_changed immediately. Browser CDP
+          // appears as a seven-tool capability group, so calling those helpers in a loop creates
+          // seven concurrent stdio writes and can exceed Node's listener limit. Mutating the
+          // registration handle is otherwise identical to update({enabled}), then one notification
+          // below publishes the complete new toolset atomically.
+          registered.enabled = after;
+          changed = true;
         }
         lastSupported = next;
+        if (changed) server.sendToolListChanged();
       } catch (error) {
         onError(error instanceof Error ? error : new Error(String(error)));
       }

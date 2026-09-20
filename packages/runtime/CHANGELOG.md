@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.58 — 2026-09-20
+
+- `computer_snapshot` normalizes partial platform-capture failures into schema-stable collections/objects and bounded `{ source, message }` errors instead of leaking error strings into structured output.
+- Output-budget pruning preserves the structured snapshot error contract, and browser snapshot fallbacks reject invalid/error-shaped payloads.
+- Dynamic browser/CDP capability groups now toggle registrations in one batch and emit one `tools/list_changed` notification per transition, preventing concurrent stdio notification writes from exceeding Node's listener limit.
+- Lockstep patch release with the ReMCP client at `0.2.58`.
+
 ## 0.2.57 — 2026-09-20
 
 - ZIP extraction recognizes Info-ZIP `unzip` on Debian/Ubuntu by probing it with `-v`, fixing the false “unzip is not installed” error reproduced during physical 76-tool package verification.

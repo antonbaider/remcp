@@ -106,6 +106,52 @@ test('computer snapshot prunes huge semantic payloads without producing invalid 
   assert.ok((bounded.ocr?.words?.length || 0) < 10000);
 });
 
+test('computer snapshot normalizes partial capture failures into schema-stable fields', () => {
+  const bounded = boundedComputerSnapshot({
+    device: { hostname:'fixture', platform:'darwin', arch:'arm64' },
+    platform:'darwin',
+    hostname:'fixture',
+    active_window:'unavailable',
+    windows:'window inventory failed',
+    displays:null,
+    cursor:'cursor unavailable',
+    ui:null,
+    clipboard:null,
+    errors:[
+      'window inventory failed',
+      { source:'browser', message:'CDP unavailable' },
+    ],
+  });
+  assert.equal(bounded.active_window, null);
+  assert.deepEqual(bounded.windows, []);
+  assert.deepEqual(bounded.displays, []);
+  assert.deepEqual(bounded.cursor, { x:null, y:null });
+  assert.deepEqual(bounded.ui.nodes, []);
+  assert.deepEqual(bounded.clipboard, { available:false, length:0 });
+  assert.deepEqual(bounded.errors, [
+    { source:'snapshot', message:'window inventory failed' },
+    { source:'browser', message:'CDP unavailable' },
+  ]);
+});
+
+test('computer snapshot keeps structured errors when output bounding is required', () => {
+  const huge = 'x'.repeat(1_200_000);
+  const bounded = boundedComputerSnapshot({
+    device: { hostname:'fixture', platform:'linux', arch:'x64' },
+    platform:'linux',
+    hostname:'fixture',
+    active_window:null,
+    windows:[],
+    displays:[],
+    cursor:{ x:null, y:null },
+    ui:{ platform:'linux', count:0, nodes:[], semantic_tree:huge },
+    clipboard:{ available:false, length:0 },
+    errors:[{ source:'windows', message:'temporary failure' }],
+  });
+  assert.equal(bounded.snapshot_truncated, true);
+  assert.deepEqual(bounded.errors, [{ source:'windows', message:'temporary failure' }]);
+});
+
 test('computer snapshot/action expose OCR through the compact universal tool surface', () => {
   const tools = allExtendedTools();
   const snapshot = tools.find(tool => tool.name === 'computer_snapshot');

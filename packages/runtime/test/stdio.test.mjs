@@ -106,6 +106,7 @@ test('runtime sends tools/list_changed when the dynamic CDP toolset appears and 
     assert.equal(await waitUntil(() => changes.some(change =>
       !change.error && Array.isArray(change.tools) && change.tools.some(tool => tool.name === 'browser_tabs')
     )), true, 'browser tools should appear after the CDP endpoint starts');
+    assert.equal(changes.length, 1, 'a capability group appearing emits one batched tools/list_changed notification');
 
     await new Promise(resolve => server.close(resolve));
     server = null;
@@ -113,6 +114,7 @@ test('runtime sends tools/list_changed when the dynamic CDP toolset appears and 
     assert.equal(await waitUntil(() => changes.slice(appearedAt + 1).some(change =>
       !change.error && Array.isArray(change.tools) && !change.tools.some(tool => tool.name === 'browser_tabs')
     )), true, 'browser tools should disappear after the CDP endpoint stops');
+    assert.equal(changes.length, 2, 'a capability group disappearing emits one batched tools/list_changed notification');
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
     await client.close();

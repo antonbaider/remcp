@@ -137,35 +137,78 @@ function resultValue(result) {
   try { return JSON.parse(raw); } catch { return raw; }
 }
 
+function objectRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
+function toolResultMessage(result) {
+  const text = result?.content?.find(part => part.type === 'text')?.text;
+  return String(text || 'tool returned an error result').slice(0, 2000);
+}
+
+function snapshotError(source, settled) {
+  if (settled?.status === 'rejected') {
+    return { source, message:String(settled.reason?.message || settled.reason || 'capture rejected').slice(0, 2000) };
+  }
+  if (settled?.status === 'fulfilled' && settled.value?.isError === true) {
+    return { source, message:toolResultMessage(settled.value) };
+  }
+  return null;
+}
+
+function normalizeSnapshotErrors(errors) {
+  if (!Array.isArray(errors)) return [];
+  return errors.slice(0, 50).map((error, index) => {
+    if (objectRecord(error)) {
+      return {
+        ...error,
+        source:String(error.source || 'snapshot').slice(0, 120),
+        message:String(error.message || error.error || 'snapshot capture error').slice(0, 2000),
+      };
+    }
+    return { source:'snapshot', message:String(error ?? `snapshot error ${index + 1}`).slice(0, 2000) };
+  });
+}
+
 function jsonBytes(value) {
   return Buffer.byteLength(JSON.stringify(value), 'utf8');
 }
 
 export function boundedComputerSnapshot(payload) {
+  const normalized = {
+    ...payload,
+    active_window:objectRecord(payload?.active_window),
+    windows:Array.isArray(payload?.windows) ? payload.windows : [],
+    displays:Array.isArray(payload?.displays) ? payload.displays : [],
+    cursor:objectRecord(payload?.cursor) || { x:null, y:null },
+    ui:objectRecord(payload?.ui) || { platform:process.platform, count:0, nodes:[] },
+    clipboard:objectRecord(payload?.clipboard) || { available:false, length:0 },
+    errors:normalizeSnapshotErrors(payload?.errors),
+  };
   const budget = Math.min(768 * 1024, Math.max(16 * 1024, Math.floor(Number(liveConfig('maxOutputBytes') || 0) * 0.35)));
-  const originalBytes = jsonBytes(payload);
+  const originalBytes = jsonBytes(normalized);
   if (originalBytes <= budget) {
-    return { ...payload, snapshot_bytes:originalBytes, snapshot_budget_bytes:budget, snapshot_truncated:false };
+    return { ...normalized, snapshot_bytes:originalBytes, snapshot_budget_bytes:budget, snapshot_truncated:false };
   }
 
   const bounded = {
-    ...payload,
-    windows:Array.isArray(payload.windows) ? [...payload.windows] : payload.windows,
-    errors:Array.isArray(payload.errors) ? payload.errors.map(value => String(value).slice(0, 1000)).slice(0, 50) : payload.errors,
-    ui:payload.ui && typeof payload.ui === 'object' ? {
-      ...payload.ui,
-      ...(Array.isArray(payload.ui.nodes) ? { nodes:[...payload.ui.nodes] } : {}),
-    } : payload.ui,
-    browser:payload.browser && typeof payload.browser === 'object' ? {
-      ...payload.browser,
-      ...(Array.isArray(payload.browser.nodes) ? { nodes:[...payload.browser.nodes] } : {}),
-    } : payload.browser,
-    ocr:payload.ocr && typeof payload.ocr === 'object' ? {
-      ...payload.ocr,
-      text:String(payload.ocr.text || '').slice(0, 50_000),
-      ...(Array.isArray(payload.ocr.words) ? { words:[...payload.ocr.words] } : {}),
-      ...(Array.isArray(payload.ocr.lines) ? { lines:[...payload.ocr.lines] } : {}),
-    } : payload.ocr,
+    ...normalized,
+    windows:[...normalized.windows],
+    errors:normalizeSnapshotErrors(normalized.errors),
+    ui:{
+      ...normalized.ui,
+      ...(Array.isArray(normalized.ui.nodes) ? { nodes:[...normalized.ui.nodes] } : {}),
+    },
+    browser:objectRecord(normalized.browser) ? {
+      ...normalized.browser,
+      ...(Array.isArray(normalized.browser.nodes) ? { nodes:[...normalized.browser.nodes] } : {}),
+    } : undefined,
+    ocr:objectRecord(normalized.ocr) ? {
+      ...normalized.ocr,
+      text:String(normalized.ocr.text || '').slice(0, 50_000),
+      ...(Array.isArray(normalized.ocr.words) ? { words:[...normalized.ocr.words] } : {}),
+      ...(Array.isArray(normalized.ocr.lines) ? { lines:[...normalized.ocr.lines] } : {}),
+    } : undefined,
     snapshot_original_bytes:originalBytes,
     snapshot_budget_bytes:budget,
     snapshot_truncated:true,
@@ -939,15 +982,33 @@ export async function computerSnapshot(args = {}) {
     cursorPosition(),
     captureScreenshot ? computerScreenshotTask(args) : Promise.resolve(null),
   ]);
-  const parse = result => {
-    if (result.status !== 'fulfilled' || !result.value) return null;
-    const raw = result.value.content?.[0]?.text;
-    if (typeof raw !== 'string') return null;
-    try { return JSON.parse(raw); } catch { return raw; }
+  const parse = (result, fallback = null) => {
+    if (result.status !== 'fulfilled' || !result.value || result.value.isError === true) return fallback;
+    return resultValue(result.value) ?? fallback;
   };
-  const clipText = clipboardResult.status === 'fulfilled' ? clipboardResult.value.content?.[0]?.text || '' : '';
-  const windows = parse(windowsResult);
-  const ui = parse(uiResult);
+  const shapeErrors = [];
+  const parsedWindows = parse(windowsResult, []);
+  const windows = Array.isArray(parsedWindows) ? parsedWindows : [];
+  if (parsedWindows !== windows && parsedWindows != null) {
+    shapeErrors.push({ source:'windows', message:'window inventory returned an invalid result shape' });
+  }
+  const parsedDisplays = parse(displaysResult, []);
+  const displays = Array.isArray(parsedDisplays) ? parsedDisplays : [];
+  if (parsedDisplays !== displays && parsedDisplays != null) {
+    shapeErrors.push({ source:'displays', message:'display inventory returned an invalid result shape' });
+  }
+  const parsedCursor = parse(cursorResult, { x:null, y:null });
+  const cursor = objectRecord(parsedCursor) || { x:null, y:null };
+  if (parsedCursor !== cursor && parsedCursor != null) {
+    shapeErrors.push({ source:'cursor', message:'cursor position returned an invalid result shape' });
+  }
+  const parsedUi = includeUi ? parse(uiResult, null) : null;
+  const ui = objectRecord(parsedUi) || { platform:process.platform, count:0, nodes:[], ...(includeUi ? { unavailable:true } : { skipped:true }) };
+  if (includeUi && parsedUi !== ui && parsedUi != null) {
+    shapeErrors.push({ source:'ui', message:'accessibility snapshot returned an invalid result shape' });
+  }
+  const clipboardOk = clipboardResult.status === 'fulfilled' && clipboardResult.value?.isError !== true;
+  const clipText = clipboardOk ? clipboardResult.value.content?.[0]?.text || '' : '';
   const uiNodes = Array.isArray(ui?.nodes) ? ui.nodes : Array.isArray(ui) ? ui : [];
   const focusedNodes = uiNodes.filter(node => node.focused === true);
   const focusScore = node => {
@@ -1002,18 +1063,24 @@ export async function computerSnapshot(args = {}) {
   if (browserRequested && await browserCapabilityAvailable(undefined, 400)) {
     const hint = browserTitleHint(activeWindow);
     try {
-      browser = resultValue(await browserSnapshot({
+      const browserResult = await browserSnapshot({
         ...(hint ? { title:hint } : {}),
         max_nodes:clamp(args.browser_max_nodes, 500, 1, 2000),
         timeout_ms:3000,
-      }));
+      });
+      if (browserResult?.isError === true) throw new Error(toolResultMessage(browserResult));
+      browser = objectRecord(resultValue(browserResult));
+      if (!browser) throw new Error('browser snapshot returned an invalid result shape');
     } catch (error) {
       if (hint) {
         try {
-          browser = resultValue(await browserSnapshot({
+          const fallbackResult = await browserSnapshot({
             max_nodes:clamp(args.browser_max_nodes, 500, 1, 2000),
             timeout_ms:3000,
-          }));
+          });
+          if (fallbackResult?.isError === true) throw new Error(toolResultMessage(fallbackResult));
+          browser = objectRecord(resultValue(fallbackResult));
+          if (!browser) throw new Error('browser snapshot returned an invalid result shape');
         } catch (fallbackError) {
           browserError = String(fallbackError?.message || fallbackError);
         }
@@ -1058,8 +1125,8 @@ export async function computerSnapshot(args = {}) {
     active_app: activeApp,
     active_window: activeWindow,
     windows,
-    displays: parse(displaysResult),
-    cursor: parse(cursorResult),
+    displays,
+    cursor,
     ui,
     ...(browser ? { browser } : {}),
     ...(ocr ? { ocr } : {}),
@@ -1098,12 +1165,18 @@ export async function computerSnapshot(args = {}) {
         : (args.screenshot_monitor != null || args.screenshot_monitor_index != null) ? 'monitor'
         : 'desktop',
     },
-    clipboard: { available:clipboardResult.status === 'fulfilled', length:clipText.length },
+    clipboard: { available:clipboardOk, length:clipText.length },
     errors: [
-      ...[windowsResult, displaysResult, uiResult, clipboardResult, cursorResult, shotResult]
-        .filter(result => result.status === 'rejected')
-        .map(result => String(result.reason?.message || result.reason)),
-      ...(browserError ? [`browser snapshot: ${browserError}`] : []),
+      ...[
+        ['windows', windowsResult],
+        ['displays', displaysResult],
+        ...(includeUi ? [['ui', uiResult]] : []),
+        ['clipboard', clipboardResult],
+        ['cursor', cursorResult],
+        ...(captureScreenshot ? [['screenshot', shotResult]] : []),
+      ].map(([source, result]) => snapshotError(source, result)).filter(Boolean),
+      ...shapeErrors,
+      ...(browserError ? [{ source:'browser', message:browserError.slice(0, 2000) }] : []),
     ],
   };
   const boundedPayload = boundedComputerSnapshot(payload);
