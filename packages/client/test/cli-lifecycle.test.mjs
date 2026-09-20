@@ -132,6 +132,8 @@ test('a macOS plist pointing at an old prefix is rewritten', () => {
   assert.match(calls, /launchctl print gui\/\d+\/com\.remcp\.agent/);
   assert.match(calls, /launchctl submit -l com\.remcp\.agent\.reload\./,
     'a loaded stale job is handed to an independent launchd repair helper');
+  assert.equal((calls.match(/launchctl submit -l com\.remcp\.agent\.(?:reload|restart)\./g) || []).length, 1,
+    'a plist reload already owns the restart handoff and must not race a second detached restart helper');
   assert.doesNotMatch(calls, /launchctl bootout/, 'the updater itself never boots out its owning job inline');
 });
 

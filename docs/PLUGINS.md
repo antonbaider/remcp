@@ -20,7 +20,7 @@ Shareable install guides:
 
 The ReMCP-owned URLs are stable user-facing guides. They can later point to a more specific catalog card without changing the link you already shared.
 
-## ChatGPT and Codex
+## ChatGPT & Codex
 
 ChatGPT and Codex share OpenAI's unified public plugin directory.
 

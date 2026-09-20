@@ -258,10 +258,13 @@ export async function updateCommand(flags) {
     saveConfig({ ...cfg, runtime:{ ...cfg.runtime, packageSpec:targets.runtimeSpec } });
     cfg = loadConfig();
   }
-  ensureServiceIfRecorded(cfg);
+  const restartAlreadyScheduled = ensureServiceIfRecorded(cfg);
   cfg = loadConfig();
   const after = { cli: installedVersion(PACKAGE_NAME), runtime: installedVersion(cfg.runtime.packageName) };
-  const restarted = restartPersistentServiceIfInstalled(cfg);
+  // A changed macOS plist is reloaded by an independent launchd helper. Do not schedule a second
+  // helper against the same job: two one-second handoffs can race bootout/bootstrap with kickstart
+  // and leave the device offline even though npm installed the new release successfully.
+  const restarted = restartAlreadyScheduled || restartPersistentServiceIfInstalled(cfg);
   if (restarted) {
     console.log(`ReMCP updated and ${restarted} restarted (client ${before.cli} → ${after.cli ?? '?'}, runtime ${before.runtime ?? '?'} → ${after.runtime ?? '?'}).`);
     return;

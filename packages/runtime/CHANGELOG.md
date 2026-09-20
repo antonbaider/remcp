@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.54 — 2026-09-20
+
+- Lockstep patch release with the ReMCP client at `0.2.54`; the runtime tool implementation is unchanged from `0.2.53`.
+
 ## 0.2.53 — 2026-09-20
 
 - Lockstep patch release with the ReMCP client at `0.2.53`; the runtime tool implementation is unchanged from `0.2.52`.

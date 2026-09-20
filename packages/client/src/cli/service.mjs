@@ -414,11 +414,12 @@ export function installPersistentAgent(config) {
 // (a failed install, a cleaned LaunchAgents directory, a re-imaged user), the next update recreates
 // it instead of leaving a hand-over to a process nobody supervises.
 export function ensureServiceIfRecorded(config) {
-  if (!persistentServiceExpected(config)) return false;
+  if (!persistentServiceExpected(config)) return null;
   try {
     const cliPath = canonicalServiceCliPath(config);
     const nodePath = canonicalServiceNodePath(config);
     const platform = servicePlatform();
+    let restartScheduled = null;
     if (platform === 'linux') {
       if (!fs.existsSync(linuxServiceFile)) {
         installLinuxService(cliPath, nodePath);
@@ -445,7 +446,8 @@ export function ensureServiceIfRecorded(config) {
       // boot out a loaded agent inline: this updater may itself be a descendant of that LaunchAgent.
       // installMacService either leaves an unchanged loaded job alone, bootstraps an unloaded job, or
       // hands a changed launcher to an independent transient launchd helper.
-      installMacService(cliPath, { restart: false, nodePath });
+      const state = installMacService(cliPath, { restart: false, nodePath });
+      if (state === 'reload-scheduled') restartScheduled = macServiceLabel;
     } else if (platform === 'win32') installWindowsService(cliPath);
     // Upgrade the legacy inferred state only after the supervisor repair succeeded. A failed repair
     // must not turn a stale artifact into a permanent "managed service" declaration.
@@ -453,10 +455,10 @@ export function ensureServiceIfRecorded(config) {
     if (config?.serviceInstalled !== true || config?.serviceCliPath !== cliScript || config?.serviceNodePath !== nodePath) {
       saveConfig({ ...config, serviceInstalled: true, serviceCliPath: cliScript, serviceNodePath: nodePath });
     }
-    return true;
+    return restartScheduled;
   } catch (error) {
     console.error(`Could not ensure the background service: ${error instanceof Error ? error.message : String(error)}`);
-    return false;
+    return null;
   }
 }
 

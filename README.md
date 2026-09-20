@@ -24,7 +24,7 @@
   <a href="https://remcp.site/support">Support</a>
 </p>
 
-ReMCP connects a computer you own or administer to **ChatGPT, Codex, Cursor, Claude Code, Gemini
+ReMCP connects a computer you own or administer to **ChatGPT & Codex, Cursor, Claude Code, Gemini
 CLI, Kiro, Cline, or another MCP client**. The device agent makes an **outbound connection only** — no
 inbound port, no tunnel, no third-party desktop relay. This repository contains the public device
 client/runtime, portable Agent Plugin metadata, the Gemini CLI extension manifest, official MCP
