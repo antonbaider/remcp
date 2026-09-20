@@ -847,11 +847,13 @@ export async function copyFileTool(args) {
 
 // --- archives -------------------------------------------------------------------------
 function archiveTool() {
-  const probe = name => {
-    const result = spawnSync(name, ['--version'], { encoding: 'utf8' });
+  const probe = (name, versionArgs = ['--version']) => {
+    const result = spawnSync(name, versionArgs, { encoding: 'utf8' });
     return !result.error && result.status === 0 ? name : null;
   };
-  return { tar: probe('tar'), zip: probe('zip'), unzip: probe('unzip') };
+  // Info-ZIP unzip (the default on Debian/Ubuntu) treats --version as an invalid combination and
+  // exits 10 even though the binary is healthy. Its portable version probe is -v.
+  return { tar: probe('tar'), zip: probe('zip'), unzip: probe('unzip', ['-v']) };
 }
 
 export async function createArchiveTool(args) {

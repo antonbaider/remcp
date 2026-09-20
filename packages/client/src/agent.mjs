@@ -21,6 +21,10 @@ export { localRuntimeEntry, supervisorRestart, updateDecision } from './agent-up
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_CHECK_TIMEOUT_MS = 5000;
+// A deployment can briefly leave one HA replica advertising the previous release. Recheck a few
+// times after a stable connection instead of making that unlucky first answer stick for six hours.
+const POST_CONNECT_UPDATE_RECHECK_DELAYS_MS = Object.freeze([60_000, 5 * 60_000, 15 * 60_000]);
+const POST_CONNECT_UPDATE_RECHECK_JITTER_MS = 30_000;
 // A version that failed to install is retried after this cooldown instead of on every reconnect.
 const UPDATE_RETRY_COOLDOWN_MS = 30 * 60 * 1000;
 const METRICS_INTERVAL_MS = 60_000;
@@ -75,12 +79,22 @@ export async function runAgent(options) {
   const callTimeoutMs = Math.max(5_000, Number(options.rpcTimeoutMs || 120000) - CALL_TIMEOUT_MARGIN_MS);
   const telemetryEnabled = options.telemetryEnabled !== false;
   const persistState = typeof options.persistState === 'function' ? options.persistState : () => {};
+  const postConnectUpdateRecheckDelaysMs = (Array.isArray(options.updateRecheckDelaysMs)
+    ? options.updateRecheckDelaysMs
+    : POST_CONNECT_UPDATE_RECHECK_DELAYS_MS)
+    .map(Number)
+    .filter(delay => Number.isFinite(delay) && delay >= 0 && delay < UPDATE_CHECK_INTERVAL_MS)
+    .slice(0, 3);
+  const postConnectUpdateRecheckJitterMs = Number.isFinite(Number(options.updateRecheckJitterMs))
+    ? Math.max(0, Math.min(60_000, Number(options.updateRecheckJitterMs)))
+    : POST_CONNECT_UPDATE_RECHECK_JITTER_MS;
   let stopping = false;
   let revoked = false;
   const inFlight = new Map();
   let activeSocket;
   let reconnects = 0;
   let reconnectTimer = null;
+  let postConnectUpdateTimers = [];
   // Set when a replica asks this agent to move before it is replaced; the close handler reads it.
   let askedToReconnect = false;
   let pendingRequests = 0;
@@ -377,6 +391,7 @@ export async function runAgent(options) {
       reportInstallOnce();
       flushTelemetry();
       void checkForUpdate();
+      schedulePostConnectUpdateChecks();
     });
     ws.on('message', raw => {
       let message;
@@ -392,6 +407,7 @@ export async function runAgent(options) {
       }
     });
     ws.on('close', code => {
+      clearPostConnectUpdateChecks();
       for (const controller of inFlight.values()) controller.abort();
       if (stopping) return;
       // 1013 ('reconnect') is what a replica sends before it is replaced by a deployment. The machine
@@ -436,6 +452,28 @@ export async function runAgent(options) {
   let lastAttemptAt = 0;
   let lastUpdateCheckError = '';
   let lastUpdateCheckErrorAt = 0;
+
+  function clearPostConnectUpdateChecks() {
+    for (const timer of postConnectUpdateTimers) clearTimeout(timer);
+    postConnectUpdateTimers = [];
+  }
+
+  function schedulePostConnectUpdateChecks() {
+    clearPostConnectUpdateChecks();
+    if (options.autoUpdate === false) return;
+    for (const delay of postConnectUpdateRecheckDelaysMs) {
+      const jitter = postConnectUpdateRecheckJitterMs > 0
+        ? Math.floor(Math.random() * (postConnectUpdateRecheckJitterMs + 1))
+        : 0;
+      const timer = setTimeout(() => {
+        postConnectUpdateTimers = postConnectUpdateTimers.filter(candidate => candidate !== timer);
+        void checkForUpdate();
+      }, delay + jitter);
+      timer.unref?.();
+      postConnectUpdateTimers.push(timer);
+    }
+  }
+
   async function checkForUpdate() {
     if (options.autoUpdate === false) return;
     if (updateInFlight) return;
@@ -550,6 +588,7 @@ export async function runAgent(options) {
     runtimeToolsRetryTimer = null;
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
+    clearPostConnectUpdateChecks();
     if (telemetryTimer) clearInterval(telemetryTimer);
     clearInterval(telemetryFlushTimer);
     clearInterval(updateTimer);

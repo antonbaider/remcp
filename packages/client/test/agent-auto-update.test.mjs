@@ -8,7 +8,7 @@ import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
 import { VERSION } from '../src/version.mjs';
 
-test('live auto-update discovery can compare the advertised minimum version', { timeout: 10000 }, async t => {
+test('live auto-update discovery rechecks the advertised release after connect', { timeout: 10000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), 'remcp-auto-update-'));
   const modules = join(root, 'modules');
   const runtimeDir = join(modules, '@example', 'runtime');
@@ -84,6 +84,8 @@ printf '%s\\n' '${modules}'
     deviceToken:'fixture-token',
     deviceId:'fixture-device',
     telemetryEnabled:false,
+    updateRecheckDelaysMs:[25, 60],
+    updateRecheckJitterMs:0,
     runtime:{
       kind:'npm',
       packageName:'@example/runtime',
@@ -93,9 +95,8 @@ printf '%s\\n' '${modules}'
   });
 
   const deadline = Date.now() + 5000;
-  while (versionChecks === 0 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
-  assert.ok(versionChecks > 0, 'the connected agent checks the advertised release immediately');
-  await new Promise(resolve => setTimeout(resolve, 100));
+  while (versionChecks < 3 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+  assert.ok(versionChecks >= 3, `expected the immediate check plus two bounded convergence rechecks, got ${versionChecks}`);
   assert.equal(
     errors.some(line => line.includes('ReMCP auto-update check failed')),
     false,

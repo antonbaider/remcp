@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { body, freshWorkspace, isError } from './helpers.mjs';
 
 const root = freshWorkspace('extended');
@@ -69,6 +70,22 @@ test('archives can be created and extracted', async () => {
   assert.equal(isError(extracted), false, body(extracted));
   const nested = join(out, 'archive-project', 'nested', 'b.txt');
   assert.equal(readFileSync(nested, 'utf8'), 'beta\n');
+});
+
+test('zip archives use the Info-ZIP compatible unzip probe', {
+  skip: spawnSync('zip', ['--version'], { stdio:'ignore' }).status !== 0
+    || spawnSync('unzip', ['-v'], { stdio:'ignore' }).status !== 0,
+}, async () => {
+  const project = join(root, 'archive-zip-project');
+  mkdirSync(project, { recursive:true });
+  writeFileSync(join(project, 'inside.txt'), 'zip works\n');
+  const archive = join(root, 'bundle.zip');
+  const created = await invokeTool('create_archive', { paths:[project], destination:archive, format:'zip' });
+  assert.equal(isError(created), false, body(created));
+  const out = join(root, 'extracted-zip');
+  const extracted = await invokeTool('extract_archive', { archive, destination:out });
+  assert.equal(isError(extracted), false, body(extracted));
+  assert.equal(readFileSync(join(out, 'archive-zip-project', 'inside.txt'), 'utf8'), 'zip works\n');
 });
 
 test('take_screenshot either returns an image or explains what is missing', async () => {

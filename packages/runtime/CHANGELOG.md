@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.57 — 2026-09-20
+
+- ZIP extraction recognizes Info-ZIP `unzip` on Debian/Ubuntu by probing it with `-v`, fixing the false “unzip is not installed” error reproduced during physical 76-tool package verification.
+- Lockstep patch release with the ReMCP client at `0.2.57`.
+
 ## 0.2.56 — 2026-09-20
 
 - Lockstep patch release with the ReMCP client at `0.2.56`; the runtime tool implementation is unchanged from `0.2.55`.
