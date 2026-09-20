@@ -155,6 +155,13 @@ export async function runAgent(options) {
     runtimeToolsRetryTimer.unref?.();
   }
 
+  function applyRuntimeTools(next, { announce = true } = {}) {
+    if (next.length === runtimeTools.length && next.every((name, index) => name === runtimeTools[index])) return runtimeTools;
+    runtimeTools = next;
+    if (announce) send({ type: 'capabilities', runtimeTools });
+    return runtimeTools;
+  }
+
   async function refreshRuntimeTools(client = mcp, { announce = true } = {}) {
     if (!client || runtimeDown) return runtimeTools;
     try {
@@ -162,10 +169,7 @@ export async function runAgent(options) {
       if (runtimeToolsRetryTimer) clearTimeout(runtimeToolsRetryTimer);
       runtimeToolsRetryTimer = null;
       runtimeToolsRetryDelay = RUNTIME_TOOLS_RETRY_BASE_MS;
-      const next = toolNames(listed);
-      if (next.length === runtimeTools.length && next.every((name, index) => name === runtimeTools[index])) return runtimeTools;
-      runtimeTools = next;
-      if (announce) send({ type: 'capabilities', runtimeTools });
+      applyRuntimeTools(toolNames(listed), { announce });
     } catch (error) {
       console.error(`ReMCP could not refresh runtime capabilities: ${error instanceof Error ? error.message : String(error)}`);
       scheduleRuntimeToolsRetry(client);
@@ -191,9 +195,29 @@ export async function runAgent(options) {
       handleRuntimeExit('missing');
       return;
     }
-    const client = new Client(
+    let client;
+    client = new Client(
       { name: 'remcp-agent', version: VERSION },
-      { versionNegotiation:{ mode:'auto' } },
+      {
+        versionNegotiation:{ mode:'auto' },
+        // MCP 2026-07-28 list changes are subscription-based. Without this, a runtime can gain
+        // tools (for example when browser CDP appears) while the paired agent keeps publishing its
+        // old capability snapshot. Legacy runtimes are still covered by fallbackNotificationHandler.
+        listChanged:{
+          tools:{
+            autoRefresh:true,
+            debounceMs:0,
+            onChanged(error, tools) {
+              if (error) {
+                console.error(`ReMCP runtime tool subscription failed: ${error instanceof Error ? error.message : String(error)}`);
+                scheduleRuntimeToolsRetry(client);
+                return;
+              }
+              applyRuntimeTools(toolNames({ tools }));
+            },
+          },
+        },
+      },
     );
     const stdio = new StdioClientTransport({ command: process.execPath, args: [runtimeEntry], env: runtimeEnv(), maxBufferSize: RUNTIME_STDIO_BUFFER_BYTES });
     mcp = client;

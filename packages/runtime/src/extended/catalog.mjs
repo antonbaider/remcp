@@ -4,7 +4,7 @@ const JSON_OUTPUT_SCHEMA = {
   additionalProperties: true,
   description: 'Structured tool result. Array/scalar payloads are exposed under data for compatibility with MCP clients that require object-root output schemas.',
 };
-import { browserCapabilityAvailable, browserHandlers } from './browser.mjs';
+import { browserControlAvailable, browserHandlers } from './browser.mjs';
 import { isWaylandSession } from '../screenshot-portal.mjs';
 import { waylandPortalCandidate } from '../wayland-remote-desktop.mjs';
 import { commandExists, runFile } from './common.mjs';
@@ -606,7 +606,7 @@ export async function capabilitySnapshot() {
   const wayland = linux && isWaylandSession();
   const portalInput = wayland && waylandPortalCandidate();
   const x11Input = linux && !wayland && (commandExists('wdotool') || commandExists('xdotool'));
-  const browserCdp = await browserCapabilityAvailable(undefined, 500);
+  const browserCdp = await browserControlAvailable(undefined, 500);
   return {
     windows: win || mac || commandExists('wdotool') || commandExists('wmctrl') || (wayland && pyAtSpi),
     ui: win || mac || pyAtSpi,

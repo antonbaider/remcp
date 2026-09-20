@@ -1,9 +1,85 @@
 import process from 'node:process';
+import os from 'node:os';
+import path from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
 import { resolveSafePath } from '../util.mjs';
-import { clamp, jsonResult, optionalString, requireEnum, unavailable } from './common.mjs';
+import { clamp, commandExists, jsonResult, optionalString, requireEnum, spawnDetached, unavailable } from './common.mjs';
 
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:9222';
 const MAX_DISCOVERY_BYTES = 8 * 1024 * 1024;
+
+let browserLaunchPromise = null;
+
+function browserExecutable() {
+  const configured = optionalString(process.env.REMCP_BROWSER_BINARY);
+  const candidates = configured ? [configured] : process.platform === 'darwin'
+    ? [
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      ]
+    : process.platform === 'win32'
+      ? [
+          path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        ]
+      : ['/opt/google/chrome/chrome','/usr/bin/google-chrome','/usr/bin/google-chrome-stable','chromium','chromium-browser','microsoft-edge','microsoft-edge-stable'];
+  return candidates.find(candidate => path.isAbsolute(candidate) ? existsSync(candidate) : commandExists(candidate)) || null;
+}
+
+export function browserAutoLaunchAvailable() {
+  return Boolean(browserExecutable());
+}
+
+function browserDataDir() {
+  const configured = optionalString(process.env.REMCP_BROWSER_DATA_DIR);
+  if (configured) return configured;
+  if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', 'ReMCP', 'browser-cdp');
+  if (process.platform === 'win32') return path.join(process.env.LOCALAPPDATA || os.homedir(), 'ReMCP', 'browser-cdp');
+  return path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'remcp', 'browser-cdp');
+}
+
+async function waitForBrowserEndpoint(timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    if (await browserCapabilityAvailable(undefined, 250)) return true;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  return false;
+}
+
+async function ensureBrowserEndpoint(endpoint) {
+  if (endpoint || process.env.REMCP_CDP_URL) return;
+  if (await browserCapabilityAvailable(undefined, 250)) return;
+  if (!browserLaunchPromise) {
+    browserLaunchPromise = (async () => {
+      const executable = browserExecutable();
+      if (!executable) throw new Error('Browser control is unavailable: no supported Chrome, Edge, or Chromium executable was found');
+      const profile = browserDataDir();
+      mkdirSync(profile, { recursive:true, mode:0o700 });
+      const args = [
+        '--remote-debugging-address=127.0.0.1',
+        '--remote-debugging-port=9222',
+        `--user-data-dir=${profile}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        'about:blank',
+      ];
+      if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) args.unshift('--headless=new');
+      spawnDetached(executable, args);
+      if (!await waitForBrowserEndpoint(5000)) throw new Error('ReMCP launched a browser but its local CDP endpoint did not become ready');
+    })().finally(() => { browserLaunchPromise = null; });
+  }
+  await browserLaunchPromise;
+}
+
+export async function browserControlAvailable(endpoint, timeoutMs = 500) {
+  if (await browserCapabilityAvailable(endpoint, timeoutMs)) return true;
+  if (endpoint || process.env.REMCP_CDP_URL) return false;
+  return browserAutoLaunchAvailable();
+}
 
 function boundedText(value, max = 1000) {
   const text = String(value ?? '');
@@ -66,6 +142,7 @@ export async function browserCapabilityAvailable(endpoint, timeoutMs = 500) {
 }
 
 export async function listBrowserTargets(endpoint) {
+  await ensureBrowserEndpoint(endpoint);
   const list = await requestJson('/json/list', endpoint);
   return Array.isArray(list) ? list : [];
 }
@@ -242,6 +319,7 @@ export async function browserNavigate(args = {}) {
   const action = requireEnum(args.action || (url ? 'url' : 'reload'), 'action', ['url','new_tab','back','forward','reload']);
   if (['url','new_tab'].includes(action) && !url) throw new Error('url is required when action=url or new_tab');
   if (action === 'new_tab') {
+    await ensureBrowserEndpoint(args.endpoint);
     const created = await requestJson(`/json/new?${encodeURIComponent(url)}`, args.endpoint, { method:'PUT', timeout_ms:args.timeout_ms });
     return jsonResult({
       target_id:created?.id || null,

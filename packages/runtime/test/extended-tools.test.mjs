@@ -8,7 +8,7 @@ import {
   extendedToolDefinitions,
   extendedToolHandlers,
 } from '../src/extended/catalog.mjs';
-import { browserNavigate, browserSnapshot, browserTabs } from '../src/extended/browser.mjs';
+import { browserAutoLaunchAvailable, browserNavigate, browserSnapshot, browserTabs } from '../src/extended/browser.mjs';
 import { hasTool, invokeTool } from '../src/invoke.mjs';
 
 const EXPECTED = [
@@ -145,6 +145,21 @@ test('capability-aware live advertising is a subset of the full release contract
   }
   for (const browserTool of ['browser_tabs','browser_navigate','browser_snapshot','browser_find','browser_action','browser_wait','browser_evaluate']) {
     assert.equal(advertised.some(tool => tool.name === browserTool), Boolean(capabilities.browser_cdp), `${browserTool} should follow the live CDP capability`);
+  }
+});
+
+test('installed Chromium keeps the browser tool group discoverable before CDP starts', async () => {
+  const previousBinary = process.env.REMCP_BROWSER_BINARY;
+  const previousEndpoint = process.env.REMCP_CDP_URL;
+  process.env.REMCP_BROWSER_BINARY = process.execPath;
+  delete process.env.REMCP_CDP_URL;
+  try {
+    assert.equal(browserAutoLaunchAvailable(), true);
+    const capabilities = await capabilitySnapshot();
+    assert.equal(capabilities.browser_cdp, true, 'a launchable local Chromium capability should not disappear just because CDP is not started yet');
+  } finally {
+    if (previousBinary == null) delete process.env.REMCP_BROWSER_BINARY; else process.env.REMCP_BROWSER_BINARY = previousBinary;
+    if (previousEndpoint == null) delete process.env.REMCP_CDP_URL; else process.env.REMCP_CDP_URL = previousEndpoint;
   }
 });
 
