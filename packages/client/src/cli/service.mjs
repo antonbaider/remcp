@@ -158,6 +158,100 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
+const remcpPathBlockStart = '# >>> ReMCP CLI PATH >>>';
+const remcpPathBlockEnd = '# <<< ReMCP CLI PATH <<<';
+const remcpCliShimMarker = '# ReMCP managed CLI shim';
+
+function macCliShimPath() {
+  return path.join(home, '.local', 'bin', 'remcp');
+}
+
+function interactiveShellProfile() {
+  const shell = String(process.env.REMCP_TEST_SHELL || process.env.SHELL || os.userInfo().shell || '/bin/zsh');
+  const name = path.basename(shell);
+  if (name === 'zsh') return path.join(home, '.zshrc');
+  if (name === 'bash') return path.join(home, '.bash_profile');
+  return '';
+}
+
+function upsertManagedPathBlock(file) {
+  if (!file) return false;
+  const block = [
+    remcpPathBlockStart,
+    'case ":$PATH:" in',
+    '  *":$HOME/.local/bin:"*) ;;',
+    '  *) export PATH="$HOME/.local/bin:$PATH" ;;',
+    'esac',
+    remcpPathBlockEnd,
+  ].join('\n');
+  let current = '';
+  try { current = fs.readFileSync(file, 'utf8'); } catch {}
+  const start = current.indexOf(remcpPathBlockStart);
+  const end = start >= 0 ? current.indexOf(remcpPathBlockEnd, start + remcpPathBlockStart.length) : -1;
+  let next;
+  if (start >= 0 && end >= 0) {
+    next = current.slice(0, start) + block + current.slice(end + remcpPathBlockEnd.length);
+  } else {
+    const prefix = current && !current.endsWith('\n') ? current + '\n' : current;
+    next = prefix + (prefix ? '\n' : '') + block + '\n';
+  }
+  if (next === current) return false;
+  fs.writeFileSync(file, next, { mode:0o600 });
+  return true;
+}
+
+function removeManagedPathBlock(file) {
+  if (!file) return;
+  let current = '';
+  try { current = fs.readFileSync(file, 'utf8'); } catch { return; }
+  const start = current.indexOf(remcpPathBlockStart);
+  const end = start >= 0 ? current.indexOf(remcpPathBlockEnd, start + remcpPathBlockStart.length) : -1;
+  if (start < 0 || end < 0) return;
+  let before = current.slice(0, start);
+  let after = current.slice(end + remcpPathBlockEnd.length);
+  if (before.endsWith('\n') && after.startsWith('\n')) after = after.slice(1);
+  const next = before + after;
+  fs.writeFileSync(file, next, { mode:0o600 });
+}
+
+export function ensureMacCliCommand(config = {}, { cliPath = '', nodePath = '' } = {}) {
+  if (servicePlatform() !== 'darwin') return null;
+  const effectiveCli = cliPath || (persistentServiceExpected(config) ? canonicalServiceCliPath(config) : globalCliPath());
+  const effectiveNode = nodePath || (persistentServiceExpected(config) ? canonicalServiceNodePath(config) : process.execPath);
+  const cliScript = resolvedCliScript(effectiveCli);
+  const shim = macCliShimPath();
+  try {
+    const existing = fs.readFileSync(shim, 'utf8');
+    if (!existing.includes(remcpCliShimMarker)) {
+      console.error(`ReMCP did not replace ${shim} because it is not a ReMCP-managed command.`);
+      return null;
+    }
+  } catch (error) {
+    if (error?.code && error.code !== 'ENOENT') {
+      console.error(`ReMCP could not inspect ${shim}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+  const launcher = `#!/bin/sh\n${remcpCliShimMarker}\nexec ${shellQuote(effectiveNode)} ${shellQuote(cliScript)} "$@"\n`;
+  fs.mkdirSync(path.dirname(shim), { recursive:true, mode:0o755 });
+  const temporary = `${shim}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporary, launcher, { mode:0o755 });
+  fs.chmodSync(temporary, 0o755);
+  fs.renameSync(temporary, shim);
+  upsertManagedPathBlock(interactiveShellProfile());
+  return shim;
+}
+
+function removeMacCliCommand() {
+  if (servicePlatform() !== 'darwin') return;
+  const shim = macCliShimPath();
+  try {
+    const existing = fs.readFileSync(shim, 'utf8');
+    if (existing.includes(remcpCliShimMarker)) fs.unlinkSync(shim);
+  } catch {}
+  removeManagedPathBlock(interactiveShellProfile());
+}
+
 function macServicePlist(cliPath, nodePath = process.execPath) {
   // launchd wants an absolute path; a symlinked prefix that npm has not materialised yet (or a path
   // that is about to be replaced by the next install) must not abort the repair — a stale plist is
@@ -486,8 +580,10 @@ export function installPersistentAgent(config) {
   const cliScript = resolvedCliScript(cliPath);
   const nodePath = process.execPath;
   if (platform === 'linux') installLinuxService(cliPath, nodePath);
-  else if (platform === 'darwin') installMacService(cliPath, { nodePath });
-  else installWindowsService(cliPath);
+  else if (platform === 'darwin') {
+    installMacService(cliPath, { nodePath });
+    ensureMacCliCommand(config, { cliPath:cliScript, nodePath });
+  } else installWindowsService(cliPath);
   configurePostInstallAccess();
   saveConfig({ ...config, serviceInstalled: true, serviceCliPath: cliScript, serviceNodePath: nodePath });
   console.log('ReMCP is installed as a background service. Future updates: remcp update');
@@ -530,6 +626,7 @@ export function ensureServiceIfRecorded(config) {
       // installMacService either leaves an unchanged loaded job alone, bootstraps an unloaded job, or
       // hands a changed launcher to an independent transient launchd helper.
       const state = installMacService(cliPath, { restart: false, nodePath });
+      ensureMacCliCommand(config, { cliPath, nodePath });
       if (state === 'reload-scheduled') restartScheduled = macServiceLabel;
     } else if (platform === 'win32') installWindowsService(cliPath);
     // Upgrade the legacy inferred state only after the supervisor repair succeeded. A failed repair
@@ -586,6 +683,7 @@ export function uninstallPersistentService() {
     const domain = macLaunchDomain();
     spawnSync('launchctl', ['bootout', domain, macServiceFile], { stdio: 'ignore' });
     try { fs.unlinkSync(macServiceFile); } catch {}
+    removeMacCliCommand();
   } else if (platform === 'win32') {
     spawnSync('schtasks.exe', ['/End', '/TN', windowsTaskName], { stdio: 'ignore' });
     spawnSync('schtasks.exe', ['/Delete', '/TN', windowsTaskName, '/F'], { stdio: 'ignore' });

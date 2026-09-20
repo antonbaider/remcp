@@ -11,7 +11,7 @@ import { ensureMachineId, loadConfig, readJsonFile, saveConfig, setTelemetry, te
 import { assertRuntimeTrust, pairWithDeviceCode } from './cli/connect.mjs';
 import { diagnoseLocalRuntime, installedVersion, runtimeAllowedRoots } from './cli/doctor.mjs';
 import { configFile, npm, officialOrigin, runtimeConfigFile } from './cli/env.mjs';
-import { currentInstallationInfo, installPersistentAgent, persistentServiceState, rememberCurrentInstallation, restartPersistentServiceIfInstalled, serviceInstallationInfo, uninstallPersistentService } from './cli/service.mjs';
+import { currentInstallationInfo, ensureMacCliCommand, installPersistentAgent, persistentServiceState, rememberCurrentInstallation, restartPersistentServiceIfInstalled, serviceInstallationInfo, uninstallPersistentService } from './cli/service.mjs';
 import { run } from './cli/shell.mjs';
 import { updateCommand } from './cli/update.mjs';
 function parse(argv) {
@@ -97,6 +97,10 @@ export async function main(argv = process.argv.slice(2)) {
       || Boolean(process.env.INVOCATION_ID)
       || String(process.env.XPC_SERVICE_NAME || '').includes('com.remcp.agent');
     const cfg = rememberCurrentInstallation(loadConfig(), { service:supervised });
+    // A service can start from an absolute fnm/nvm Node path even when an interactive macOS shell
+    // cannot resolve the npm-global `remcp` binary. Refresh the stable user shim on every start so
+    // an auto-update repairs the next Terminal session without requiring a manual PATH edit.
+    ensureMacCliCommand(cfg);
     const service = persistentServiceState(cfg);
     if (!supervised && service.active) {
       console.log(`ReMCP is already running as a background service (${service.name}). Use \`remcp status\` to inspect it or \`remcp doctor\` to diagnose it.`);

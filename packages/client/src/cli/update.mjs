@@ -11,7 +11,7 @@ import { PACKAGE_NAME, VERSION } from '../version.mjs';
 import { loadConfig, saveConfig } from './config.mjs';
 import { installedVersion } from './doctor.mjs';
 import { linuxServiceFile, macServiceFile, officialOrigin } from './env.mjs';
-import { currentInstallationInfo, ensureServiceIfRecorded, installationVersionsAtCliPath, npmGlobalUpdate, persistentServiceExpected, rememberCurrentInstallation, restartPersistentServiceIfInstalled, serviceInstallationInfo, syncKnownInstallations } from './service.mjs';
+import { currentInstallationInfo, ensureMacCliCommand, ensureServiceIfRecorded, installationVersionsAtCliPath, npmGlobalUpdate, persistentServiceExpected, rememberCurrentInstallation, restartPersistentServiceIfInstalled, serviceInstallationInfo, syncKnownInstallations } from './service.mjs';
 
 const UPDATE_DISCOVERY_TIMEOUT_MS = 5000;
 
@@ -232,6 +232,9 @@ export async function updateCommand(flags) {
   }
 
   if (alreadyCurrent) {
+    // `npx @remcp/remcp@latest update` is the recovery path when a Node-manager prefix was never
+    // exported into the user's shell. Even with no package delta, repair the stable macOS command.
+    ensureMacCliCommand(cfg);
     if (targets.persistRuntime) {
       saveConfig({ ...cfg, runtime:{ ...cfg.runtime, packageSpec:targets.runtimeSpec } });
     }

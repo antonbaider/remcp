@@ -3,7 +3,7 @@
   "name": "io.github.antonbaider/remcp",
   "title": "ReMCP",
   "description": "Securely use files, terminals, screenshots and processes on computers you pair with ReMCP.",
-  "version": "0.2.55",
+  "version": "0.2.56",
   "repository": {
     "url": "https://github.com/antonbaider/remcp",
     "source": "github"

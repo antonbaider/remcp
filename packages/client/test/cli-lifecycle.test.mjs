@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -89,6 +89,130 @@ test('a systemd unit without ExecStart is rewritten instead of leaving the old C
   assert.match(unit, new RegExp(`ExecStart="${launcherFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" start --service`), 'the unit is rewritten to the stable supervisor-owned launcher');
   assert.match(readFileSync(launcherFile, 'utf8'), new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/bin/remcp`), 'the launcher targets the prefix npm installed into');
   assert.doesNotMatch(unit, /hand-edited/);
+});
+
+test('macOS CLI repair never overwrites or deletes an unrelated user-local command', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'remcp-cli-conflict-'));
+  const home = path.join(root, 'home');
+  const fakeBin = path.join(root, 'bin');
+  const prefix = path.join(root, 'global');
+  const configDir = path.join(root, 'config');
+  const log = path.join(root, 'calls.log');
+  const shim = path.join(home, '.local', 'bin', 'remcp');
+  mkdirSync(path.dirname(shim), { recursive:true });
+  mkdirSync(fakeBin, { recursive:true });
+  mkdirSync(configDir, { recursive:true });
+  writeFileSync(shim, '#!/bin/sh\necho unrelated-command\n');
+  chmodSync(shim, 0o755);
+  writeFileSync(path.join(home, '.zshrc'), '# keep me\n');
+  writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
+    serverUrl:'https://example.invalid',
+    deviceId:'test',
+    deviceToken:'test',
+    deviceName:'test',
+    runtime:{ kind:'npm', packageName:'@example/local-runtime', packageSpec:'@example/local-runtime@1.2.3', entry:'dist/index.js' },
+  }));
+  fakeExecutable(path.join(fakeBin, 'npm'), [
+    'if [ "$1" = "prefix" ]; then echo "$REMCP_TEST_PREFIX"; fi',
+    'exit 0',
+  ].join('\n'));
+  fakeExecutable(path.join(fakeBin, 'launchctl'), 'exit 0');
+  const env = {
+    ...process.env,
+    HOME:home,
+    SHELL:'/bin/zsh',
+    REMCP_TEST_SHELL:'/bin/zsh',
+    REMCP_CONFIG_DIR:configDir,
+    REMCP_TEST_LOG:log,
+    REMCP_TEST_PREFIX:prefix,
+    REMCP_NPM:path.join(fakeBin, 'npm'),
+    NODE_ENV:'test',
+    REMCP_TEST_PLATFORM:'darwin',
+    PATH:fakeBin + ':' + process.env.PATH,
+  };
+
+  const install = spawnSync(process.execPath, [bin, 'install'], { env, encoding:'utf8' });
+  assert.equal(install.status, 0, install.stderr || install.stdout);
+  assert.equal(readFileSync(shim, 'utf8'), '#!/bin/sh\necho unrelated-command\n');
+  assert.doesNotMatch(readFileSync(path.join(home, '.zshrc'), 'utf8'), /ReMCP CLI PATH/,
+    'PATH is not changed when the stable command name belongs to somebody else');
+
+  const uninstall = spawnSync(process.execPath, [bin, 'uninstall'], { env, encoding:'utf8' });
+  assert.equal(uninstall.status, 0, uninstall.stderr || uninstall.stdout);
+  assert.equal(readFileSync(shim, 'utf8'), '#!/bin/sh\necho unrelated-command\n',
+    'uninstall leaves a non-ReMCP command untouched');
+});
+
+test('macOS install creates an interactive remcp command and uninstall removes only its managed shell block', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'remcp-cli-path-'));
+  const home = path.join(root, 'home');
+  const fakeBin = path.join(root, 'bin');
+  const prefix = path.join(root, 'fnm node with spaces');
+  const configDir = path.join(root, 'config');
+  const log = path.join(root, 'calls.log');
+  mkdirSync(home, { recursive:true });
+  mkdirSync(fakeBin, { recursive:true });
+  mkdirSync(configDir, { recursive:true });
+  writeFileSync(path.join(home, '.zshrc'), '# user setting\nexport KEEP_ME=1\n');
+  writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
+    serverUrl:'https://example.invalid',
+    deviceId:'test',
+    deviceToken:'test',
+    deviceName:'test',
+    runtime:{ kind:'npm', packageName:'@example/local-runtime', packageSpec:'@example/local-runtime@1.2.3', entry:'dist/index.js' },
+  }));
+  fakeExecutable(path.join(fakeBin, 'npm'), [
+    'echo "npm $@" >> "$REMCP_TEST_LOG"',
+    'if [ "$1" = "prefix" ]; then echo "$REMCP_TEST_PREFIX"; fi',
+    'exit 0',
+  ].join('\n'));
+  fakeExecutable(path.join(fakeBin, 'launchctl'), [
+    'echo "launchctl $@" >> "$REMCP_TEST_LOG"',
+    'if [ "$1" = "print" ]; then exit 1; fi',
+    'exit 0',
+  ].join('\n'));
+  const env = {
+    ...process.env,
+    HOME:home,
+    SHELL:'/bin/zsh',
+    REMCP_TEST_SHELL:'/bin/zsh',
+    REMCP_CONFIG_DIR:configDir,
+    REMCP_TEST_LOG:log,
+    REMCP_TEST_PREFIX:prefix,
+    REMCP_NPM:path.join(fakeBin, 'npm'),
+    NODE_ENV:'test',
+    REMCP_TEST_PLATFORM:'darwin',
+    PATH:fakeBin + ':' + process.env.PATH,
+  };
+
+  const install = spawnSync(process.execPath, [bin, 'install'], { env, encoding:'utf8' });
+  assert.equal(install.status, 0, install.stderr || install.stdout);
+
+  const shim = path.join(home, '.local', 'bin', 'remcp');
+  assert.equal(existsSync(shim), true, 'install creates a stable user-local remcp command');
+  const shimBody = readFileSync(shim, 'utf8');
+  assert.match(shimBody, /^#!\/bin\/sh\n# ReMCP managed CLI shim\nexec /);
+  assert.ok(shimBody.includes(process.execPath), 'the wrapper pins the node interpreter used by the service');
+  assert.ok(shimBody.includes(prefix + '/bin/remcp'), 'the wrapper targets the npm-global CLI even when its prefix contains spaces');
+  const firstProfile = readFileSync(path.join(home, '.zshrc'), 'utf8');
+  assert.match(firstProfile, /# user setting/);
+  assert.match(firstProfile, /# >>> ReMCP CLI PATH >>>/);
+  assert.match(firstProfile, /\$HOME\/\.local\/bin/);
+
+  const update = spawnSync(process.execPath, [bin, 'update'], { env, encoding:'utf8' });
+  assert.equal(update.status, 0, update.stderr || update.stdout);
+  const secondProfile = readFileSync(path.join(home, '.zshrc'), 'utf8');
+  assert.equal((secondProfile.match(/# >>> ReMCP CLI PATH >>>/g) || []).length, 1,
+    'repeated updates keep one idempotent PATH block');
+  assert.equal((secondProfile.match(/# <<< ReMCP CLI PATH <<</g) || []).length, 1);
+
+  const uninstall = spawnSync(process.execPath, [bin, 'uninstall'], { env, encoding:'utf8' });
+  assert.equal(uninstall.status, 0, uninstall.stderr || uninstall.stdout);
+  assert.equal(existsSync(shim), false, 'uninstall removes the ReMCP wrapper');
+  const finalProfile = readFileSync(path.join(home, '.zshrc'), 'utf8');
+  assert.match(finalProfile, /# user setting/);
+  assert.match(finalProfile, /export KEEP_ME=1/);
+  assert.doesNotMatch(finalProfile, /ReMCP CLI PATH/);
 });
 
 // macOS keeps the interpreter and the CLI path inside the launchd plist, so the same prefix change
