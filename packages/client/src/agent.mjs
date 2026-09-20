@@ -9,6 +9,7 @@ import { VERSION } from './version.mjs';
 import {
   globalCliEntry,
   globalInstalledVersion,
+  isNewer,
   localRuntimeEntry,
   restartToApplyUpdate,
   supervisorRestart,

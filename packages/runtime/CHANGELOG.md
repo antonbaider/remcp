@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.53 — 2026-09-20
+
+- Lockstep patch release with the ReMCP client at `0.2.53`; the runtime tool implementation is unchanged from `0.2.52`.
+
 ## 0.2.52 — 2026-09-20
 
 - `computer_snapshot.active_window` is nullable when native accessibility state cannot be matched to the platform's top-level window enumeration, preventing valid macOS snapshots from failing structured output validation.
