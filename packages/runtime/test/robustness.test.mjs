@@ -6,8 +6,8 @@ import { promisify } from 'node:util';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { Client } from '@modelcontextprotocol/client';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { body, freshWorkspace, isError } from './helpers.mjs';
 import { globToRegExp } from '../src/util.mjs';
 
@@ -18,7 +18,7 @@ const { invokeTool } = await import('../src/invoke.mjs');
 
 async function withRuntime(env, fn) {
   const transport = new StdioClientTransport({ command: process.execPath, args: [entry], env: { ...process.env, ...env } });
-  const client = new Client({ name: 'robustness-test', version: '1.0.0' });
+  const client = new Client({ name: 'robustness-test', version: '1.0.0' }, { versionNegotiation:{ mode:'legacy' } });
   await client.connect(transport);
   try {
     await fn(client);
@@ -68,6 +68,10 @@ test('an unreadable runtime.json stops the device loudly instead of silently dro
 test('a stream with no newlines is bounded instead of growing until the runtime dies', async () => {
   const started = await invokeTool('start_process', { command: 'head -c 3000000 /dev/zero | tr "\\0" "x"', timeout_ms: 4000 });
   assert.equal(isError(started), false);
+  assert.equal(typeof started.structuredContent?.pid, 'number', 'oversized output keeps the declared start_process structured shape');
+  assert.equal(typeof started.structuredContent?.output, 'string');
+  assert.equal(started.structuredContent?.truncated, undefined, 'terminal tools never fall back to the schema-agnostic truncation envelope');
+  assert.ok(Buffer.byteLength(started.structuredContent.output, 'utf8') <= 128 * 1024);
   const pid = Number(body(started).match(/Process (\d+)/)[1]);
   const read = body(await invokeTool('read_process_output', { pid, offset: -1, length: 1 }));
   assert.match(read, /of \d+/);

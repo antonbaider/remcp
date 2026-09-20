@@ -31,7 +31,7 @@ break the other.
 > does not claim community-marketplace availability until Anthropic marks the listing approved.
 
 See [`PLUGINS.md`](PLUGINS.md) for the side-by-side OpenAI / Anthropic overview.
-See [`TOOLS.md`](TOOLS.md) for the generated 94-tool UI-capable hosted contract, the 91-tool non-UI compatibility surface, and the complete 83-tool device runtime surface.
+See [`TOOLS.md`](TOOLS.md) for the generated 94-tool hosted production contract, the 91-tool native-only profile available by configuration, and the complete 83-tool device runtime surface.
 
 ## OpenAI migration path for this Claude-compatible package
 

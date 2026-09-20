@@ -17,7 +17,7 @@ import {
   waitForProcessExit,
   waitForProcessActivity,
 } from '../sessions.mjs';
-import { clampInteger, fail, requireInteger, requireString, structured, text } from '../util.mjs';
+import { clampInteger, fail, requireInteger, requireString, structured, text, truncate } from '../util.mjs';
 
 function shellCommand() {
   if (runtimeConfig.defaultShell) return runtimeConfig.defaultShell;
@@ -49,6 +49,21 @@ function abortError() {
 
 function throwIfAborted(signal) {
   if (signal?.aborted) throw abortError();
+}
+
+// Terminal results have strict tool-specific output schemas. The generic structured() helper uses a
+// schema-agnostic {truncated,bytes,preview} envelope above 256 KiB, which is valid for extended
+// free-form tools but invalid for start_process/read_process_output and friends. Bound the few
+// potentially large terminal strings before mirroring them so structuredContent always keeps the
+// declared terminal shape.
+function terminalStructured(value, fallbackText) {
+  const bounded = { ...value };
+  if (typeof bounded.output === 'string') bounded.output = truncate(bounded.output, 128 * 1024);
+  if (typeof bounded.partial === 'string') bounded.partial = truncate(bounded.partial, 64 * 1024);
+  if (typeof bounded.command === 'string') bounded.command = truncate(bounded.command, 16 * 1024);
+  if (typeof bounded.warning === 'string') bounded.warning = truncate(bounded.warning, 8 * 1024);
+  if (typeof bounded.pattern === 'string') bounded.pattern = truncate(bounded.pattern, 16 * 1024);
+  return structured(bounded, fallbackText);
 }
 
 export async function startProcessTool(args, extra = {}) {
@@ -101,7 +116,7 @@ export async function startProcessTool(args, extra = {}) {
   const warning = verdict.note ? String(verdict.note) : '';
   const rendered = [warning, headline, output, partial].filter(Boolean).join('\n');
   const status = describeSession(session);
-  return structured({
+  return terminalStructured({
     ...status,
     command,
     output,
@@ -141,7 +156,7 @@ export async function readProcessOutputTool(args, extra = {}) {
   const status = describeSession(session);
   const header = `pid ${pid} ${status.status} · lines ${range}`;
   const output = slice.join('\n');
-  return structured({
+  return terminalStructured({
     ...status,
     range,
     output,
@@ -187,7 +202,7 @@ export async function waitForProcessOutputTool(args, extra = {}) {
     ? `pid ${pid} ${status.status} · pattern matched${bufferedMatch ? ' (already buffered)' : ''}`
     : `pid ${pid} ${status.status} · pattern not matched within ${timeoutMs}ms`;
   const output = slice.join('\n');
-  return structured({
+  return terminalStructured({
     ...status,
     pattern,
     matched,
@@ -226,7 +241,7 @@ export async function interactWithProcessTool(args, extra = {}) {
   const slice = readNewOutput(session);
   const status = describeSession(session);
   const output = slice.join('\n');
-  return structured({
+  return terminalStructured({
     ...status,
     output,
   }, [`pid ${pid} ${status.status}`, output].filter(Boolean).join('\n'));
@@ -238,7 +253,7 @@ export async function forceTerminateTool(args) {
   if (!session) fail(`No ReMCP session with pid ${pid}`);
   if (session.exited) {
     const status = describeSession(session);
-    return structured({ ...status, terminated:false, alreadyExited:true, escalated:false }, `Process ${pid} already exited.`);
+    return terminalStructured({ ...status, terminated:false, alreadyExited:true, escalated:false }, `Process ${pid} already exited.`);
   }
   killSessionTree(session, 'SIGTERM');
   const deadline = Date.now() + 2000;
@@ -250,7 +265,7 @@ export async function forceTerminateTool(args) {
     await waitForProcessActivity(session, 1000);
   }
   const status = describeSession(session);
-  return structured(
+  return terminalStructured(
     { ...status, terminated:Boolean(session.exited), alreadyExited:false, escalated },
     `Terminated session ${pid}${status.status.startsWith('exited') ? '' : ' (still running)'}. Status: ${status.status}.`,
   );
@@ -263,11 +278,11 @@ export async function listSessionsTool() {
     const blocked = session.exited ? '' : session.partial ? 'blocked-possibly' : 'idle-or-running';
     return { ...status, blocked, command:session.command.slice(0, 120) };
   });
-  if (!facts.length) return structured({ sessions:[] }, 'No active terminal sessions.');
+  if (!facts.length) return terminalStructured({ sessions:[] }, 'No active terminal sessions.');
   const rows = facts.map(session =>
     `pid ${session.pid} · ${session.status} · ${Math.round(session.runtimeMs / 1000)}s · ${session.blocked} · ${session.command}`
   );
-  return structured({ sessions:facts }, rows.join('\n'));
+  return terminalStructured({ sessions:facts }, rows.join('\n'));
 }
 
 export const terminalToolHandlers = {

@@ -1167,7 +1167,7 @@
       "user_prompt": "Using ReMCP device id review-sandbox, take a screenshot and show it.",
       "file_attachment_urls": null,
       "tools_triggered": "take_screenshot",
-      "expected_output": "Returns the labelled synthetic Review Sandbox PNG as native MCP image content for model vision and, in an MCP Apps-capable session, a short-lived preview reference that can be rendered without taking a second screenshot; no real screen capture is involved.",
+      "expected_output": "Returns the labelled synthetic Review Sandbox PNG as native MCP image content for model vision and, while custom widgets are enabled, a short-lived preview reference that can be rendered without taking a second screenshot; no real screen capture is involved.",
       "expected_output_url": null
     },
     {

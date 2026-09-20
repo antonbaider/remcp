@@ -1,6 +1,6 @@
 {
   "name": "@remcp/runtime",
-  "version": "0.2.64",
+  "version": "0.2.65",
   "description": "First-party ReMCP local device runtime: filesystem, terminal, computer-use, browser, diagnostics and document tools over MCP.",
   "type": "module",
   "license": "MIT",
@@ -28,8 +28,7 @@
     "@modelcontextprotocol/server": "^2.0.0"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "^2.0.0",
-    "@modelcontextprotocol/sdk": "^1.30.0"
+    "@modelcontextprotocol/client": "^2.0.0"
   },
   "repository": {
     "type": "git",

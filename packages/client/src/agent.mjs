@@ -3,8 +3,8 @@ import { existsSync } from 'node:fs';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { Client } from '@modelcontextprotocol/client';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { VERSION } from './version.mjs';
 import {
   globalCliEntry,
@@ -191,7 +191,10 @@ export async function runAgent(options) {
       handleRuntimeExit('missing');
       return;
     }
-    const client = new Client({ name: 'remcp-agent', version: VERSION });
+    const client = new Client(
+      { name: 'remcp-agent', version: VERSION },
+      { versionNegotiation:{ mode:'auto' } },
+    );
     const stdio = new StdioClientTransport({ command: process.execPath, args: [runtimeEntry], env: runtimeEnv(), maxBufferSize: RUNTIME_STDIO_BUFFER_BYTES });
     mcp = client;
     transport = stdio;

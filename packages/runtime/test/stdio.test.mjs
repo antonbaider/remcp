@@ -8,10 +8,8 @@ import { promisify } from 'node:util';
 import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { Client as ModernClient } from '@modelcontextprotocol/client';
-import { StdioClientTransport as ModernStdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { body, freshWorkspace } from './helpers.mjs';
 
 const run = promisify(execFile);
@@ -42,7 +40,7 @@ async function waitUntil(predicate, timeoutMs = 5000) {
 
 test('runtime serves MCP over stdio like the ReMCP agent expects', async () => {
   const transport = new StdioClientTransport({ command: process.execPath, args: [entry], env: { ...process.env } });
-  const client = new Client({ name: 'remcp-agent-test', version: '1.0.0' });
+  const client = new Client({ name: 'remcp-agent-test', version: '1.0.0' }, { versionNegotiation:{ mode:'legacy' } });
   await client.connect(transport);
   try {
     const { tools } = await client.listTools();
@@ -74,6 +72,7 @@ test('runtime sends tools/list_changed when the dynamic CDP toolset appears and 
   const client = new Client(
     { name: 'remcp-list-changed-test', version: '1.0.0' },
     {
+      versionNegotiation:{ mode:'legacy' },
       listChanged: {
         tools: {
           autoRefresh: true,
@@ -125,13 +124,13 @@ test('runtime negotiates MCP 2026-07-28 and delivers subscription-based tool cha
   const port = await unusedPort();
   const endpoint = `http://127.0.0.1:${port}`;
   const changes = [];
-  const transport = new ModernStdioClientTransport({
+  const transport = new StdioClientTransport({
     command: process.execPath,
     args: [entry],
     env: { ...process.env, REMCP_CDP_URL: endpoint, REMCP_CAPABILITY_POLL_MS: '250' },
     stderr: 'pipe',
   });
-  const client = new ModernClient(
+  const client = new Client(
     { name: 'remcp-modern-test', version: '1.0.0' },
     {
       versionNegotiation: { mode: { pin: '2026-07-28' } },

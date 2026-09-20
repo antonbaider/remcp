@@ -2,10 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
+import { Server } from '@modelcontextprotocol/server';
 import { body, freshWorkspace } from './helpers.mjs';
 
 const root = freshWorkspace('server');
@@ -15,10 +13,10 @@ const { hasTool, invokeTool } = await import('../src/invoke.mjs');
 
 function buildServer() {
   const server = new Server({ name: 'remcp-runtime', version: 'test' }, { capabilities: { tools: {} } });
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler('tools/list', async () => ({
     tools: toolDefinitions.map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations })),
   }));
-  server.setRequestHandler(CallToolRequestSchema, async request => invokeTool(request.params.name, request.params.arguments));
+  server.setRequestHandler('tools/call', async request => invokeTool(request.params.name, request.params.arguments));
   return server;
 }
 

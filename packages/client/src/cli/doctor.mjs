@@ -48,9 +48,12 @@ export async function diagnoseLocalRuntime(cfg) {
     return diagnosis;
   }
   try {
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
-    const client = new Client({ name: 'remcp-doctor', version: VERSION });
+    const { Client } = await import('@modelcontextprotocol/client');
+    const { StdioClientTransport } = await import('@modelcontextprotocol/client/stdio');
+    const client = new Client(
+      { name: 'remcp-doctor', version: VERSION },
+      { versionNegotiation:{ mode:'auto' } },
+    );
     const stdio = new StdioClientTransport({ command: process.execPath, args: [entry], env: { ...process.env }, maxBufferSize: 4 * 1024 * 1024 });
     const stderr = [];
     stdio.onerror = error => stderr.push(String(error?.message || error));

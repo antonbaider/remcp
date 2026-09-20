@@ -167,7 +167,7 @@ either host-specific contract drifts from the shared ReMCP version or production
 with, [DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) or any other MCP
 server.
 
-**83 device tools.** The hosted UI-capable catalog adds 8 account/fleet tools and 3 chat-presentation tools for **94 tools total**; clients without MCP Apps receive the 91-tool native surface. See the generated **[full tool reference](docs/TOOLS.md)**.
+**83 device tools.** The hosted production catalog adds 8 account/fleet tools and 3 chat-presentation tools for **94 tools total** whenever custom widgets are enabled; native-only deployments expose 91 tools. See the generated **[full tool reference](docs/TOOLS.md)**.
 
 **Device runtime surface:**
 
@@ -187,7 +187,7 @@ server.
 | Diagnostics | `service`, `event_log`, `network`, `installed_apps`, `environment`, `audio`, `power_action`, `record_screen` |
 | Documents | `read_document`, `edit_spreadsheet`, `edit_document`, `pdf_action` |
 
-The hosted ReMCP endpoint has eleven hosted account/presentation tools in its full UI-capable catalog, for **94 tools**. Clients that do not negotiate MCP Apps receive 91 tools because the three presentation-only render tools are omitted. File/image/terminal data tools stay useful without UI and may return a short-lived `structuredContent.preview` only in negotiated UI sessions; the named render tool accepts that id and renders the exact already-returned payload without a second device RPC. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
+The hosted ReMCP endpoint has eleven hosted account/presentation tools in its normal production catalog, for **94 tools**. Setting `REMCP_CUSTOM_WIDGETS_ENABLED=false` omits the three presentation-only render tools and returns the 91-tool native-only surface. File/image/terminal data tools stay useful without UI and may return a short-lived `structuredContent.preview` whenever custom widgets are enabled; the named render tool accepts that id and renders the exact already-returned payload without a second device RPC. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
 
 ### Tool selection for AI agents
 
