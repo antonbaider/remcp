@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.96 — 2026-09-22
+
+- Keeps readable search matches when an unreadable descendant is encountered while surfacing a warning.
+- Makes the regression backend-neutral so both ripgrep and the built-in scanner are validated consistently.
+- Supersedes the failed unpublished 0.2.95 tag; runtime behavior is otherwise unchanged from that candidate.
+
 ## 0.2.95 — 2026-09-22
 
 - Search sessions preserve readable matches when ripgrep encounters unreadable descendant paths, reporting the partial traversal problem as a warning instead of a fatal session error.

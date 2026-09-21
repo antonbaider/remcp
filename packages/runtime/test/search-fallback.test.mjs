@@ -94,7 +94,7 @@ test('the fallback scanner skips unreadable descendants and keeps readable match
       literalSearch: true,
     });
     const output = await finalResults(sessionIdOf(started));
-    assert.match(output, /visible\.txt:1: needle-visible/);
+    assert.match(output, /visible\.txt:1:\s*needle-visible/);
     assert.match(output, /status: completed/);
     assert.match(output, /warning: .*Permission denied/i);
     assert.doesNotMatch(output, /status: failed/);

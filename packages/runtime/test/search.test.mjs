@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { body, freshWorkspace, isError, waitFor } from './helpers.mjs';
 
 const root = freshWorkspace('search');
+const hasRipgrep = spawnSync('rg', ['--version'], { stdio: 'ignore' }).status === 0;
 const { invokeTool } = await import('../src/invoke.mjs');
 
 mkdirSync(join(root, 'project', 'src'), { recursive: true });
@@ -123,7 +125,7 @@ test('an unreadable search path fails instead of reporting success', async () =>
 });
 
 test('ripgrep search keeps readable matches when a descendant is unreadable', {
-  skip: process.platform === 'win32' || process.getuid?.() === 0,
+  skip: process.platform === 'win32' || process.getuid?.() === 0 || !hasRipgrep,
 }, async () => {
   const project = join(root, 'permission-subtree-rg');
   const blocked = join(project, 'blocked');
@@ -144,7 +146,7 @@ test('ripgrep search keeps readable matches when a descendant is unreadable', {
       return /status: (completed|capped|failed)/.test(page);
     });
     const output = body(await invokeTool('get_more_search_results', { sessionId, offset: 0, length: 100 }));
-    assert.match(output, /visible\.txt:1:needle-visible/);
+    assert.match(output, /visible\.txt:1:\s*needle-visible/);
     assert.match(output, /status: completed/);
     assert.match(output, /warning: .*Permission denied/i);
     assert.doesNotMatch(output, /status: failed/);
