@@ -32,42 +32,6 @@
         "destructive_justification": "Destructive: the façade is conservatively destructive because operation=remove permanently revokes a pairing; inspection, ping, pairing creation, rename, and enable/disable are narrower operations validated separately."
       }
     },
-    "render_file_preview": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it resolves one short-lived preview id created by read_file and presents that already-read text through the file-preview MCP App without contacting the paired computer again and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads only the bounded account-scoped ReMCP preview store; the presentation layer has no external network allow-list.",
-        "destructive_justification": "Not destructive: renders previously read text without changing the file; user-confirmed editor save uses the separate app-only save_file_preview tool."
-      }
-    },
-    "render_image_preview": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it resolves one short-lived image preview id created by read_image or a screenshot tool and presents the already-validated raster bytes through the image-preview MCP App without contacting the paired computer again and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads only the bounded account-scoped ReMCP preview store; the presentation layer has no external network allow-list.",
-        "destructive_justification": "Not destructive: renders previously returned image bytes without capturing, reading, writing, or changing the computer."
-      }
-    },
-    "render_terminal_preview": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it resolves one short-lived terminal preview id created by a process-output tool and presents the already-returned output through the terminal MCP App without rerunning the command and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads only the bounded account-scoped ReMCP preview store; the presentation layer has no external network allow-list.",
-        "destructive_justification": "Not destructive: renders previously returned process output without starting, stopping, or interacting with the process; refresh uses the separate app-only refresh_terminal_preview tool."
-      }
-    },
     "read_file": {
       "annotations": {
         "readOnlyHint": true,
@@ -162,30 +126,6 @@
         "read_only_justification": "Not read only: it routes one explicitly selected structured document operation for reading supported documents or editing XLSX, DOCX, and PDF files, which changes state on the selected computer or in a running session.",
         "open_world_justification": "Not open world: operates only on permitted local document paths and does not fetch URLs.",
         "destructive_justification": "Destructive: the façade is conservatively destructive because editing operations can replace local document content or output files; read_document remains read-only at dispatch."
-      }
-    },
-    "save_file_preview": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it writes the exact user-edited text from the ReMCP file preview back to the same permitted local path through the underlying write_file schema, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: writes only a local file on the explicitly paired computer and does not contact external services.",
-        "destructive_justification": "Destructive: replaces or appends local file content exactly as requested by the user in the file editor."
-      }
-    },
-    "refresh_terminal_preview": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads more buffered output from the same existing ReMCP terminal session through the underlying read_process_output schema and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local buffered process output only.",
-        "destructive_justification": "Not destructive: returns additional output without starting, stopping, or interacting with the process."
       }
     }
   },
