@@ -20,76 +20,16 @@
         "destructive_justification": "Not destructive: returns a list; nothing is created, changed or removed."
       }
     },
-    "device_action": {
+    "manage_account": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Not read only: it administers one paired computer at the account boundary: ping, account-visible rename, reversible enable/disable, or permanent pairing revocation, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: ping contacts only the selected paired computer through the ReMCP relay; rename/enable/disable/remove write only the signed-in account’s device record.",
-        "destructive_justification": "Destructive: the tool is conservatively marked destructive because action=remove permanently revokes that pairing; disable is reversible and rename changes only the account-visible label."
-      }
-    },
-    "who_am_i": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads the signed-in account record, its paired device count and this month of tool-call usage and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads the ReMCP account only, no machine is contacted.",
-        "destructive_justification": "Not destructive: returns account facts; nothing is created, changed or removed."
-      }
-    },
-    "create_pairing_command": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it writes one short-lived pairing code for the signed-in account and returns the command that uses it, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: no device is contacted; the code is stored in the ReMCP database and expires.",
-        "destructive_justification": "Not destructive: creates a single-use pairing code; it changes no user data and the same code is returned while it is valid."
-      }
-    },
-    "get_recent_tool_calls": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads the signed-in account’s own recent tool-call metadata (tool, device name, outcome, duration) and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads the ReMCP database only; no machine is contacted.",
-        "destructive_justification": "Not destructive: returns metadata; nothing is created, changed or removed."
-      }
-    },
-    "get_usage_statistics": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads the signed-in account’s own aggregated usage for the requested window and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads the ReMCP database only; no machine is contacted.",
-        "destructive_justification": "Not destructive: returns counts and durations; nothing is created, changed or removed."
-      }
-    },
-    "get_configuration": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads this deployment’s version, endpoints, runtime package, retention and limits, plus the paired machines’ versions and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads the ReMCP server configuration; no machine is contacted.",
-        "destructive_justification": "Not destructive: returns configuration; nothing is created, changed or removed."
+        "read_only_justification": "Not read only: it routes one signed-in ReMCP account operation: profile, recent calls, usage, hosted configuration, pairing creation, ping, rename, enable/disable, or permanent pairing removal, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Not open world: account reads and writes stay inside ReMCP; ping reaches only the explicitly paired computer through the ReMCP relay.",
+        "destructive_justification": "Destructive: the façade is conservatively destructive because operation=remove permanently revokes a pairing; inspection, ping, pairing creation, rename, and enable/disable are narrower operations validated separately."
       }
     },
     "render_file_preview": {
@@ -101,7 +41,7 @@
       "justifications": {
         "read_only_justification": "Read only: it resolves one short-lived preview id created by read_file and presents that already-read text through the file-preview MCP App without contacting the paired computer again and returns the result without writing anything.",
         "open_world_justification": "Not open world: reads only the bounded account-scoped ReMCP preview store; the presentation layer has no external network allow-list.",
-        "destructive_justification": "Not destructive: renders previously read text without changing the file; editing is a separate write_file call initiated by the user in the app."
+        "destructive_justification": "Not destructive: renders previously read text without changing the file; user-confirmed editor save uses the separate app-only save_file_preview tool."
       }
     },
     "render_image_preview": {
@@ -125,7 +65,7 @@
       "justifications": {
         "read_only_justification": "Read only: it resolves one short-lived terminal preview id created by a process-output tool and presents the already-returned output through the terminal MCP App without rerunning the command and returns the result without writing anything.",
         "open_world_justification": "Not open world: reads only the bounded account-scoped ReMCP preview store; the presentation layer has no external network allow-list.",
-        "destructive_justification": "Not destructive: renders previously returned process output without starting, stopping, or interacting with the process; refresh is a separate read_process_output call."
+        "destructive_justification": "Not destructive: renders previously returned process output without starting, stopping, or interacting with the process; refresh uses the separate app-only refresh_terminal_preview tool."
       }
     },
     "read_file": {
@@ -140,988 +80,112 @@
         "destructive_justification": "Not destructive: returns file content without writing anything."
       }
     },
-    "read_files": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads the files matching a glob from the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: local glob walk only, no network access.",
-        "destructive_justification": "Not destructive: returns file content without writing anything."
-      }
-    },
-    "read_multiple_files": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads the named text files from the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local files only.",
-        "destructive_justification": "Not destructive: returns file content without writing anything."
-      }
-    },
-    "read_image": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads an image file from the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads a local file only.",
-        "destructive_justification": "Not destructive: returns the image bytes without modifying the file."
-      }
-    },
-    "read_binary": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads raw bytes from a file on the paired computer in base64 chunks and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads a local file only.",
-        "destructive_justification": "Not destructive: returns bytes without writing anything."
-      }
-    },
-    "write_binary": {
+    "manage_files": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Not read only: it writes raw bytes to a file on the paired computer, replacing or appending, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: writes a local file, no external service.",
-        "destructive_justification": "Destructive: replaces the file content byte for byte, or appends to it."
+        "read_only_justification": "Not read only: it routes one explicitly selected filesystem operation on the paired computer, including reads, edits, search, archives, copies, moves, permissions, or deletion, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Not open world: filesystem operations are local to the selected paired computer and do not fetch URLs.",
+        "destructive_justification": "Destructive: the façade is conservatively destructive because contained operations can overwrite, move, permission-change, or permanently delete local paths; the concrete operation retains its original closed schema and policy."
       }
     },
-    "hash_file": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it streams a file on the paired computer through a hash function and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads a local file only.",
-        "destructive_justification": "Not destructive: computes a digest and leaves the file untouched."
-      }
-    },
-    "list_directory": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it lists a directory on the paired computer, with an optional glob and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads the local filesystem only.",
-        "destructive_justification": "Not destructive: reads directory entries without changing them."
-      }
-    },
-    "get_file_info": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads file metadata on the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local filesystem metadata only.",
-        "destructive_justification": "Not destructive: metadata read only."
-      }
-    },
-    "write_file": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it creates or replaces a text file on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: writes a local file, no external service.",
-        "destructive_justification": "Destructive: replaces existing file content, or appends to it."
-      }
-    },
-    "write_files": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it creates or replaces several files in one call on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: writes local files, no external service.",
-        "destructive_justification": "Destructive: replaces the content of every file it is given."
-      }
-    },
-    "apply_patch": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it applies a unified diff to one or more files on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: edits local files, no external service.",
-        "destructive_justification": "Destructive: rewrites the matched regions of every file in the patch."
-      }
-    },
-    "set_permissions": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it changes the permission bits (and optionally the numeric owner) of a file or directory on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: changes local filesystem permissions only.",
-        "destructive_justification": "Destructive: can remove read or execute access from a path, recursively when asked, which can lock the account out of its own files."
-      }
-    },
-    "edit_block": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it replaces an exact text block inside a file on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: edits a local file, no external service.",
-        "destructive_justification": "Destructive: changes existing file content in place."
-      }
-    },
-    "replace_lines": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it replaces a line range in a file on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: edits a local file, no external service.",
-        "destructive_justification": "Destructive: overwrites the requested lines of an existing file."
-      }
-    },
-    "replace_in_files": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it rewrites every matching file under a path on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: edits local files, no external service.",
-        "destructive_justification": "Destructive: changes many files at once without a per-file confirmation step."
-      }
-    },
-    "diff_files": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it compares two text files on the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads two local files only.",
-        "destructive_justification": "Not destructive: computes a diff and returns it."
-      }
-    },
-    "move_to_trash": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it moves a file or directory on the paired computer into the system trash, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: moves a local path, no external service.",
-        "destructive_justification": "Destructive: removes the path from its original location; the data is recoverable from the trash with move_file."
-      }
-    },
-    "create_directory": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it creates directories on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: creates local directories only.",
-        "destructive_justification": "Not destructive: adds directories and never removes or overwrites anything."
-      }
-    },
-    "move_file": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it moves or renames a path on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: moves a local path, no external service.",
-        "destructive_justification": "Destructive: removes the source path and replaces the destination when it already exists."
-      }
-    },
-    "copy_file": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it copies one file on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: copies a local file, no external service.",
-        "destructive_justification": "Destructive: replaces the destination file when it already exists."
-      }
-    },
-    "copy_paths": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it copies files and whole directories on the paired computer in one call, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: copies local paths, no external service.",
-        "destructive_justification": "Destructive: replaces existing destinations when they are present."
-      }
-    },
-    "move_paths": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it moves or renames several paths on the paired computer in one call, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: moves local paths, no external service.",
-        "destructive_justification": "Destructive: removes every source path and replaces existing destinations."
-      }
-    },
-    "delete_path": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it deletes a file or directory on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: deletes a local path, no external service.",
-        "destructive_justification": "Destructive: permanently removes the path; a non-empty directory is removed with its contents."
-      }
-    },
-    "delete_paths": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it deletes many files and directories in one call on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: deletes local paths, no external service.",
-        "destructive_justification": "Destructive: permanently removes every listed path in one call."
-      }
-    },
-    "create_archive": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it packs files and directories on the paired computer into a tar or zip archive, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: reads and writes local paths, no external service.",
-        "destructive_justification": "Destructive: replaces an archive that already exists at the destination path."
-      }
-    },
-    "extract_archive": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it extracts a tar or zip archive on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: reads and writes local paths, no external service.",
-        "destructive_justification": "Destructive: writes archive members over files that already exist in the destination directory."
-      }
-    },
-    "take_screenshot": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it captures the screen of the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: uses a local screenshot utility, no network access.",
-        "destructive_justification": "Not destructive: returns an image; it may leave a temporary PNG when keep is true."
-      }
-    },
-    "start_search": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it starts a filename or content search on the paired computer, which creates or ends an in-memory execution session even though no user file is modified.",
-        "open_world_justification": "Not open world: searches the local filesystem only.",
-        "destructive_justification": "Not destructive: creates an in-memory search session; no file is changed."
-      }
-    },
-    "get_more_search_results": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads more results from a running search session and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads from the local search session only.",
-        "destructive_justification": "Not destructive: read only."
-      }
-    },
-    "stop_search": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it stops a running search session on the paired computer, which creates or ends an in-memory execution session even though no user file is modified.",
-        "open_world_justification": "Not open world: stops a local in-memory session.",
-        "destructive_justification": "Not destructive: ends the search session; collected results stay readable."
-      }
-    },
-    "list_searches": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it lists search sessions on the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local session state only.",
-        "destructive_justification": "Not destructive: read only."
-      }
-    },
-    "start_process": {
+    "run_terminal": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Not read only: it starts a shell command on the paired computer and can change files, services and external systems, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: a command can reach the public internet, install packages or call external APIs.",
-        "destructive_justification": "Destructive: executes arbitrary commands with the rights of the account that runs the agent."
+        "read_only_justification": "Not read only: it routes one explicitly selected terminal-session operation on the paired computer, including starting commands, reading or waiting for output, interaction, termination, or session listing, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Open world: a started or interactive command can contact external services with the rights of the local agent account.",
+        "destructive_justification": "Destructive: the façade is conservatively destructive because command execution, process input, and termination can change state or lose unsaved work; read-only terminal operations remain narrower at dispatch."
       }
     },
-    "read_process_output": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads buffered output from a session on the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local process output only.",
-        "destructive_justification": "Not destructive: advances a read cursor; no state is changed."
-      }
-    },
-    "interact_with_process": {
+    "control_computer": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Not read only: it sends a line of input to a running session on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: the running program can reach external services.",
-        "destructive_justification": "Destructive: the input can trigger irreversible work inside that process."
+        "read_only_justification": "Not read only: it routes one explicitly selected native desktop operation, including semantic inspection of windows/accessibility/displays or actions such as window/app control, text/keyboard/pointer input, clipboard, path opening, notifications, or bounded recording, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Open world: the controlled local application can itself communicate with external services, so some contained action operations can have open-world effects.",
+        "destructive_justification": "Destructive: the façade is conservatively destructive because contained operations can change application state, enter or submit data, close windows, replace clipboard content, or create a recording; inspection operations remain read-only at dispatch."
       }
     },
-    "wait_for_process_output": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it waits for a pattern in a session output on the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local process output only.",
-        "destructive_justification": "Not destructive: read only; the session keeps running."
-      }
-    },
-    "force_terminate": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it stops a terminal session and its process group on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: acts on the local process tree only.",
-        "destructive_justification": "Destructive: kills the session; unsaved work in that process is lost."
-      }
-    },
-    "list_sessions": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it lists terminal sessions on the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local session state only.",
-        "destructive_justification": "Not destructive: read only."
-      }
-    },
-    "get_system_info": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads host facts from the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local system information only.",
-        "destructive_justification": "Not destructive: read only."
-      }
-    },
-    "list_processes": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads the process table of the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local process state only.",
-        "destructive_justification": "Not destructive: read only; secret-looking arguments are masked."
-      }
-    },
-    "kill_process": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it terminates an operating-system process on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: signals a local process only.",
-        "destructive_justification": "Destructive: ends the process; unsaved work in it is lost."
-      }
-    },
-    "get_runtime_info": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads the ReMCP runtime configuration on the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local runtime state only.",
-        "destructive_justification": "Not destructive: read only; this tool does not change configuration, while set_config_value handles only the runtime preferences it explicitly allows."
-      }
-    },
-    "get_runtime_stats": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads local counters from the ReMCP runtime on the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local counters only.",
-        "destructive_justification": "Not destructive: read only."
-      }
-    },
-    "set_config_value": {
+    "view_image": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Not read only: it changes one preference inside the device runtime on the paired computer (telemetry opt-out, read and buffer line limits, result size), which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: writes that runtime’s own runtime.json; no external service is contacted.",
-        "destructive_justification": "Not destructive: rewrites one key of the local runtime.json; access roots, blocked commands, the command guardrail, the shell and the write limit are refused."
+        "read_only_justification": "Not read only: it routes one pixel-producing operation: read a local image, capture the desktop, or capture a selected window/monitor/region, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Not open world: image reads and captures use local files or local screen facilities only.",
+        "destructive_justification": "Not destructive: returns image content; screenshot operations may create only their explicitly requested bounded local capture artifact and do not overwrite unrelated user data."
       }
     },
-    "computer_snapshot": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads the paired computer’s visible windows, display layout, accessibility tree, clipboard metadata and optionally a screenshot or browser-derived state and returns the result without writing anything.",
-        "open_world_justification": "Not open world: the visible desktop can contain browser or application content originating from external services even though ReMCP reads that state locally.",
-        "destructive_justification": "Not destructive: returns a snapshot of local state without changing the computer."
-      }
-    },
-    "computer_action": {
+    "control_browser": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Not read only: it performs one requested desktop action such as clicking a UI control, moving a window, typing, using the clipboard, launching an application, or opening a permitted path, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: the local application being controlled can itself communicate with external services, so an action may have open-world effects.",
-        "destructive_justification": "Destructive: can change application state, enter or submit data, close windows, launch programs, or replace clipboard content."
+        "read_only_justification": "Not read only: it routes one explicitly selected loopback Chrome DevTools Protocol operation for tabs, navigation, DOM/accessibility inspection, element actions, waits, or JavaScript evaluation, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Open world: the controlled browser page may access internet or intranet services, navigate, submit requests, or execute page JavaScript.",
+        "destructive_justification": "Destructive: the façade is conservatively destructive because contained actions can submit forms, upload files, navigate, or change remote website data; inspection operations remain read-only at dispatch."
       }
     },
-    "list_windows": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads visible top-level window titles, owning processes and geometry from the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local window-manager state only.",
-        "destructive_justification": "Not destructive: returns window metadata without changing any window."
-      }
-    },
-    "window_action": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it changes one selected local window by focusing, minimizing, maximizing, restoring, moving, resizing, or closing it, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: acts on the local desktop only.",
-        "destructive_justification": "Destructive: changes window state and closing a window can discard unsaved application work."
-      }
-    },
-    "launch_app": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it starts a requested executable or desktop application on the paired computer after ReMCP command policy is applied, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: the launched application may immediately contact an external service when its requested arguments or normal startup behavior require it.",
-        "destructive_justification": "Not destructive: launches a process but does not itself overwrite or remove user data; later application actions are separate effects."
-      }
-    },
-    "ui_snapshot": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads the active application’s native accessibility or UI Automation tree on the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local accessibility state only.",
-        "destructive_justification": "Not destructive: returns semantic UI roles, names and bounds without changing the application."
-      }
-    },
-    "ui_find": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it searches the local accessibility or UI Automation tree for controls matching a semantic selector and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local accessibility state only.",
-        "destructive_justification": "Not destructive: returns matching UI elements without activating or editing them."
-      }
-    },
-    "ui_action": {
+    "manage_system": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Not read only: it invokes, clicks, focuses, edits, selects, or toggles one native accessibility/UI Automation control, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: the controlled application may itself communicate with external services when that UI action is triggered.",
-        "destructive_justification": "Destructive: can change application state or data and can trigger an action exposed by the application."
+        "read_only_justification": "Not read only: it routes one explicitly selected operating-system or ReMCP runtime operation for system/process facts, preferences, services, logs, networking, installed apps, environment, audio, or power, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Open world: some contained operations can contact a requested network host or affect a service that communicates externally.",
+        "destructive_justification": "Destructive: the façade is conservatively destructive because it includes process termination, service changes, runtime preference changes, audio changes, and power actions; read-only diagnostics remain narrower at dispatch."
       }
     },
-    "type_text": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it enters the requested Unicode text into the currently focused local control, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: the focused application can send the entered text to an external service if that control is connected to one.",
-        "destructive_justification": "Destructive: changes the contents of the focused input and may trigger application behavior when combined with existing UI state."
-      }
-    },
-    "keyboard": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it sends the requested key or keyboard shortcut to the active application on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: the application receiving the keystroke may use it to trigger external actions.",
-        "destructive_justification": "Destructive: a keyboard shortcut can change, submit, close, save, or otherwise alter application state."
-      }
-    },
-    "pointer": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it moves or clicks the local pointer at requested screen coordinates, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: the local application under the pointer may itself interact with an external service.",
-        "destructive_justification": "Destructive: clicks can activate controls and change application state."
-      }
-    },
-    "drag_drop": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it drags the local pointer from one screen coordinate to another, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: the receiving application may process the drop locally or send resulting data to an external service.",
-        "destructive_justification": "Destructive: a drag can move, reorder, upload, or otherwise change data in the target application."
-      }
-    },
-    "scroll": {
+    "manage_documents": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Not read only: it sends local horizontal or vertical scroll input to the active application, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: the active application may show externally hosted content and scrolling can request additional remote content such as a lazily loaded page.",
-        "destructive_justification": "Not destructive: changes only the current viewport and is readily reversible by scrolling back."
+        "read_only_justification": "Not read only: it routes one explicitly selected structured document operation for reading supported documents or editing XLSX, DOCX, and PDF files, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Not open world: operates only on permitted local document paths and does not fetch URLs.",
+        "destructive_justification": "Destructive: the façade is conservatively destructive because editing operations can replace local document content or output files; read_document remains read-only at dispatch."
       }
     },
-    "wait_for_ui": {
+    "save_file_preview": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Not read only: it writes the exact user-edited text from the ReMCP file preview back to the same permitted local path through the underlying write_file schema, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Not open world: writes only a local file on the explicitly paired computer and does not contact external services.",
+        "destructive_justification": "Destructive: replaces or appends local file content exactly as requested by the user in the file editor."
+      }
+    },
+    "refresh_terminal_preview": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Read only: it polls the local accessibility/UI Automation tree until a matching element appears or disappears and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local UI state only.",
-        "destructive_justification": "Not destructive: waits for and returns UI state without changing the application."
-      }
-    },
-    "clipboard": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it reads, replaces, or clears the paired computer’s text clipboard, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: uses the local operating-system clipboard only.",
-        "destructive_justification": "Destructive: write and clear operations replace clipboard content that may otherwise be lost."
-      }
-    },
-    "display_inventory": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads connected display names, geometry and primary-display state from the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local display configuration only.",
-        "destructive_justification": "Not destructive: returns display facts without changing monitor configuration."
-      }
-    },
-    "screenshot_region": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it captures the requested rectangular region of the paired computer’s screen and returns the result without writing anything.",
-        "open_world_justification": "Not open world: uses a local screenshot facility only.",
-        "destructive_justification": "Not destructive: returns image pixels and deletes its temporary capture file after reading it."
-      }
-    },
-    "open_path": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it opens a permitted local file or directory with its associated desktop application, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: the associated local application can itself contact external services.",
-        "destructive_justification": "Not destructive: launches or activates an application and can cause that application to load the requested local content."
-      }
-    },
-    "reveal_path": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it opens the local file manager and reveals a permitted filesystem path, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: acts on the local desktop only.",
-        "destructive_justification": "Not destructive: changes only local UI state by opening or focusing the file manager."
-      }
-    },
-    "notification": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it posts a local desktop notification or visible popup on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: uses local notification facilities only.",
-        "destructive_justification": "Not destructive: adds a transient local notification without changing files or account data."
-      }
-    },
-    "browser_tabs": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads debuggable browser page targets exposed by a loopback-only Chrome DevTools Protocol endpoint on the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: tab titles and URLs can describe external internet or intranet pages even though the CDP transport itself is restricted to localhost.",
-        "destructive_justification": "Not destructive: returns tab metadata without navigating or changing a page."
-      }
-    },
-    "browser_navigate": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it navigates a selected local browser tab to the requested URL through loopback Chrome DevTools Protocol, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: the browser can contact the requested internet or intranet URL.",
-        "destructive_justification": "Not destructive: changes the current page and may cause normal website side effects associated with navigation."
-      }
-    },
-    "browser_snapshot": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads the accessibility tree of the currently loaded browser page through loopback Chrome DevTools Protocol and returns the result without writing anything.",
-        "open_world_justification": "Not open world: the page may be content from an external website even though CDP itself is reached only on localhost.",
-        "destructive_justification": "Not destructive: reads page state without modifying DOM or navigation."
-      }
-    },
-    "browser_find": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads visible DOM elements in the selected browser page and returns selectors, text, values and bounds and returns the result without writing anything.",
-        "open_world_justification": "Not open world: the inspected page may belong to an external website while the runtime connects to CDP only on localhost.",
-        "destructive_justification": "Not destructive: queries page state without clicking, typing, or changing the document."
-      }
-    },
-    "browser_action": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it clicks, focuses, types, selects, scrolls, uploads a permitted local file, or presses a key in a selected browser page, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: the browser page can send requests or data to the external site being controlled.",
-        "destructive_justification": "Destructive: can submit forms, upload files, change remote data, or otherwise trigger website side effects."
-      }
-    },
-    "browser_wait": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it polls a browser page for a selector, text, URL substring, or JavaScript condition through loopback CDP and returns the result without writing anything.",
-        "open_world_justification": "Not open world: the observed page may be an external website.",
-        "destructive_justification": "Not destructive: only observes page state while waiting and does not itself alter the page."
-      }
-    },
-    "browser_evaluate": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it evaluates user-requested JavaScript in a selected browser page through loopback CDP, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Open world: page JavaScript can call external services available to that browser context.",
-        "destructive_justification": "Destructive: arbitrary page JavaScript can change DOM state, submit requests, or modify data exposed by the site."
-      }
-    },
-    "service": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it lists, inspects, starts, stops, or restarts an operating-system service on the paired computer, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: the service itself may communicate externally, but ReMCP service control targets the local service manager.",
-        "destructive_justification": "Destructive: start, stop and restart change service state and can interrupt local workloads."
-      }
-    },
-    "event_log": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads recent Windows Event Log, macOS unified log, or systemd journal records on the paired computer and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local operating-system logs only.",
-        "destructive_justification": "Not destructive: returns log records without clearing or changing them."
-      }
-    },
-    "network": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": true,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads local interfaces, DNS, routes or listeners, or opens a bounded TCP connectivity test to the requested host and port and returns the result without writing anything.",
-        "open_world_justification": "Open world: the connectivity-test action can contact a user-specified external or intranet host.",
-        "destructive_justification": "Not destructive: does not alter network configuration; the test only opens and closes a TCP connection."
-      }
-    },
-    "installed_apps": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads the paired computer’s installed application or package inventory and versions and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local package/application metadata only.",
-        "destructive_justification": "Not destructive: returns inventory data without installing, updating, or removing software."
-      }
-    },
-    "environment": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads runtime platform, paths, shell and optionally environment variables with secret-looking values masked and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local process and operating-system environment state only.",
-        "destructive_justification": "Not destructive: returns sanitized environment information without changing it."
-      }
-    },
-    "audio": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it reads or changes the paired computer’s default output volume and mute state, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: uses local operating-system audio controls only.",
-        "destructive_justification": "Not destructive: volume and mute changes are immediately reversible and do not remove user data."
-      }
-    },
-    "power_action": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it locks, sleeps, restarts, or shuts down the paired computer using native operating-system power facilities after command-policy evaluation, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: acts on the local computer only.",
-        "destructive_justification": "Destructive: sleep, restart and shutdown interrupt running applications and can lose unsaved work."
-      }
-    },
-    "record_screen": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it records a short bounded video of the paired computer’s screen to a permitted local file, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: uses local screen-capture facilities only.",
-        "destructive_justification": "Destructive: creates or replaces the requested local recording file while leaving other desktop state unchanged."
-      }
-    },
-    "read_document": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Read only: it reads a permitted local PDF, DOCX, XLSX, text, Markdown, CSV, JSON, or XML document and returns the result without writing anything.",
-        "open_world_justification": "Not open world: reads local document files only and does not fetch URLs.",
-        "destructive_justification": "Not destructive: extracts and returns document content without modifying the source file."
-      }
-    },
-    "edit_spreadsheet": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it rewrites requested cells or formulas in a permitted local XLSX workbook using its OOXML package, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: edits a local workbook only.",
-        "destructive_justification": "Destructive: changes spreadsheet cell content and replaces the input file when a separate output path is not supplied."
-      }
-    },
-    "edit_document": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it replaces paragraph text or appends paragraphs in a permitted local DOCX document using its OOXML package, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: edits a local document only.",
-        "destructive_justification": "Destructive: changes document text and replaces the input file when a separate output path is not supplied."
-      }
-    },
-    "pdf_action": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it reads PDF metadata or annotations, or creates PDF outputs by merging, splitting, or extracting pages from permitted local PDF files, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: operates on local PDF files only.",
-        "destructive_justification": "Destructive: write actions create or replace output PDF files; read-only info and annotation actions leave the source unchanged."
+        "read_only_justification": "Read only: it reads more buffered output from the same existing ReMCP terminal session through the underlying read_process_output schema and returns the result without writing anything.",
+        "open_world_justification": "Not open world: reads local buffered process output only.",
+        "destructive_justification": "Not destructive: returns additional output without starting, stopping, or interacting with the process."
       }
     }
   },
@@ -1138,8 +202,8 @@
       "description": "Fixture: use the dedicated reviewer OAuth account and fixed device id review-sandbox. Its seeded workspace contains README.txt. Browse the sandbox workspace without changing it.",
       "user_prompt": "Using ReMCP device id review-sandbox, list the files in /workspace.",
       "file_attachment_urls": null,
-      "tools_triggered": "list_directory",
-      "expected_output": "Returns the sandbox directory entries, including the seeded README fixture, without modifying the workspace.",
+      "tools_triggered": "manage_files",
+      "expected_output": "Calls manage_files with operation=list_directory and returns the sandbox directory entries, including the seeded README fixture, without modifying the workspace.",
       "expected_output_url": null
     },
     {
@@ -1154,16 +218,16 @@
       "description": "Fixture: use the dedicated reviewer OAuth account and fixed device id review-sandbox. Its screenshot action returns a labelled synthetic PNG as native MCP image content.",
       "user_prompt": "Using ReMCP device id review-sandbox, take a screenshot and show it.",
       "file_attachment_urls": null,
-      "tools_triggered": "take_screenshot",
-      "expected_output": "Returns the labelled synthetic Review Sandbox PNG as native MCP image content for model vision and, while custom widgets are enabled, a short-lived preview reference that can be rendered without taking a second screenshot; no real screen capture is involved.",
+      "tools_triggered": "view_image",
+      "expected_output": "Calls view_image with operation=take_screenshot and returns the labelled synthetic Review Sandbox PNG as native MCP image content for model vision plus a short-lived preview reference when custom widgets are enabled; no real screen capture is involved.",
       "expected_output_url": null
     },
     {
       "description": "Fixture: use the dedicated reviewer OAuth account and fixed device id review-sandbox with its writable sandbox workspace. Exercise the exact-content write case.",
       "user_prompt": "Using ReMCP device id review-sandbox, create /workspace/review-note.txt containing exactly: ReMCP submission test.",
       "file_attachment_urls": null,
-      "tools_triggered": "write_file",
-      "expected_output": "Creates or replaces only the requested sandbox review note with the exact text and returns the write result. No real computer is modified.",
+      "tools_triggered": "manage_files",
+      "expected_output": "Calls manage_files with operation=write_file, creates or replaces only the requested sandbox review note with the exact text, and returns the write result. No real computer is modified.",
       "expected_output_url": null
     }
   ],

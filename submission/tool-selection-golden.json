@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "purpose": "Golden prompt set for ReMCP tool-selection regression testing in ChatGPT Developer mode. Record actual selected tools and compare with expected sequences before releases.",
   "categories": [
     "direct",
@@ -14,12 +14,23 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "ui_snapshot"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "ui_snapshot"
+          }
         ],
         "must_not_call": [
-          "take_screenshot",
-          "pointer"
+          {
+            "tool": "view_image",
+            "operation": "take_screenshot"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "pointer"
+          }
         ]
       },
       "rationale": "Native semantic inspection should precede pixels or coordinates."
@@ -31,16 +42,39 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "browser_tabs",
-          "browser_find",
-          "browser_action",
-          "browser_wait"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_tabs"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_find"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_action"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_wait"
+          }
         ],
         "must_not_call": [
-          "pointer",
-          "ui_action",
-          "browser_evaluate"
+          {
+            "tool": "control_computer",
+            "operation": "pointer"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "ui_action"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_evaluate"
+          }
         ]
       },
       "rationale": "Known web-page task should stay in CDP/DOM and use semantic wait."
@@ -52,12 +86,23 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "type_text"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "type_text"
+          }
         ],
         "must_not_call": [
-          "keyboard",
-          "clipboard"
+          {
+            "tool": "control_computer",
+            "operation": "keyboard"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "clipboard"
+          }
         ]
       },
       "rationale": "Normal Unicode prose belongs to type_text, not key-by-key shortcuts."
@@ -69,11 +114,19 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "keyboard"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "keyboard"
+          }
         ],
         "must_not_call": [
-          "type_text"
+          {
+            "tool": "control_computer",
+            "operation": "type_text"
+          }
         ]
       },
       "rationale": "Shortcuts and control keys belong to keyboard."
@@ -85,12 +138,23 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "pointer"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "pointer"
+          }
         ],
         "must_not_call": [
-          "ui_action",
-          "browser_action"
+          {
+            "tool": "control_computer",
+            "operation": "ui_action"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_action"
+          }
         ]
       },
       "rationale": "The user explicitly requested a coordinate action."
@@ -102,12 +166,23 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "ui_find",
-          "drag_drop"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "ui_find"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "drag_drop"
+          }
         ],
         "must_not_call": [
-          "pointer"
+          {
+            "tool": "control_computer",
+            "operation": "pointer"
+          }
         ]
       },
       "rationale": "Semantic drag endpoints are more stable than coordinate mouse choreography."
@@ -119,12 +194,23 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "list_windows",
-          "window_action"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "list_windows"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "window_action"
+          }
         ],
         "must_not_call": [
-          "pointer"
+          {
+            "tool": "control_computer",
+            "operation": "pointer"
+          }
         ]
       },
       "rationale": "Window operations should use window ids rather than desktop coordinates."
@@ -136,18 +222,29 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "browser_navigate"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_navigate"
+          }
+        ],
+        "must_not_call": [
+          {
+            "tool": "control_computer",
+            "operation": "keyboard"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "pointer"
+          }
         ],
         "arguments": {
-          "browser_navigate": {
+          "control_browser/browser_navigate": {
             "action": "new_tab"
           }
-        },
-        "must_not_call": [
-          "keyboard",
-          "pointer"
-        ]
+        }
       },
       "rationale": "new_tab bootstraps CDP even when no page target exists."
     },
@@ -158,12 +255,21 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "read_file"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "read_file"
+          }
         ],
         "must_not_call": [
-          "open_path",
-          "render_file_preview"
+          {
+            "tool": "control_computer",
+            "operation": "open_path"
+          },
+          {
+            "tool": "render_file_preview"
+          }
         ]
       },
       "rationale": "The default production path ends with the model-readable file result; custom UI is not required."
@@ -175,12 +281,22 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "take_screenshot"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "view_image",
+            "operation": "take_screenshot"
+          }
         ],
         "must_not_call": [
-          "read_binary",
-          "render_image_preview"
+          {
+            "tool": "manage_files",
+            "operation": "read_binary"
+          },
+          {
+            "tool": "render_image_preview"
+          }
         ]
       },
       "rationale": "The screenshot tool already returns native MCP image content for the host and model."
@@ -192,11 +308,18 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "start_process"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "run_terminal",
+            "operation": "start_process"
+          }
         ],
         "must_not_call": [
-          "render_terminal_preview"
+          {
+            "tool": "render_terminal_preview"
+          }
         ]
       },
       "rationale": "The command runs once and its normal MCP result is the default terminal presentation path."
@@ -208,11 +331,19 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "computer_snapshot"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "computer_snapshot"
+          }
         ],
         "must_not_call": [
-          "take_screenshot"
+          {
+            "tool": "view_image",
+            "operation": "take_screenshot"
+          }
         ]
       },
       "rationale": "An unfamiliar mixed desktop state is the intended computer_snapshot use case."
@@ -224,15 +355,35 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "launch_app",
-          "ui_find",
-          "ui_action",
-          "wait_for_ui"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "launch_app"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "ui_find"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "ui_action"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "wait_for_ui"
+          }
         ],
         "must_not_call": [
-          "pointer",
-          "take_screenshot"
+          {
+            "tool": "control_computer",
+            "operation": "pointer"
+          },
+          {
+            "tool": "view_image",
+            "operation": "take_screenshot"
+          }
         ]
       },
       "rationale": "Native app semantics should drive the task end to end."
@@ -244,16 +395,39 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "browser_tabs",
-          "browser_find",
-          "browser_action",
-          "browser_wait"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_tabs"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_find"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_action"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_wait"
+          }
         ],
         "must_not_call": [
-          "type_text",
-          "pointer",
-          "browser_evaluate"
+          {
+            "tool": "control_computer",
+            "operation": "type_text"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "pointer"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_evaluate"
+          }
         ]
       },
       "rationale": "Page content should stay in DOM/CDP when available."
@@ -265,14 +439,31 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "ui_find",
-          "ui_action",
-          "wait_for_ui"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "ui_find"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "ui_action"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "wait_for_ui"
+          }
         ],
         "must_not_call": [
-          "pointer",
-          "take_screenshot"
+          {
+            "tool": "control_computer",
+            "operation": "pointer"
+          },
+          {
+            "tool": "view_image",
+            "operation": "take_screenshot"
+          }
         ]
       },
       "rationale": "Semantic wait is preferred to sleeps or screenshot polling."
@@ -284,11 +475,19 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "screenshot_region"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "view_image",
+            "operation": "screenshot_region"
+          }
         ],
         "must_not_call": [
-          "record_screen"
+          {
+            "tool": "control_computer",
+            "operation": "record_screen"
+          }
         ]
       },
       "rationale": "Static pixel/layout proof belongs to a targeted screenshot."
@@ -300,11 +499,19 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "record_screen"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "record_screen"
+          }
         ],
         "must_not_call": [
-          "screenshot_region"
+          {
+            "tool": "view_image",
+            "operation": "screenshot_region"
+          }
         ]
       },
       "rationale": "Motion/timing debugging requires recording, not a static image."
@@ -316,12 +523,23 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "read_document"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "manage_documents",
+            "operation": "read_document"
+          }
         ],
         "must_not_call": [
-          "launch_app",
-          "open_path"
+          {
+            "tool": "control_computer",
+            "operation": "launch_app"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "open_path"
+          }
         ]
       },
       "rationale": "Structured document content should not drive a GUI app."
@@ -333,13 +551,27 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "edit_spreadsheet",
-          "read_document"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "manage_documents",
+            "operation": "edit_spreadsheet"
+          },
+          {
+            "tool": "manage_documents",
+            "operation": "read_document"
+          }
         ],
         "must_not_call": [
-          "launch_app",
-          "ui_action"
+          {
+            "tool": "control_computer",
+            "operation": "launch_app"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "ui_action"
+          }
         ]
       },
       "rationale": "Direct XLSX editing is deterministic and should be read back."
@@ -351,12 +583,23 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "pdf_action"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "manage_documents",
+            "operation": "pdf_action"
+          }
         ],
         "must_not_call": [
-          "launch_app",
-          "start_process"
+          {
+            "tool": "control_computer",
+            "operation": "launch_app"
+          },
+          {
+            "tool": "run_terminal",
+            "operation": "start_process"
+          }
         ]
       },
       "rationale": "PDF structure operation should use pdf_action."
@@ -368,11 +611,19 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "service"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "manage_system",
+            "operation": "service"
+          }
         ],
         "must_not_call": [
-          "start_process"
+          {
+            "tool": "run_terminal",
+            "operation": "start_process"
+          }
         ]
       },
       "rationale": "Service-manager operations should use the service tool."
@@ -384,11 +635,19 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "network"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "manage_system",
+            "operation": "network"
+          }
         ],
         "must_not_call": [
-          "start_process"
+          {
+            "tool": "run_terminal",
+            "operation": "start_process"
+          }
         ]
       },
       "rationale": "Bounded connectivity test is structured and safer than shell networking commands."
@@ -400,12 +659,23 @@
       "expected": {
         "action": "call",
         "sequence": [
-          "list_devices",
-          "browser_tabs",
-          "browser_evaluate"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_tabs"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_evaluate"
+          }
         ],
         "must_not_call": [
-          "pointer"
+          {
+            "tool": "control_computer",
+            "operation": "pointer"
+          }
         ]
       },
       "rationale": "browser_evaluate is justified only because supported DOM tools cannot expose the JS-only value."
@@ -419,8 +689,13 @@
         "alternative": "weather",
         "sequence": [],
         "must_not_call": [
-          "list_devices",
-          "computer_snapshot"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "computer_snapshot"
+          }
         ]
       },
       "rationale": "Use the platform weather capability; ReMCP is unrelated."
@@ -434,8 +709,13 @@
         "alternative": "web_search",
         "sequence": [],
         "must_not_call": [
-          "list_devices",
-          "browser_navigate"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_browser",
+            "operation": "browser_navigate"
+          }
         ]
       },
       "rationale": "General web research should use web search, not a user's paired computer."
@@ -448,8 +728,12 @@
         "action": "none",
         "sequence": [],
         "must_not_call": [
-          "list_devices",
-          "read_file"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "read_file"
+          }
         ]
       },
       "rationale": "The conversation already contains the data."
@@ -463,8 +747,13 @@
         "alternative": "image_generation",
         "sequence": [],
         "must_not_call": [
-          "list_devices",
-          "open_path"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "open_path"
+          }
         ]
       },
       "rationale": "Image generation is a platform capability, not remote computer control."
@@ -478,8 +767,13 @@
         "alternative": "automation",
         "sequence": [],
         "must_not_call": [
-          "list_devices",
-          "notification"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "control_computer",
+            "operation": "notification"
+          }
         ]
       },
       "rationale": "A future reminder is not a native notification on a paired device."
@@ -493,8 +787,13 @@
         "alternative": "calculator",
         "sequence": [],
         "must_not_call": [
-          "list_devices",
-          "start_process"
+          {
+            "tool": "list_devices"
+          },
+          {
+            "tool": "run_terminal",
+            "operation": "start_process"
+          }
         ]
       },
       "rationale": "Simple arithmetic should not invoke a remote machine."

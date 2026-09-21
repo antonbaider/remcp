@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.85 — 2026-09-21
+
+- Runtime capability remains 83 granular tools; no device-side operation is removed or renamed in this patch.
+- The hosted server now groups those operations into a compact typed discovery façade while dispatch still validates and executes the original per-operation runtime schemas.
+- Lockstep patch release with the ReMCP client/server at `0.2.85`.
+
 ## 0.2.84 — 2026-09-21
 
 - `edit_document` can create a new DOCX with `create=true`, refusing to overwrite an existing destination.

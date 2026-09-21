@@ -11,27 +11,56 @@ const golden = JSON.parse(readFileSync(goldenPath, 'utf8'));
 const results = JSON.parse(readFileSync(resultsPath, 'utf8'));
 const actualById = new Map((results.cases || []).map(row => [row.id, row]));
 
+function normalizeCall(value) {
+  if (typeof value === 'string') {
+    const [tool, ...operationParts] = value.split('/');
+    return { tool:String(tool || ''), ...(operationParts.length ? { operation:operationParts.join('/') } : {}) };
+  }
+  if (!value || typeof value !== 'object') return { tool:'' };
+  return {
+    tool:String(value.tool || value.name || ''),
+    ...(value.operation ? { operation:String(value.operation) } : {}),
+  };
+}
+
+function sameCall(expected, actual) {
+  if (!expected?.tool || expected.tool !== actual?.tool) return false;
+  return expected.operation ? expected.operation === actual?.operation : true;
+}
+
 function isSubsequence(expected, actual) {
   let index = 0;
-  for (const name of actual) if (name === expected[index]) index += 1;
+  for (const call of actual) {
+    if (index < expected.length && sameCall(expected[index], call)) index += 1;
+  }
   return index === expected.length;
 }
+
+function selectedCalls(actual) {
+  if (Array.isArray(actual?.selectedCalls)) return actual.selectedCalls.map(normalizeCall);
+  // Backward compatibility for old result files. Compact tool-only rows still score where the
+  // golden expectation does not require an operation; operation-sensitive v2 cases intentionally
+  // require selectedCalls so a correct domain with the wrong concrete operation cannot pass.
+  if (Array.isArray(actual?.selectedTools)) return actual.selectedTools.map(normalizeCall);
+  return [];
+}
+
 const rows = [];
 for (const testCase of golden.cases || []) {
   const actual = actualById.get(testCase.id);
-  const selectedTools = Array.isArray(actual?.selectedTools) ? actual.selectedTools.map(String) : [];
-  const expectedTools = testCase.expected?.sequence || [];
-  const forbidden = testCase.expected?.must_not_call || [];
+  const calls = selectedCalls(actual);
+  const expectedCalls = (testCase.expected?.sequence || []).map(normalizeCall);
+  const forbidden = (testCase.expected?.must_not_call || []).map(normalizeCall);
   const isNegative = testCase.kind === 'negative';
-  const sequenceOk = isNegative ? selectedTools.length === 0 : isSubsequence(expectedTools, selectedTools);
-  const forbiddenOk = forbidden.every(name => !selectedTools.includes(name));
+  const sequenceOk = isNegative ? calls.length === 0 : isSubsequence(expectedCalls, calls);
+  const forbiddenOk = forbidden.every(blocked => !calls.some(call => sameCall(blocked, call)));
   const componentOk = !testCase.expected?.component || actual?.component === testCase.expected.component;
   const passed = Boolean(actual) && sequenceOk && forbiddenOk && componentOk;
   rows.push({
     id:testCase.id,
     kind:testCase.kind,
     passed,
-    selectedTools,
+    selectedCalls:calls,
     sequenceOk,
     forbiddenOk,
     componentOk,

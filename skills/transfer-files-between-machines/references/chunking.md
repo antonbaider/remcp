@@ -18,13 +18,13 @@ and `mode` (`rewrite` or `append`); it cannot write at an arbitrary offset.
 2. Read the first chunk (replace the example ids and paths):
 
 ```json
-{"tool":"read_binary","arguments":{"device":"source-device","path":"/source/file.bin","offset_bytes":0,"length_bytes":65536}}
+{"tool":"manage_files","arguments":{"device":"source-device","operation":"read_binary","parameters":{"path":"/source/file.bin","offset_bytes":0,"length_bytes":65536}}}
 ```
 
 3. Parse the JSON text result and write its exact base64 `data` to the destination:
 
 ```json
-{"tool":"write_binary","arguments":{"device":"destination-device","path":"/destination/file.bin","data":"AAEC","mode":"rewrite"}}
+{"tool":"manage_files","arguments":{"device":"destination-device","operation":"write_binary","parameters":{"path":"/destination/file.bin","data":"AAEC","mode":"rewrite"}}}
 ```
 
 `AAEC` is illustrative only; replace it with the returned data. For an empty file, write

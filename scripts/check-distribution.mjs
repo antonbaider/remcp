@@ -6,6 +6,7 @@ const pkg = readJson('package.json');
 const agentPlugin = readJson('plugin.json');
 const agentMcp = readJson('mcp.json');
 const claudePlugin = readJson('.claude-plugin/plugin.json');
+const cursorPlugin = readJson('.cursor-plugin/plugin.json');
 const claudeMcp = readJson('.mcp.json');
 const gemini = readJson('gemini-extension.json');
 const registry = readJson('server.json');
@@ -25,6 +26,17 @@ check(agentPlugin.$schema === 'https://agent-plugins.org/schemas/1.0.0/plugin.sc
 check(agentPlugin.name === 'remcp', 'plugin.json name must stay remcp');
 check(agentPlugin.version === version, 'plugin.json version must match package.json');
 check(agentMcp?.mcpServers?.remcp?.url === endpoint, 'mcp.json must point at the production MCP endpoint');
+
+check(cursorPlugin.name === 'remcp', 'Cursor plugin name must stay remcp');
+check(cursorPlugin.displayName === 'ReMCP', 'Cursor plugin displayName must stay ReMCP');
+check(cursorPlugin.version === version, 'Cursor plugin version must match package.json');
+check(cursorPlugin.publisher === 'ReMCP', 'Cursor plugin publisher must stay ReMCP');
+check(cursorPlugin.homepage === 'https://remcp.site', 'Cursor plugin homepage must point at remcp.site');
+check(cursorPlugin.repository === 'https://github.com/getremcp/remcp', 'Cursor plugin repository must point at the canonical public repo');
+check(cursorPlugin.logo === 'assets/remcp-marketplace-400.png', 'Cursor plugin must use the committed marketplace logo');
+check(cursorPlugin.skills === './skills/', 'Cursor plugin must expose the bundled skills');
+check(cursorPlugin.mcpServers === './mcp.json', 'Cursor plugin must expose the production MCP config');
+check(cursorPlugin.category === 'developer-tools', 'Cursor plugin category must stay developer-tools');
 
 check(claudePlugin.version === version, 'Claude plugin version must match package.json');
 check(claudeMcp?.mcpServers?.remcp?.url === endpoint, 'Claude MCP config must point at the production MCP endpoint');
@@ -66,4 +78,4 @@ if (problems.length) {
   process.exit(1);
 }
 
-console.log(`distribution contracts OK: Agent Plugins, Codex marketplace, Claude Code, Gemini CLI, MCP Registry, Copilot/VS Code (v${version})`);
+console.log(`distribution contracts OK: Agent Plugins, Cursor, Codex marketplace, Claude Code, Gemini CLI, MCP Registry, Copilot/VS Code (v${version})`);

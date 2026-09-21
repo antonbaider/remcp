@@ -167,7 +167,7 @@ either host-specific contract drifts from the shared ReMCP version or production
 with, [DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) or any other MCP
 server.
 
-**83 device tools.** The hosted production catalog adds 7 account/fleet tools and 3 chat-presentation tools for **93 tools total** whenever custom widgets are enabled; native-only deployments expose 90 tools. See the generated **[full tool reference](docs/TOOLS.md)**.
+**83 granular device operations, 15 hosted definitions.** Production advertises 8 device-facing façade tools, 2 account/fleet tools, and 5 app-only UI helpers; only 10 definitions are model-visible, and native-only deployments expose that same 10-tool model-facing surface. See the generated **[full tool reference](docs/TOOLS.md)** for every façade and its operation list.
 
 **Device runtime surface:**
 
@@ -187,7 +187,7 @@ server.
 | Diagnostics | `service`, `event_log`, `network`, `installed_apps`, `environment`, `audio`, `power_action`, `record_screen` |
 | Documents | `read_document`, `edit_spreadsheet`, `edit_document`, `pdf_action` |
 
-The hosted ReMCP endpoint has ten hosted account/presentation tools in its normal production catalog, for **93 tools**. Setting `REMCP_CUSTOM_WIDGETS_ENABLED=false` omits the three app-only preview recovery helpers and returns the 90-tool native-only surface. With widgets enabled, file/image/terminal source tools own their UI resource directly and hydrate it from the same tool result; `structuredContent.preview` remains a short-lived retry reference for the app only, so no second model-selected render call or device RPC is required. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
+The hosted ReMCP endpoint advertises **15 tools** in normal production, of which **10 are model-visible**; with `REMCP_CUSTOM_WIDGETS_ENABLED=false` it exposes those same **10** model-facing tools without the five app-only helpers. The compact surface routes to all 83 granular runtime operations; legacy granular names remain callable for cached clients without inflating discovery for new models. With widgets enabled, `read_file`, `view_image`, and `run_terminal` own their UI resources directly and hydrate from the same tool result; `structuredContent.preview` remains a short-lived retry reference for the app only, so no second model-selected render call or device RPC is required. Each online device returned by `list_devices` reports its live supported subset, and unavailable operations fail closed.
 
 ### Tool selection for AI agents
 

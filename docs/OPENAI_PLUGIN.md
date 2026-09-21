@@ -32,11 +32,11 @@ rename, or regenerate the files described here.
 | Manifest | `plugin.json` |
 | MCP configuration | `mcp.json` |
 | Shared skills | 5 |
-| Hosted tool surface | 93 tools with custom widgets enabled; 90 in native-only mode |
+| Hosted tool surface | 15 advertised definitions with custom widgets enabled, of which 10 are model-visible; native-only mode exposes those same 10 model-facing definitions; 83 granular runtime operations remain available through grouped façade tools |
 | Rich UI | Production file editor/diff with syntax highlighting and save, fullscreen image viewer, and terminal output viewer. When custom widgets are enabled, file/image/terminal source tools carry their MCP Apps resource directly; three app-only recovery helpers can consume short-lived preview references without rerunning source actions |
 | Authentication | OAuth authorization code + PKCE, OIDC/UserInfo metadata |
 | Public overview | [`docs/PLUGINS.md`](PLUGINS.md) |
-| Full tool reference | [`docs/TOOLS.md`](TOOLS.md) — 93-tool production surface with custom widgets enabled; 90-tool native-only surface when disabled |
+| Full tool reference | [`docs/TOOLS.md`](TOOLS.md) — 15-tool production surface, 10-tool model/native-only surface, and the operation lists that cover all 83 runtime capabilities |
 
 ## Package layout
 
@@ -76,7 +76,7 @@ rename, or regenerate the files described here.
 12. Select only regions where the hosted service, support, privacy policy, and terms are ready.
 13. Review the final policy attestations manually and submit for review.
 
-ReMCP has three production self-contained MCP Apps: file preview/editor, image viewer, and terminal output viewer. They use no external assets or network fetches and follow the decoupled data-tool then render-tool pattern. When custom widgets are enabled, the server advertises them on every stateless request; file/image/terminal source tools may then return a short-lived `structuredContent.preview`, and only the three `render_*` tools own `ui://` resources. Native MCP `image` content remains authoritative for model vision. File preview renders the actual file text with syntax highlighting, source/edit/diff tabs and save through `write_file`; image preview renders the exact already-returned raster bytes; terminal preview renders already-returned process output and refreshes only that same process. Operators can explicitly disable custom UI with `REMCP_CUSTOM_WIDGETS_ENABLED=false`.
+ReMCP has three production self-contained MCP Apps: file preview/editor, image viewer, and terminal output viewer. They use no external assets or network fetches and follow the decoupled data-tool then render-tool pattern. When custom widgets are enabled, the server advertises them on every stateless request; file/image/terminal source tools may then return a short-lived `structuredContent.preview`, and only the three `render_*` tools own `ui://` resources. Native MCP `image` content remains authoritative for model vision. File preview renders the actual file text with syntax highlighting, source/edit/diff tabs and save through `manage_files(operation=write_file)`; image preview renders the exact already-returned raster bytes; terminal preview renders already-returned process output and refreshes only that same process. Operators can explicitly disable custom UI with `REMCP_CUSTOM_WIDGETS_ENABLED=false`.
 
 ## Review-sensitive behavior
 
