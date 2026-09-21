@@ -63,6 +63,17 @@ test('docx text is extracted, including entities and breaks', () => {
   assert.doesNotMatch(text, /<w:/);
 });
 
+test('docx markup scanning handles quoted greater-than signs and comments without leaking tags', () => {
+  const tricky = '<?xml version="1.0"?><w:document xmlns:w="x"><w:body>\n'
+    + '<w:p><w:r data-note="1 > 0"><w:t>Visible &lt;script&gt; text</w:t></w:r></w:p>\n'
+    + '<!-- <w:t>hidden</w:t> --><w:p><w:r><w:t>Done</w:t></w:r></w:p>\n'
+    + '</w:body></w:document>';
+  const text = readDocxText(zip('word/document.xml', tricky));
+  assert.match(text, /Visible <script> text/);
+  assert.match(text, /Done/);
+  assert.doesNotMatch(text, /hidden|data-note|<w:/);
+});
+
 test('a zip without a document part is refused with a clear message', () => {
   assert.throws(() => readDocxText(zip('word/other.xml', '<x/>')), /not a readable \.docx/);
 });
@@ -78,6 +89,13 @@ trailer << /Root 1 0 R >>
   const text = readPdfText(pdf);
   assert.match(text, /Hello from ReMCP PDF/);
   assert.match(text, /Second line/);
+});
+
+test('pdf text parsing handles long escaped and unterminated literal strings without backtracking', () => {
+  const hostile = 'BT (' + '\\Z'.repeat(50_000) + ' Tj ET';
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj << /Length ' + hostile.length + ' >> stream\n'
+    + hostile + '\nendstream endobj\ntrailer <<>>\n%%EOF', 'latin1');
+  assert.throws(() => readPdfText(pdf), /no extractable text/);
 });
 
 test('a pdf with no extractable text says so instead of returning noise', () => {

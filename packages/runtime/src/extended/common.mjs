@@ -2,8 +2,8 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { execFile, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { constants, existsSync } from 'node:fs';
+import { mkdtemp, open, rm } from 'node:fs/promises';
 import { StringDecoder } from 'node:string_decoder';
 import { promisify } from 'node:util';
 import { ToolError, fail, structured, text } from '../util.mjs';
@@ -257,6 +257,18 @@ export async function spawnDetachedWithInput(file, args = [], input = '', option
       });
     });
   });
+}
+
+export async function readPrivateTempFile(file, maxBytes) {
+  const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new ToolError('Temporary capture is not a regular file');
+    if (info.size > maxBytes) throw new ToolError(`Captured file is ${info.size} bytes, above the ${maxBytes}-byte inline limit`);
+    return { info, data: await handle.readFile() };
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function tempDir(prefix = 'remcp-') {

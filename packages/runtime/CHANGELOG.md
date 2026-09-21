@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.94 — 2026-09-22
+
+- Replaced DOCX/PDF regex-heavy extraction with bounded scanners and added adversarial parser regressions.
+- Browser actions pass user-controlled values through structured CDP arguments instead of interpolating them into executable JavaScript.
+- File/search/screenshot/hash operations validate and consume the same open descriptor, using `O_NOFOLLOW` where supported to prevent symlink-swap/check-then-use races.
+- Temporary desktop captures and telemetry marker creation are now descriptor-bound or atomic.
+- Tool schemas and the 83 granular runtime operations remain unchanged.
+
 ## 0.2.93 — 2026-09-21
 
 - Lockstep release for the device client's fresher npm metadata revalidation during exact release updates.

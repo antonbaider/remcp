@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import process from 'node:process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { advertisedTools as advertisedCoreTools, toolDefinitions as coreToolDefinitions } from './catalog.mjs';
 import { allExtendedTools, advertisedExtendedTools, extendedToolDefinitions } from './extended/catalog.mjs';
@@ -76,10 +76,12 @@ function announceTelemetryOnce() {
   if (!telemetryEnabled()) return;
   const marker = path.join(runtimeConfigDir, '.telemetry-notice');
   try {
-    if (existsSync(marker)) return;
     mkdirSync(runtimeConfigDir, { recursive: true, mode: 0o700 });
-    writeFileSync(marker, `${new Date().toISOString()}\n`, { mode: 0o600 });
-  } catch { return; }
+    writeFileSync(marker, `${new Date().toISOString()}\n`, { mode: 0o600, flag: 'wx' });
+  } catch (error) {
+    if (error?.code === 'EEXIST') return;
+    return;
+  }
   console.error('ReMCP runtime: anonymous usage metrics are on (tool names, timings, outcomes only - never file paths, commands or output). They go to your own ReMCP account through the paired agent. Disable with `remcp telemetry off`.');
 }
 

@@ -55,17 +55,70 @@ function unzipEntry(buffer, wanted) {
 
 const DOCX_ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" };
 
+function xmlTagName(tag) {
+  let index = 0;
+  while (index < tag.length && /\s/.test(tag[index])) index += 1;
+  let closing = false;
+  if (tag[index] === '/') {
+    closing = true;
+    index += 1;
+    while (index < tag.length && /\s/.test(tag[index])) index += 1;
+  }
+  const start = index;
+  while (index < tag.length && !/\s|\/|>/.test(tag[index])) index += 1;
+  return { name: tag.slice(start, index), closing };
+}
+
+function wordXmlText(xml) {
+  let output = '';
+  let index = 0;
+  while (index < xml.length) {
+    if (xml[index] !== '<') {
+      output += xml[index];
+      index += 1;
+      continue;
+    }
+    if (xml.startsWith('<!--', index)) {
+      const end = xml.indexOf('-->', index + 4);
+      index = end < 0 ? xml.length : end + 3;
+      continue;
+    }
+    if (xml.startsWith('<![CDATA[', index)) {
+      const end = xml.indexOf(']]>', index + 9);
+      if (end < 0) break;
+      output += xml.slice(index + 9, end);
+      index = end + 3;
+      continue;
+    }
+    let quote = '';
+    let end = index + 1;
+    for (; end < xml.length; end += 1) {
+      const character = xml[end];
+      if (quote) {
+        if (character === quote) quote = '';
+        continue;
+      }
+      if (character === '"' || character === "'") {
+        quote = character;
+        continue;
+      }
+      if (character === '>') break;
+    }
+    if (end >= xml.length) break;
+    const { name, closing } = xmlTagName(xml.slice(index + 1, end));
+    if (closing && name === 'w:p') output += '\n';
+    else if (!closing && (name === 'w:br' || name === 'w:cr')) output += '\n';
+    else if (!closing && name === 'w:tab') output += '\t';
+    index = end + 1;
+  }
+  return output;
+}
+
 export function readDocxText(buffer) {
   const document = unzipEntry(buffer, 'word/document.xml');
   if (!document) throw new Error('This file is not a readable .docx (its word/document.xml is missing or compressed in an unsupported way)');
   const xml = document.toString('utf8');
-  // Paragraph and line breaks become newlines, tabs become tabs, everything else is text.
-  const withBreaks = xml
-    .replace(/<w:(?:br|cr)\b[^>]*\/?>/g, '\n')
-    .replace(/<\/w:p>/g, '\n')
-    .replace(/<w:tab\b[^>]*\/?>/g, '\t');
-  const text = withBreaks.replace(/<[^>]+>/g, '');
-  return text
+  return wordXmlText(xml)
     .replace(/&(amp|lt|gt|quot|apos);/g, match => DOCX_ENTITIES[match])
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -76,6 +129,132 @@ function decodePdfString(raw) {
   return raw
     .replace(/\\([nrtbf()\\])/g, (_match, character) => ({ n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' }[character] ?? character))
     .replace(/\\([0-7]{1,3})/g, (_match, octal) => String.fromCharCode(Number.parseInt(octal, 8)));
+}
+
+const PDF_HEX = '0123456789abcdefABCDEF';
+
+function readPdfLiteral(content, start) {
+  let raw = '';
+  let depth = 1;
+  let index = start + 1;
+  while (index < content.length) {
+    const character = content[index];
+    if (character === '\\') {
+      raw += character;
+      index += 1;
+      if (index < content.length) {
+        raw += content[index];
+        index += 1;
+      }
+      continue;
+    }
+    if (character === '(') {
+      depth += 1;
+      raw += character;
+      index += 1;
+      continue;
+    }
+    if (character === ')') {
+      depth -= 1;
+      index += 1;
+      if (depth === 0) return { value: decodePdfString(raw), next: index };
+      raw += character;
+      continue;
+    }
+    raw += character;
+    index += 1;
+  }
+  return { value: '', next: content.length };
+}
+
+function readPdfHex(content, start) {
+  let hex = '';
+  let index = start + 1;
+  while (index < content.length && content[index] !== '>') {
+    if (PDF_HEX.includes(content[index])) hex += content[index];
+    index += 1;
+  }
+  if (hex.length % 2) hex += '0';
+  const value = Buffer.from(hex, 'hex').toString('latin1').replace(/\0/g, '');
+  return { value, next: index < content.length ? index + 1 : index };
+}
+
+function readPdfArray(content, start) {
+  const values = [];
+  let index = start + 1;
+  while (index < content.length) {
+    const character = content[index];
+    if (character === ']') return { value: values.join(''), next: index + 1 };
+    if (character === '(') {
+      const token = readPdfLiteral(content, index);
+      if (token.value) values.push(token.value);
+      index = token.next;
+      continue;
+    }
+    if (character === '<' && content[index + 1] !== '<') {
+      const token = readPdfHex(content, index);
+      if (token.value) values.push(token.value);
+      index = token.next;
+      continue;
+    }
+    index += 1;
+  }
+  return { value: values.join(''), next: index };
+}
+
+function pdfTextPieces(content) {
+  const pieces = [];
+  let operand = '';
+  let index = 0;
+  while (index < content.length) {
+    const character = content[index];
+    if (/\s/.test(character)) {
+      index += 1;
+      continue;
+    }
+    if (character === '%') {
+      const newline = content.indexOf('\n', index + 1);
+      index = newline < 0 ? content.length : newline + 1;
+      continue;
+    }
+    if (character === '(') {
+      const token = readPdfLiteral(content, index);
+      operand = token.value;
+      index = token.next;
+      continue;
+    }
+    if (character === '<' && content[index + 1] !== '<') {
+      const token = readPdfHex(content, index);
+      operand = token.value;
+      index = token.next;
+      continue;
+    }
+    if (character === '[') {
+      const token = readPdfArray(content, index);
+      operand = token.value;
+      index = token.next;
+      continue;
+    }
+    const start = index;
+    while (index < content.length && !/\s|[()[\]<>]/.test(content[index])) index += 1;
+    if (index === start) {
+      index += 1;
+      continue;
+    }
+    const operator = content.slice(start, index);
+    if (operator === 'Tj' || operator === 'TJ') {
+      if (operand) pieces.push(operand);
+      operand = '';
+    } else if (operator === "'" || operator === '"') {
+      pieces.push('\n');
+      if (operand) pieces.push(operand);
+      operand = '';
+    } else if (operator === 'T*' || operator === 'Td' || operator === 'TD' || operator === 'ET') {
+      pieces.push('\n');
+      operand = '';
+    }
+  }
+  return pieces;
 }
 
 export function readPdfText(buffer) {
@@ -97,23 +276,7 @@ export function readPdfText(buffer) {
   }
   const content = chunks.join('\n');
 
-  const pieces = [];
-  const showText = /(?:\((?:\\.|[^\\()])*\)|<[0-9A-Fa-f\s]+>)\s*Tj|\[((?:[^\][]|\\.)*)\]\s*TJ|\((?:\\.|[^\\()])*\)\s*['"]|T\*|Td|TD|ET/g;
-  for (const match of content.matchAll(showText)) {
-    const token = match[0];
-    if (/^T\*|Td|TD|ET$/.test(token)) { pieces.push('\n'); continue; }
-    if (token.includes('TJ')) {
-      const array = match[1] ?? '';
-      for (const part of array.matchAll(/\((?:\\.|[^\\()])*\)|<[0-9A-Fa-f\s]+>/g)) {
-        const value = part[0];
-        if (value.startsWith('(')) pieces.push(decodePdfString(value.slice(1, -1)));
-        else pieces.push(Buffer.from(value.slice(1, -1).replace(/\s+/g, ''), 'hex').toString('latin1').replace(/\0/g, ''));
-      }
-      continue;
-    }
-    if (token.startsWith('(')) pieces.push(decodePdfString(token.slice(1, token.lastIndexOf(')'))));
-    else if (token.startsWith('<')) pieces.push(Buffer.from(token.slice(1, token.indexOf('>')).replace(/\s+/g, ''), 'hex').toString('latin1').replace(/\0/g, ''));
-  }
+  const pieces = pdfTextPieces(content);
   const text = pieces.join('').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   const printable = text.replace(/[^\p{L}\p{N}\p{P}\p{Zs}\n\t]/gu, '');
   if (text.length < 8 || printable.length / Math.max(1, text.length) < 0.7) {

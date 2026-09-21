@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open, readdir, stat } from 'node:fs/promises';
 import { spawn, spawnSync } from 'node:child_process';
 import { runtimeConfig } from '../config.mjs';
 import { countEvent, recordEvent } from '../telemetry.mjs';
@@ -152,10 +153,17 @@ async function runFallback(session, { path: target, matcher, searchType, filePat
       appendSearchResults(session, [displayPath(file)]);
       return;
     }
-    const info = await stat(file).catch(() => null);
-    if (!info || info.size > MAX_FALLBACK_FILE_BYTES) return;
-    const buffer = await readFile(file).catch(() => null);
-    if (!buffer || looksBinary(buffer)) return;
+    const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0)).catch(() => null);
+    if (!handle) return;
+    let buffer;
+    try {
+      const info = await handle.stat();
+      if (!info.isFile() || info.size > MAX_FALLBACK_FILE_BYTES) return;
+      buffer = await handle.readFile();
+    } finally {
+      await handle.close();
+    }
+    if (looksBinary(buffer)) return;
     const lines = splitLines(buffer.toString('utf8'));
     for (let index = 0; index < lines.length; index += 1) {
       if (session.status !== 'running' || collected >= maxResults) return;

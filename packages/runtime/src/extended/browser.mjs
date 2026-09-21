@@ -294,6 +294,29 @@ async function evaluate(session, expression, awaitPromise = true) {
   return result.result?.value;
 }
 
+async function callPageFunction(session, functionDeclaration, args = [], awaitPromise = true) {
+  const global = await session.send('Runtime.evaluate', {
+    expression: 'globalThis',
+    returnByValue: false,
+    awaitPromise: false,
+  });
+  if (global.exceptionDetails || !global.result?.objectId) {
+    throw new Error(global.exceptionDetails?.exception?.description || global.exceptionDetails?.text || 'Could not access the page execution context');
+  }
+  const result = await session.send('Runtime.callFunctionOn', {
+    objectId: global.result.objectId,
+    functionDeclaration,
+    arguments: args.map(value => ({ value })),
+    returnByValue: true,
+    awaitPromise,
+    userGesture: true,
+  });
+  if (result.exceptionDetails) {
+    throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text || 'JavaScript function call failed');
+  }
+  return result.result?.value;
+}
+
 export async function browserTabs(args = {}) {
   const targets = await listBrowserTargets(args.endpoint);
   return jsonResult(targets.filter(item => item.type === 'page').slice(0, 500).map(item => ({
@@ -559,18 +582,41 @@ export async function browserFind(args) {
   });
 }
 
-function elementLookup(args) {
-  const selector = optionalString(args.selector);
-  const needle = optionalString(args.text);
-  if (!selector && !needle) throw new Error('selector or text is required');
-  return `(() => {
-    const selector = ${JSON.stringify(selector)};
-    const needle = ${JSON.stringify(needle)};
-    let el = selector ? document.querySelector(selector) : null;
-    if (!el && needle) el = Array.from(document.querySelectorAll('*')).find(x => ((x.innerText || x.textContent || '').trim().toLowerCase().includes(needle.toLowerCase())));
-    return el;
-  })()`;
-}
+const PAGE_ELEMENT_ACTION = `function(selector, needle, action, value) {
+  let el = selector ? document.querySelector(selector) : null;
+  if (!el && needle) {
+    const lower = String(needle).toLowerCase();
+    el = Array.from(document.querySelectorAll('*')).find(node =>
+      String(node.innerText || node.textContent || '').trim().toLowerCase().includes(lower)
+    ) || null;
+  }
+  if (!el) throw new Error('Element not found');
+  if (action === 'click' || action === 'type' || action === 'scroll_into_view') {
+    el.scrollIntoView({block:'center', inline:'center'});
+  }
+  if (action === 'focus' || action === 'type') el.focus();
+  if (action === 'select') {
+    el.value = value;
+    el.dispatchEvent(new Event('input', {bubbles:true}));
+    el.dispatchEvent(new Event('change', {bubbles:true}));
+  } else if (action === 'set_value') {
+    const proto = Object.getPrototypeOf(el);
+    const own = Object.getOwnPropertyDescriptor(proto, 'value');
+    const parent = Object.getPrototypeOf(proto);
+    const inherited = parent ? Object.getOwnPropertyDescriptor(parent, 'value') : null;
+    const setter = own?.set || inherited?.set;
+    if (setter) setter.call(el, value); else el.value = value;
+    el.dispatchEvent(new Event('input', {bubbles:true}));
+    el.dispatchEvent(new Event('change', {bubbles:true}));
+  }
+  const b = el.getBoundingClientRect();
+  if (action === 'click' && (!b.width || !b.height)) throw new Error('Element has no clickable bounds');
+  return {
+    tag: el.tagName.toLowerCase(),
+    value: 'value' in el ? String(el.value) : '',
+    x: b.x, y: b.y, width: b.width, height: b.height,
+  };
+}`;
 
 export function browserActionInputValue(args = {}, action = '') {
   // text is the public field models naturally use for type, while set_value/select historically
@@ -616,19 +662,14 @@ export async function browserAction(args) {
       await session.send('Input.dispatchKeyEvent', { type: 'keyUp', key });
       return jsonResult({ target_id: target.id, action, key });
     }
-    const lookup = elementLookup(args);
+    const selector = optionalString(args.selector);
+    const needle = optionalString(args.text);
+    if (!selector && !needle) throw new Error('selector or text is required');
     const value = browserActionInputValue(args, action);
     const option = String(args.option ?? value);
 
     if (action === 'click') {
-      const rect = await evaluate(session, `(() => {
-        const el = ${lookup};
-        if (!el) throw new Error('Element not found');
-        el.scrollIntoView({block:'center',inline:'center'});
-        const b = el.getBoundingClientRect();
-        if (!b.width || !b.height) throw new Error('Element has no clickable bounds');
-        return { tag:el.tagName.toLowerCase(), x:b.x, y:b.y, width:b.width, height:b.height };
-      })()`);
+      const rect = await callPageFunction(session, PAGE_ELEMENT_ACTION, [selector, needle, 'click', '']);
       const x = Number(rect.x) + Number(rect.width) / 2;
       const y = Number(rect.y) + Number(rect.height) / 2;
       await session.send('Input.dispatchMouseEvent', { type:'mouseMoved', x, y, button:'none' });
@@ -638,31 +679,18 @@ export async function browserAction(args) {
     }
 
     if (action === 'type') {
-      const focused = await evaluate(session, `(() => {
-        const el = ${lookup};
-        if (!el) throw new Error('Element not found');
-        el.scrollIntoView({block:'center',inline:'center'});
-        el.focus();
-        const b = el.getBoundingClientRect();
-        return { tag:el.tagName.toLowerCase(), value:'value' in el?String(el.value):'', x:b.x, y:b.y, width:b.width, height:b.height };
-      })()`);
+      const focused = await callPageFunction(session, PAGE_ELEMENT_ACTION, [selector, needle, 'type', '']);
       await session.send('Input.insertText', { text:value });
-      const current = await evaluate(session, `(() => { const el=${lookup}; return 'value' in el ? String(el.value) : ''; })()`);
-      return jsonResult({ target_id:target.id, action, result:{ ...focused, value:current } });
+      const current = await callPageFunction(session, PAGE_ELEMENT_ACTION, [selector, needle, 'read_value', '']);
+      return jsonResult({ target_id:target.id, action, result:{ ...focused, value:current.value } });
     }
 
-    const expression = `(() => {
-      const el = ${lookup};
-      if (!el) throw new Error('Element not found');
-      ${action === 'focus' ? 'el.focus();' :
-        action === 'scroll_into_view' ? "el.scrollIntoView({block:'center',inline:'center'});" :
-        action === 'select' ? `el.value=${JSON.stringify(option)}; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true}));` :
-        `const proto=Object.getPrototypeOf(el);const own=Object.getOwnPropertyDescriptor(proto,'value');const parent=Object.getPrototypeOf(proto);const inherited=parent?Object.getOwnPropertyDescriptor(parent,'value'):null;const setter=own?.set||inherited?.set;if(setter)setter.call(el,${JSON.stringify(value)});else el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));`
-      }
-      const b = el.getBoundingClientRect();
-      return { tag: el.tagName.toLowerCase(), value: 'value' in el ? String(el.value) : '', x: b.x, y: b.y, width: b.width, height: b.height };
-    })()`;
-    return jsonResult({ target_id: target.id, action, result: await evaluate(session, expression) });
+    const pageValue = action === 'select' ? option : value;
+    return jsonResult({
+      target_id: target.id,
+      action,
+      result: await callPageFunction(session, PAGE_ELEMENT_ACTION, [selector, needle, action, pageValue]),
+    });
   });
 }
 
