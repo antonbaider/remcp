@@ -199,6 +199,56 @@ test('Linux ui_action falls back to a bounded pointer click only for click/invok
   );
 });
 
+test('Linux accessibility retries false-empty deep AT-SPI walks while matchers use a conservative default', async () => {
+  const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
+  const desktopSource = await readFile(new URL('../src/extended/desktop.mjs', import.meta.url), 'utf8');
+
+  assert.match(
+    linuxSource,
+    /const maxDepth = clamp\(args\.max_depth, 8, 1, 32\)/,
+    'Linux ui_snapshot should still honor deep requests up to the documented maximum',
+  );
+  assert.match(desktopSource, /process\.platform === 'linux'.*requestedDepth > 15.*emptySnapshot/s);
+  assert.match(
+    desktopSource,
+    /effective = \{ \.\.\.effective, max_depth:15 \}[\s\S]{0,120}adapter\.uiSnapshot\(effective\)/,
+    'a false-empty deep Linux snapshot should retry at the proven-stable AT-SPI depth',
+  );
+  assert.match(
+    desktopSource,
+    /max_depth: resolved\.max_depth \|\| \(process\.platform === 'linux' \? 12 : 16\)/,
+    'generic UI matching should default to the stable Linux traversal depth',
+  );
+  assert.match(
+    desktopSource,
+    /max_depth:args\.max_depth \|\| \(process\.platform === 'linux' \? 12 : 16\)/,
+    'wait text matching should use the same stable Linux traversal depth',
+  );
+});
+
+test('browser_find derives native HTML roles when no explicit ARIA role is present', async () => {
+  const browserSource = await readFile(new URL('../src/extended/browser.mjs', import.meta.url), 'utf8');
+
+  assert.match(browserSource, /function semanticRole\(el\)/);
+  assert.match(browserSource, /if \(tag === 'button'\) return 'button'/);
+  assert.match(browserSource, /tag === 'a' && el\.hasAttribute\('href'\)/);
+  assert.match(browserSource, /type === 'checkbox'.*return 'checkbox'/s);
+  assert.match(browserSource, /type === 'radio'.*return 'radio'/s);
+  assert.match(browserSource, /type === 'range'.*return 'slider'/s);
+  assert.match(browserSource, /tag === 'select'.*'listbox'.*'combobox'/s);
+  assert.match(browserSource, /role: semanticRole\(el\)/);
+});
+
+test('power_action routes restart and shutdown through command policy before native power commands', async () => {
+  const source = await readFile(new URL('../src/extended/diagnostics.mjs', import.meta.url), 'utf8');
+  assert.match(
+    source,
+    /assertAllowedCommand\(action === 'restart' \? 'reboot' : action === 'shutdown' \? 'shutdown' : action\)/,
+    'restart/shutdown must reach the destructive-command guardrail before OS dispatch',
+  );
+  assert.match(source, /systemctl', \[action === 'sleep' \? 'suspend' : action === 'restart' \? 'reboot' : 'poweroff'/);
+});
+
 test('Linux direct app launch honors cwd rather than silently accepting it', { skip: process.platform !== 'linux' }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'remcp-launch-cwd-'));
   try {

@@ -150,6 +150,7 @@ export async function readProcessOutputTool(args, extra = {}) {
       }
     }
     slice = readNewOutput(session);
+    session.waitCursor = session.cursor;
     const first = Math.max(1, session.cursor - slice.length + 1);
     range = slice.length ? `${first}-${session.cursor} of ${totalLines(session)}` : `no new output (${totalLines(session)} lines total)`;
   }
@@ -181,9 +182,11 @@ export async function waitForProcessOutputTool(args, extra = {}) {
   const pattern = requireString(args.pattern, 'pattern');
   const matcher = compileWaiter(pattern);
   const timeoutMs = clampInteger(args.timeout_ms, 10000, 0, 120000);
-  const cursorStart = Math.max(0, session.cursor - session.droppedLines);
-  // Output that was already buffered before the call still counts: a pattern printed
-  // earlier should answer immediately instead of spinning for the whole timeout.
+  const waitCursor = Number.isInteger(session.waitCursor) ? session.waitCursor : session.cursor;
+  const cursorStart = Math.max(0, waitCursor - session.droppedLines);
+  // Output already retained before the call still counts once, even when start_process
+  // displayed it and advanced the ordinary read cursor. A separate wait watermark keeps
+  // retries from replaying the same historical match forever.
   let slice = session.lines.slice(cursorStart);
   const bufferedMatch = waiterMatches(slice, matcher);
   const deadline = Date.now() + timeoutMs;
@@ -196,6 +199,7 @@ export async function waitForProcessOutputTool(args, extra = {}) {
   }
   const matched = waiterMatches(slice, matcher);
   session.cursor = session.droppedLines + session.lines.length;
+  session.waitCursor = session.cursor;
   session.lastPartialRead = session.partial || null;
   const status = describeSession(session);
   const headline = matched
@@ -220,6 +224,7 @@ export async function interactWithProcessTool(args, extra = {}) {
   const input = typeof args.input === 'string' ? args.input : fail('input must be a string');
   const timeoutMs = clampInteger(args.timeout_ms, 1000, 0, 120000);
   session.cursor = session.droppedLines + session.lines.length;
+  session.waitCursor = session.cursor;
   session.lastPartialRead = null;
   throwIfAborted(extra.signal);
   const stdin = session.child?.stdin;
@@ -239,6 +244,7 @@ export async function interactWithProcessTool(args, extra = {}) {
     await waitForProcessActivity(session, Math.min(200, Math.max(20, deadline - Date.now())));
   }
   const slice = readNewOutput(session);
+  session.waitCursor = session.cursor;
   const status = describeSession(session);
   const output = slice.join('\n');
   return terminalStructured({

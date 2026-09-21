@@ -75,6 +75,11 @@ test('extended tool schemas are written for agent selection rather than name gue
     assert.equal(byName.get(name).annotations.openWorldHint, true, name + ' can reach open-ended external state');
   }
   assert.equal(byName.get('browser_navigate').annotations.destructiveHint, false, 'navigation changes browser state but is not inherently irreversible');
+  const power = byName.get('power_action');
+  assert.equal(power.annotations.readOnlyHint, false, 'power actions mutate host state');
+  assert.equal(power.annotations.destructiveHint, true, 'power actions must be advertised as destructive');
+  assert.equal(power.annotations.idempotentHint, false, 'power actions are not safe automatic retries');
+  assert.equal(power.annotations.openWorldHint, false, 'power actions stay on the paired host');
 });
 
 test('extended output schemas expose stable chaining fields instead of an untyped object', () => {
@@ -116,6 +121,7 @@ test('MCP SDK enforces conditional argument requirements before extended handler
     ['browser_wait', { condition:'text' }, { condition:'text', text:'ready' }],
     ['service', { action:'restart' }, { action:'restart', name:'demo.service' }],
     ['audio', { action:'set_volume' }, { action:'set_volume', volume:50 }],
+    ['power_action', {}, { action:'lock' }],
     ['pdf_action', { action:'merge', paths:['a.pdf','b.pdf'] }, { action:'merge', paths:['a.pdf','b.pdf'], output:'merged.pdf' }],
   ];
   for (const [name, invalid, valid] of cases) {

@@ -68,6 +68,10 @@ export function createProcessSession({ pid, child, command, shell }) {
     droppedLines: 0,
     bufferedChars: 0,
     cursor: 0,
+    // wait_for_process_output has its own consumption watermark. start_process may
+    // display initial output and advance the ordinary read cursor, but the first
+    // wait must still be able to match that retained output once.
+    waitCursor: 0,
     exitCode: null,
     signal: null,
     exited: false,

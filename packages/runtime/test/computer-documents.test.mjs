@@ -93,6 +93,41 @@ test('PDF reading falls back to local pdftotext when the built-in parser cannot 
   }
 });
 
+test('PDF page selection expands ordered ranges and rejects invalid ranges', async () => {
+  const { expandPdfPages } = await import('../src/extended/documents.mjs');
+  assert.deepEqual(expandPdfPages('1-3, 5, 7-8'), [1,2,3,5,7,8]);
+  assert.throws(() => expandPdfPages('0'), /Invalid PDF page/);
+  assert.throws(() => expandPdfPages('3-1'), /Invalid PDF page range/);
+  assert.throws(() => expandPdfPages('1-20', 10), /exceeds 10 pages/);
+});
+
+test('PDF extract_pages falls back to pdfseparate and pdfunite when qpdf/pdftk are unavailable', { skip: process.platform === 'win32' }, async () => {
+  const binDir = join(root, 'fake-poppler-bin');
+  mkdirSync(binDir, { recursive: true });
+  const pdfseparate = join(binDir, 'pdfseparate');
+  const pdfunite = join(binDir, 'pdfunite');
+  writeFileSync(pdfseparate, '#!/bin/sh\npage="$2"\nsource="$5"\npattern="$6"\nout="$(printf "$pattern" "$page")"\n/bin/cp "$source" "$out"\n');
+  writeFileSync(pdfunite, '#!/bin/sh\nfirst="$1"\nfor last do :; done\n/bin/cp "$first" "$last"\n');
+  chmodSync(pdfseparate, 0o755);
+  chmodSync(pdfunite, 0o755);
+
+  const source = join(root, 'source.pdf');
+  const output = join(root, 'selected.pdf');
+  writeFileSync(source, '%PDF-1.4\n%%EOF\n');
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = binDir;
+  try {
+    const { pdfAction } = await import('../src/extended/documents.mjs');
+    const result = await pdfAction({ action:'extract_pages', path:source, pages:'1-2,4', output });
+    const parsed = JSON.parse(result.content[0].text);
+    assert.equal(parsed.pages, '1,2,4');
+    assert.ok(parsed.bytes > 0);
+  } finally {
+    process.env.PATH = previousPath;
+  }
+});
+
 test('OOXML extraction rejects archive traversal before unzip writes anything', { skip: !zipReady }, async () => {
   const sourceDir = join(root, 'unsafe-src', 'inner');
   mkdirSync(sourceDir, { recursive: true });

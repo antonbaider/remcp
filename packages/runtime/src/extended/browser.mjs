@@ -470,15 +470,40 @@ function findExpression(args) {
       }
       return parts.join(' > ');
     }
+    function semanticRole(el) {
+      const explicit = (el.getAttribute('role') || '').trim().toLowerCase();
+      if (explicit) return explicit;
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'button') return 'button';
+      if (tag === 'a' && el.hasAttribute('href')) return 'link';
+      if (tag === 'textarea') return 'textbox';
+      if (tag === 'select') return el.multiple || el.size > 1 ? 'listbox' : 'combobox';
+      if (tag === 'option') return 'option';
+      if (tag === 'img') return 'img';
+      if (tag === 'progress') return 'progressbar';
+      if (tag === 'meter') return 'meter';
+      if (tag === 'summary') return 'button';
+      if (tag === 'input') {
+        const type = String(el.type || 'text').toLowerCase();
+        if (['button','submit','reset','image'].includes(type)) return 'button';
+        if (type === 'checkbox') return 'checkbox';
+        if (type === 'radio') return 'radio';
+        if (type === 'range') return 'slider';
+        if (type === 'number') return 'spinbutton';
+        if (type === 'search') return 'searchbox';
+        if (!['hidden','file','color'].includes(type)) return 'textbox';
+      }
+      return '';
+    }
     return source.filter(el => {
       const style = getComputedStyle(el);
       const visible = style.visibility !== 'hidden' && style.display !== 'none' && el.getClientRects().length > 0;
       const hay = (el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim();
-      const r = el.getAttribute('role') || '';
-      return visible && (!needle || hay.toLowerCase().includes(needle.toLowerCase())) && (!role || r.toLowerCase() === role.toLowerCase());
+      const r = semanticRole(el);
+      return visible && (!needle || hay.toLowerCase().includes(needle.toLowerCase())) && (!role || r === role.toLowerCase());
     }).slice(0, ${limit}).map(el => {
       const b = el.getBoundingClientRect();
-      return { selector: cssPath(el), tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', name: el.getAttribute('aria-label') || el.getAttribute('name') || '', text: (el.innerText || el.textContent || '').trim().slice(0, 500), value: 'value' in el ? String(el.value).slice(0, 500) : '', x: b.x, y: b.y, width: b.width, height: b.height, disabled: Boolean(el.disabled) };
+      return { selector: cssPath(el), tag: el.tagName.toLowerCase(), role: semanticRole(el), name: el.getAttribute('aria-label') || el.getAttribute('name') || '', text: (el.innerText || el.textContent || '').trim().slice(0, 500), value: 'value' in el ? String(el.value).slice(0, 500) : '', x: b.x, y: b.y, width: b.width, height: b.height, disabled: Boolean(el.disabled) };
     });
   })()`;
 }

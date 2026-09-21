@@ -330,9 +330,21 @@ export async function uiSnapshot(args = {}) {
   const activeOnly = args.active_only != null
     ? args.active_only === true
     : (!explicitlyScoped && args.scope !== 'desktop');
-  const effective = { ...args, active_only:activeOnly };
-  const raw = await adapter.uiSnapshot(effective);
-  const value = resultValue(raw);
+  let effective = { ...args, active_only:activeOnly };
+  let raw = await adapter.uiSnapshot(effective);
+  let value = resultValue(raw);
+  const requestedDepth = Number(effective.max_depth);
+  const emptySnapshot = Array.isArray(value)
+    ? value.length === 0
+    : Array.isArray(value?.nodes) && value.nodes.length === 0;
+  if (process.platform === 'linux' && Number.isFinite(requestedDepth) && requestedDepth > 15 && emptySnapshot) {
+    // Some GNOME/AT-SPI providers collapse otherwise valid trees to an empty result
+    // when traversed too deeply. Preserve the caller's deep request first, but recover
+    // from that provider failure with the deepest stable fallback observed on Wayland.
+    effective = { ...effective, max_depth:15 };
+    raw = await adapter.uiSnapshot(effective);
+    value = resultValue(raw);
+  }
   return jsonResult(enrichUiPayload(value, effective));
 }
 export async function uiAction(args = {}) {
@@ -452,7 +464,7 @@ async function uiMatches(args = {}) {
   const scopedPid = resolved.pid != null ? resolved.pid : stableLinuxPid ? Number(stableLinuxPid) : null;
   const result = await uiSnapshot({
     max_nodes: resolved.max_nodes || 2000,
-    max_depth: resolved.max_depth || 16,
+    max_depth: resolved.max_depth || (process.platform === 'linux' ? 12 : 16),
     ...(scopedPid != null ? { pid: scopedPid } : {}),
     ...(resolved.app ? { app: resolved.app } : {}),
     ...((resolved.window_title || resolved.windowTitle) ? { window_title: resolved.window_title || resolved.windowTitle } : {}),
@@ -508,7 +520,7 @@ async function uiConditionMatches(args, condition) {
     if (!cached) {
       const snapshot = resultValue(await uiSnapshot({
         max_nodes:args.max_nodes || 2000,
-        max_depth:args.max_depth || 16,
+        max_depth:args.max_depth || (process.platform === 'linux' ? 12 : 16),
         ...(args.pid != null ? { pid:args.pid } : {}),
         ...(args.app ? { app:args.app } : {}),
         ...((args.window_title || args.windowTitle) ? { window_title:args.window_title || args.windowTitle } : {}),

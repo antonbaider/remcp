@@ -88,6 +88,36 @@ test('read_process_output positive offsets are zero-based line numbers', async (
   assert.match(first, /l1/);
 });
 
+test('wait_for_process_output matches initial start output once from the retained buffer', async () => {
+  const started = await invokeTool('start_process', { command: 'printf "BUFFERED-READY\\n"; sleep 5', timeout_ms: 300 });
+  const pid = pidOf(started);
+  assert.match(body(started), /BUFFERED-READY/);
+
+  const before = Date.now();
+  const first = await invokeTool('wait_for_process_output', { pid, pattern: 'BUFFERED-READY', timeout_ms: 2000 });
+  assert.equal(isError(first), false);
+  assert.equal(first.structuredContent?.matched, true);
+  assert.equal(first.structuredContent?.bufferedMatch, true);
+  assert.match(first.structuredContent?.output || '', /BUFFERED-READY/);
+  assert.ok(Date.now() - before < 500, 'a buffered match should return without waiting for the timeout');
+
+  const retry = await invokeTool('wait_for_process_output', { pid, pattern: 'BUFFERED-READY', timeout_ms: 100 });
+  assert.equal(retry.structuredContent?.matched, false, 'the same retained match must not replay after the wait cursor advances');
+  assert.equal(retry.structuredContent?.bufferedMatch, false);
+  await invokeTool('force_terminate', { pid });
+});
+
+test('read_process_output consumption also advances the wait watermark', async () => {
+  const started = await invokeTool('start_process', { command: 'printf "READ-CONSUMED\\n"; sleep 5', timeout_ms: 300 });
+  const pid = pidOf(started);
+  assert.match(body(started), /READ-CONSUMED/);
+  await invokeTool('read_process_output', { pid, timeout_ms: 0 });
+  const waited = await invokeTool('wait_for_process_output', { pid, pattern: 'READ-CONSUMED', timeout_ms: 100 });
+  assert.equal(waited.structuredContent?.matched, false);
+  assert.equal(waited.structuredContent?.bufferedMatch, false);
+  await invokeTool('force_terminate', { pid });
+});
+
 test('wait_for_process_output returns as soon as the pattern appears', async () => {
   const started = await invokeTool('start_process', { command: 'sleep 0.6; echo READY-MARKER; sleep 5', timeout_ms: 100 });
   const pid = pidOf(started);

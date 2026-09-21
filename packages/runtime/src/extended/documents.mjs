@@ -336,6 +336,29 @@ export async function editDocument(args) {
   }
 }
 
+export function expandPdfPages(spec, maxPages = 10_000) {
+  const normalized = String(spec || '').replace(/\s+/g, '');
+  if (!normalized || !/^[0-9,\-]+$/.test(normalized)) throw new Error('pages must look like 1-3,5');
+  const pages = [];
+  for (const token of normalized.split(',')) {
+    if (!token) throw new Error('pages must look like 1-3,5');
+    const range = token.match(/^(\d+)-(\d+)$/);
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[2]);
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) throw new Error(`Invalid PDF page range: ${token}`);
+      if (pages.length + (end - start + 1) > maxPages) throw new Error(`PDF page selection exceeds ${maxPages} pages`);
+      for (let page = start; page <= end; page += 1) pages.push(page);
+      continue;
+    }
+    const page = Number(token);
+    if (!Number.isInteger(page) || page < 1) throw new Error(`Invalid PDF page: ${token}`);
+    pages.push(page);
+    if (pages.length > maxPages) throw new Error(`PDF page selection exceeds ${maxPages} pages`);
+  }
+  return pages;
+}
+
 function pdfAnnotations(buffer) {
   const raw = buffer.toString('latin1');
   const rows = [];
@@ -382,12 +405,38 @@ export async function pdfAction(args) {
     else unavailable('PDF split','install poppler-utils (pdfseparate)');
     return jsonResult({action,output_dir:outputDir,files:(await readdir(outputDir)).filter(name=>name.toLowerCase().endsWith('.pdf')).sort()});
   }
-  const pages=optionalString(args.pages); if(!pages || !/^[0-9,\-\s]+$/.test(pages)) throw new Error('pages must look like 1-3,5');
+  const pages=optionalString(args.pages);
+  const selectedPages=expandPdfPages(pages);
+  const normalizedPages=selectedPages.join(',');
   const output=await resolveSafePath(args.output,'output');
-  if(commandExists('qpdf')) await runFile('qpdf',[source,'--pages','.',pages.replace(/\s+/g,''),'--',output],{label:'PDF extract pages',timeout:60_000});
-  else if(commandExists('pdftk')) await runFile('pdftk',[source,'cat',...pages.replace(/\s+/g,'').split(','),'output',output],{label:'PDF extract pages',timeout:60_000});
-  else unavailable('PDF page extraction','install qpdf or pdftk');
-  return jsonResult({action,source,pages,output,bytes:(await stat(output)).size});
+  if(commandExists('qpdf')) {
+    await runFile('qpdf',[source,'--pages','.',pages.replace(/\s+/g,''),'--',output],{label:'PDF extract pages',timeout:60_000});
+  } else if(commandExists('pdftk')) {
+    await runFile('pdftk',[source,'cat',...pages.replace(/\s+/g,'').split(','),'output',output],{label:'PDF extract pages',timeout:60_000});
+  } else if(commandExists('pdfseparate')) {
+    const dir=await tempDir('remcp-pdf-pages-');
+    try {
+      const extracted=[];
+      for(let index=0;index<selectedPages.length;index+=1){
+        const page=selectedPages[index];
+        const pattern=path.join(dir,`selection-${index+1}-%d.pdf`);
+        await runFile('pdfseparate',['-f',String(page),'-l',String(page),source,pattern],{label:`PDF extract page ${page}`,timeout:60_000});
+        extracted.push(path.join(dir,`selection-${index+1}-${page}.pdf`));
+      }
+      if(extracted.length===1) {
+        await copyFile(extracted[0],output);
+      } else if(commandExists('pdfunite')) {
+        await runFile('pdfunite',[...extracted,output],{label:'PDF assemble extracted pages',timeout:60_000});
+      } else {
+        unavailable('PDF page extraction','pdfunite is required with pdfseparate when extracting multiple pages');
+      }
+    } finally {
+      await removeTemp(dir);
+    }
+  } else {
+    unavailable('PDF page extraction','install qpdf, pdftk, or poppler-utils (pdfseparate; pdfunite for multiple pages)');
+  }
+  return jsonResult({action,source,pages:normalizedPages,output,bytes:(await stat(output)).size});
 }
 
 export const documentHandlers = {
