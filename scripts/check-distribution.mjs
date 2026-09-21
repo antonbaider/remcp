@@ -35,9 +35,9 @@ check(gemini?.mcpServers?.remcp?.httpUrl === endpoint, 'Gemini extension must po
 check(!('url' in (gemini?.mcpServers?.remcp || {})), 'Gemini extension must not declare the Streamable HTTP endpoint as an SSE url');
 check(gemini?.mcpServers?.remcp?.authProviderType === 'dynamic_discovery', 'Gemini extension must use OAuth dynamic discovery');
 
-check(registry.name === 'io.github.antonbaider/remcp', 'MCP Registry name must stay in the GitHub-authenticated namespace');
+check(registry.name === 'io.github.getremcp/remcp', 'MCP Registry name must stay in the GitHub-authenticated namespace');
 check(registry.version === version, 'MCP Registry server version must match package.json');
-check(registry?.repository?.url === 'https://github.com/antonbaider/remcp', 'MCP Registry repository must point at the public repo');
+check(registry?.repository?.url === 'https://github.com/getremcp/remcp', 'MCP Registry repository must point at the public repo');
 check(registry?.remotes?.length === 1, 'MCP Registry record must expose exactly one production remote');
 check(registry?.remotes?.[0]?.type === 'streamable-http', 'MCP Registry remote must use Streamable HTTP');
 check(registry?.remotes?.[0]?.url === endpoint, 'MCP Registry remote must point at the production MCP endpoint');

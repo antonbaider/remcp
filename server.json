@@ -1,11 +1,11 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.antonbaider/remcp",
+  "name": "io.github.getremcp/remcp",
   "title": "ReMCP",
   "description": "Securely use files, terminals, screenshots and processes on computers you pair with ReMCP.",
   "version": "0.2.79",
   "repository": {
-    "url": "https://github.com/antonbaider/remcp",
+    "url": "https://github.com/getremcp/remcp",
     "source": "github"
   },
   "websiteUrl": "https://remcp.site",

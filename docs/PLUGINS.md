@@ -91,7 +91,7 @@ ReMCP ships a native `gemini-extension.json` in the public repository and the re
 Users can install directly from GitHub today:
 
 ```bash
-gemini extensions install https://github.com/antonbaider/remcp
+gemini extensions install https://github.com/getremcp/remcp
 ```
 
 Gemini CLI copies the extension locally. ReMCP's remote MCP entry uses OAuth discovery, so there is
@@ -122,7 +122,7 @@ Users can install ReMCP from GitHub before registry approval:
 1. Open the **Powers** panel in Kiro.
 2. Choose **Add Custom Power**.
 3. Choose **Import power from GitHub**.
-4. Enter `https://github.com/antonbaider/remcp`.
+4. Enter `https://github.com/getremcp/remcp`.
 5. Install the power, complete ReMCP OAuth when prompted, and use a paired computer.
 
 After registry approval, users can discover ReMCP directly in <https://kiro.dev/powers/>.
@@ -149,7 +149,7 @@ ReMCP is also published or indexed in the main MCP discovery layers:
 
 - **Smithery:** <https://smithery.ai/servers/antonbaider/remcp>
 - **Glama:** <https://glama.ai/mcp/servers/antonbaider/remcp>
-- **Official MCP Registry:** published as `io.github.antonbaider/remcp` for registry-aware clients.
+- **Official MCP Registry:** published as `io.github.getremcp/remcp` for registry-aware clients.
 
 These are discovery/catalog surfaces rather than separate ReMCP accounts. They point users back to
 the same production service, OAuth boundary, and paired computers.

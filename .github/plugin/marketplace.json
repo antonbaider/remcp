@@ -18,7 +18,7 @@
         "url": "https://remcp.site"
       },
       "homepage": "https://remcp.site/plugins",
-      "repository": "https://github.com/antonbaider/remcp",
+      "repository": "https://github.com/getremcp/remcp",
       "license": "MIT",
       "keywords": [
         "mcp",

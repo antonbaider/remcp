@@ -10,7 +10,7 @@
   <a href="https://www.npmjs.com/package/@remcp/remcp"><img alt="downloads" src="https://img.shields.io/npm/dm/%40remcp%2Fremcp?style=flat-square&label=downloads"></a>
   <img alt="Node.js" src="https://img.shields.io/node/v/%40remcp/remcp?style=flat-square&label=node">
   <a href="./LICENSE"><img alt="license" src="https://img.shields.io/npm/l/%40remcp%2Fremcp?style=flat-square"></a>
-  <a href="https://github.com/antonbaider/remcp/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/antonbaider/remcp?style=flat-square"></a>
+  <a href="https://github.com/getremcp/remcp/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/getremcp/remcp?style=flat-square"></a>
 </p>
 
 <!-- Canonical distribution badges: scripts/build-public-repo.mjs projects this block into the public README. -->
@@ -134,14 +134,14 @@ ReMCP publishes host-native metadata for coding agents plus directory records fo
 | Host / directory | User path | Status |
 | --- | --- | --- |
 | **Cursor** | Find **ReMCP** in Cursor Marketplace and install it. | published |
-| **Gemini CLI** | Install from the Extension Gallery when indexed, or run `gemini extensions install https://github.com/antonbaider/remcp`. | gallery discovery enabled |
+| **Gemini CLI** | Install from the Extension Gallery when indexed, or run `gemini extensions install https://github.com/getremcp/remcp`. | gallery discovery enabled |
 | **GitHub Copilot CLI** | Install from the `awesome-copilot` default marketplace after external-plugin review. | submitted |
 | **VS Code Agent Plugins** | Browse `@agentPlugins` / **Chat: Plugins** after the same Awesome Copilot listing is accepted. | submitted |
-| **Kiro Powers** | Import `https://github.com/antonbaider/remcp` from **Add Custom Power → Import power from GitHub** while the curated listing is reviewed. | submitted |
+| **Kiro Powers** | Import `https://github.com/getremcp/remcp` from **Add Custom Power → Import power from GitHub** while the curated listing is reviewed. | submitted |
 | **Cline** | Use the Cline MCP Marketplace after review; the current submission is tracked in [`cline/marketplace` PR #125](https://github.com/cline/marketplace/pull/125). | submitted |
 | **Smithery** | Open <https://smithery.ai/servers/antonbaider/remcp>. | published |
 | **Glama** | Open <https://glama.ai/mcp/servers/antonbaider/remcp>. | listed |
-| **Official MCP Registry** | Search for `io.github.antonbaider/remcp` in registry-aware clients. | published |
+| **Official MCP Registry** | Search for `io.github.getremcp/remcp` in registry-aware clients. | published |
 
 The same ReMCP OAuth account and paired computers sit behind every route. Marketplace and directory
 surfaces change discovery; they do not create separate ReMCP backends.

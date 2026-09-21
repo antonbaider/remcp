@@ -49,7 +49,7 @@ configuration, these are the supported shortcuts.
 ReMCP ships a native Gemini CLI extension manifest:
 
 ```bash
-gemini extensions install https://github.com/antonbaider/remcp
+gemini extensions install https://github.com/getremcp/remcp
 ```
 
 Restart the Gemini CLI session after installation, complete OAuth when prompted, then verify with
@@ -62,7 +62,7 @@ complete, install directly from the public repository:
 
 1. Open **Powers → Add Custom Power**.
 2. Choose **Import power from GitHub**.
-3. Enter `https://github.com/antonbaider/remcp`.
+3. Enter `https://github.com/getremcp/remcp`.
 4. Install, complete ReMCP authorization, then verify with `list_devices`.
 
 The curated Kiro Powers submission was received on September 19, 2026.
@@ -84,6 +84,6 @@ The same production remote is published or indexed at:
 
 - Smithery: <https://smithery.ai/servers/antonbaider/remcp>
 - Glama: <https://glama.ai/mcp/servers/antonbaider/remcp>
-- Official MCP Registry name: `io.github.antonbaider/remcp`
+- Official MCP Registry name: `io.github.getremcp/remcp`
 
 These directories do not create a second ReMCP account or a separate device fleet.

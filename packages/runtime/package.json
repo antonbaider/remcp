@@ -32,11 +32,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/antonbaider/remcp.git",
+    "url": "git+https://github.com/getremcp/remcp.git",
     "directory": "packages/runtime"
   },
   "bugs": {
-    "url": "https://github.com/antonbaider/remcp/issues"
+    "url": "https://github.com/getremcp/remcp/issues"
   },
   "publishConfig": {
     "access": "public"

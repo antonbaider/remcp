@@ -32,7 +32,7 @@ The root `plugin.json` is the canonical Agent Plugins 1.0 manifest and the root 
 
 Gemini CLI requires `gemini-extension.json`. The extension uses `httpUrl` for the remote Streamable HTTP MCP endpoint with OAuth dynamic discovery, so users do not paste tokens or endpoint URLs. For gallery discovery, the public GitHub repository must also carry the `gemini-cli-extension` topic.
 
-The Official MCP Registry uses `server.json` with the GitHub-authenticated name `io.github.antonbaider/remcp` and the public production remote.
+The Official MCP Registry uses `server.json` with the GitHub-authenticated name `io.github.getremcp/remcp` and the public production remote.
 
 OpenAI/Codex local or workspace marketplace discovery uses `.agents/plugins/marketplace.json` with a structured local source pointing at the repository root. Claude-compatible hosts can use `.claude-plugin/marketplace.json`. GitHub Copilot CLI and VS Code can also register this repository through `.github/plugin/marketplace.json` while the Awesome Copilot listing is under review.
 
