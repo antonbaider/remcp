@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.91 — 2026-09-21
+
+- Lockstep release for the hosted server's temporary custom-widget disablement.
+- Runtime handlers, schemas, and the 83 granular operations are unchanged.
+- Local compact/granular stdio behavior is unchanged; the production change is limited to hosted discovery and presentation policy.
+
 ## 0.2.90 — 2026-09-21
 
 - Updated README tool-count documentation to the current 15 hosted / 10 model-visible / 5 app-only / 83 granular runtime architecture.
