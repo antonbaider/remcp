@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.80 — 2026-09-21
+
+- Wayland `type_text` can replace text in an inactive explicitly targeted native window without compositor focus when exactly one editable accessibility control is present.
+- Ambiguous or missing editables are never guessed; key/clipboard/Enter fallbacks retain verified window-focus requirements.
+- Tool descriptions now explain the semantic window-target path so agents do not request unnecessary focus before accessibility replacement.
+- Lockstep patch release with the ReMCP client/server at `0.2.80`.
+
 ## 0.2.79 — 2026-09-21
 
 - Explicit Wayland keyboard and key-by-key text input now focuses and verifies the requested target window before dispatch, with bounded direct window cycling and verified fallbacks.

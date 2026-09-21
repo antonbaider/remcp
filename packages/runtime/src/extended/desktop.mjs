@@ -644,10 +644,23 @@ export async function typeText(args = {}) {
     optionalString(resolvedArgs.automation_id || resolvedArgs.automationId)
   );
   const explicitWindowTarget = explicitTypeTextWindowTarget(resolvedArgs, hasElementSelector);
-  if (explicitWindowTarget) await windowAction({ action:'focus', ...explicitWindowTarget });
   const clear = args.clear === true;
   const pressEnter = args.press_enter === true;
   const caret = requireEnum(args.caret_position || 'idle', 'caret_position', ['start','idle','end']);
+
+  if (
+    explicitWindowTarget && !hasElementSelector && clear && !pressEnter
+    && (method === 'auto' || method === 'accessibility')
+    && typeof adapter.typeTextWindowTarget === 'function'
+  ) {
+    const semantic = await adapter.typeTextWindowTarget(value, resolvedArgs);
+    if (semantic) {
+      return jsonResult({ length:value.length, method:'accessibility', target:semantic, clear:true, press_enter:false });
+    }
+    if (method === 'accessibility') {
+      throw new Error('Accessibility-only text input needs exactly one editable control in the targeted window when no element selector is provided');
+    }
+  }
 
   if ((method === 'auto' || method === 'accessibility') && hasElementSelector) {
     try {
@@ -671,7 +684,10 @@ export async function typeText(args = {}) {
       throw new Error(`Semantic text target rejected accessibility input. Refresh the UI target or use browser_action for browser page content. ${detail}`);
     }
   }
-  if ((method === 'auto' || method === 'accessibility') && !hasElementSelector && typeof adapter.typeTextFocused === 'function' && !clear && caret === 'idle') {
+  if (
+    !explicitWindowTarget && (method === 'auto' || method === 'accessibility') && !hasElementSelector
+    && typeof adapter.typeTextFocused === 'function' && !clear && caret === 'idle'
+  ) {
     const semantic = await adapter.typeTextFocused(value, resolvedArgs);
     if (semantic) {
       if (pressEnter) await keyboard({ ...resolvedArgs, key:'ENTER' });
@@ -680,9 +696,10 @@ export async function typeText(args = {}) {
     if (method === 'accessibility') throw new Error('No focused editable accessibility element is available');
   }
   if (method === 'accessibility') {
-    throw new Error('Accessibility-only text input requires a semantic element target for replacement, or a focused editable control with clear=false and caret_position=idle');
+    throw new Error('Accessibility-only text input requires a semantic element target, one editable control in the targeted window with clear=true, or a focused editable control with clear=false and caret_position=idle');
   }
 
+  if (explicitWindowTarget) await windowAction({ action:'focus', ...explicitWindowTarget });
   if (hasElementSelector) await uiAction({ ...resolvedArgs, action:'focus' });
   if (clear) {
     await keyboard({ ...resolvedArgs, shortcut:process.platform === 'darwin' ? 'CMD+A' : 'CTRL+A' });

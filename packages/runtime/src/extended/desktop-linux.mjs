@@ -757,6 +757,37 @@ export async function clipboard(args = {}) {
   unavailable('Clipboard read', `${failures.join('; ') || 'install wl-clipboard or xclip'}`);
 }
 
+export async function typeTextWindowTarget(value, args = {}) {
+  const row = await windowMatch(args);
+  if (!row?.pid) return null;
+  const snapshot = await uiSnapshot({
+    pid:row.pid,
+    window_title:row.title || undefined,
+    max_nodes:2200,
+    max_depth:24,
+  });
+  let payload = null;
+  try { payload = JSON.parse(snapshot.content?.[0]?.text || '{}'); } catch {}
+  const nodes = Array.isArray(payload) ? payload : payload?.nodes || [];
+  const editableRoles = /(^|\b)(text|entry|textbox|edit|text field|search box|password text)(\b|$)/i;
+  const candidates = nodes.filter(node => node?.id && editableRoles.test(String(node.role || '')));
+  if (candidates.length !== 1) return null;
+
+  const target = candidates[0];
+  const result = await uiAction({ action:'set_value', id:target.id, value:String(value) });
+  let action = result.content?.[0]?.text || '';
+  try { action = JSON.parse(action); } catch {}
+  return {
+    id:target.id,
+    pid:row.pid,
+    app:row.app || target.app || '',
+    window:row.title || target.window || '',
+    role:target.role || '',
+    name:target.name || '',
+    action,
+  };
+}
+
 export async function typeTextFocused(value) {
   if (!commandExists('python3')) return null;
   const script = String.raw`import gi,json,sys

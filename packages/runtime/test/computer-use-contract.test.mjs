@@ -205,18 +205,29 @@ test('Linux Wayland keyboard and key typing focus an explicit window target befo
   );
 });
 
-test('type_text focuses an explicit window target before focused accessibility typing', async () => {
+test('type_text prefers window-scoped semantic replacement before Wayland compositor focus', async () => {
   const desktopSource = await readFile(new URL('../src/extended/desktop.mjs', import.meta.url), 'utf8');
+  const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
   const typeBody = desktopSource.match(/export async function typeText\(args = \{\}\) \{[\s\S]*?(?=async function uiElementCenter)/)?.[0] || '';
 
   assert.match(
     typeBody,
-    /const explicitWindowTarget = explicitTypeTextWindowTarget\(resolvedArgs, hasElementSelector\);\s*if \(explicitWindowTarget\) await windowAction\(\{ action:'focus', \.\.\.explicitWindowTarget \}\);/,
-    'type_text must focus an explicit window target before inspecting the currently focused accessibility control',
+    /explicitWindowTarget[\s\S]{0,700}adapter\.typeTextWindowTarget/,
+    'explicit window auto/accessibility typing should try a window-scoped semantic write without compositor focus',
   );
   assert.ok(
-    typeBody.indexOf('explicitTypeTextWindowTarget') < typeBody.indexOf('adapter.typeTextFocused'),
-    'explicit window focus must happen before the focused-control accessibility fast path',
+    typeBody.indexOf('adapter.typeTextWindowTarget') < typeBody.indexOf("windowAction({ action:'focus'"),
+    'semantic window typing must run before any compositor focus attempt',
+  );
+  assert.match(
+    typeBody,
+    /if \(explicitWindowTarget\) await windowAction\(\{ action:'focus', \.\.\.explicitWindowTarget \}\);[\s\S]{0,900}adapter\.typeTextKeys/,
+    'key-based fallback must still verify the explicit window target before dispatch',
+  );
+  assert.match(
+    linuxSource,
+    /export async function typeTextWindowTarget[\s\S]{0,1400}if \(candidates\.length !== 1\) return null;[\s\S]{0,700}action:'set_value'/,
+    'window-scoped semantic typing must only write when exactly one editable accessibility control is found',
   );
 });
 
