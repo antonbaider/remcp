@@ -278,7 +278,7 @@ test('get_system_info reports host facts without leaking anything sensitive', as
   assert.ok(info.cpu.count >= 1);
   assert.ok(info.memory.totalBytes > 0);
   assert.equal(typeof info.uptimeSeconds, 'number');
-  assert.match(process.version, new RegExp(`^v${info.node.replace(/\./g, '\\.')}`));
+  assert.equal(process.version.startsWith(`v${info.node}`), true);
   assert.equal(statSync(root).isDirectory(), true);
 });
 

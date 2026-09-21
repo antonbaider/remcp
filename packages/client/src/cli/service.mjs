@@ -615,25 +615,44 @@ export function ensureServiceIfRecorded(config) {
     const platform = servicePlatform();
     let restartScheduled = null;
     if (platform === 'linux') {
-      if (!fs.existsSync(linuxServiceFile)) {
+      // Read and repair the unit through one descriptor. This avoids a check/read/write race where
+      // the path could be replaced between validation and mutation.
+      let fd = null;
+      try {
+        fd = fs.openSync(linuxServiceFile, fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW || 0));
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+      if (fd === null) {
         installLinuxService(cliPath, nodePath);
       } else {
-        // Keep the supervisor bound to the installation that owns the service. A manual update from
-        // another nvm/Hermes/Homebrew prefix must not silently steal service ownership.
-        const launcherFile = writeLinuxServiceLauncher(cliPath, nodePath);
-        const unit = fs.readFileSync(linuxServiceFile, 'utf8');
-        const expected = `ExecStart=${quoteSystemd(launcherFile)} start --service`;
-        if (!unit.includes(expected)) {
-          const repaired = /^ExecStart=/m.test(unit) ? unit.replace(/^ExecStart=.*$/m, expected) : '';
-          if (!repaired) {
-            // A hand-edited unit with no launcher line is replaced wholesale; the stable launcher is
-            // still refreshed first so the replacement never points back at a retired Node manager.
-            installLinuxService(cliPath, nodePath);
-          } else {
-            fs.writeFileSync(linuxServiceFile, repaired);
-            run('systemctl', ['--user', 'daemon-reload']);
+        let reinstall = false;
+        try {
+          const launcherFile = writeLinuxServiceLauncher(cliPath, nodePath);
+          const unit = fs.readFileSync(fd, 'utf8');
+          const expected = `ExecStart=${quoteSystemd(launcherFile)} start --service`;
+          if (!unit.includes(expected)) {
+            const repaired = /^ExecStart=/m.test(unit) ? unit.replace(/^ExecStart=.*$/m, expected) : '';
+            if (!repaired) {
+              reinstall = true;
+            } else {
+              const data = Buffer.from(repaired, 'utf8');
+              fs.ftruncateSync(fd, 0);
+              let offset = 0;
+              while (offset < data.length) {
+                const written = fs.writeSync(fd, data, offset, data.length - offset, offset);
+                if (!written) throw new Error('Could not finish rewriting the systemd unit');
+                offset += written;
+              }
+              fs.ftruncateSync(fd, data.length);
+              fs.fsyncSync(fd);
+              run('systemctl', ['--user', 'daemon-reload']);
+            }
           }
+        } finally {
+          fs.closeSync(fd);
         }
+        if (reinstall) installLinuxService(cliPath, nodePath);
       }
     } else if (platform === 'darwin') {
       // launchd bakes the interpreter and CLI path into the plist. Repair the file first, but never

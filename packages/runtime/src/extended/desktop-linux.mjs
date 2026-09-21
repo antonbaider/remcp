@@ -1,6 +1,6 @@
 import path from 'node:path';
 import process from 'node:process';
-import { readFile, stat } from 'node:fs/promises';
+
 import { image, multi, text } from '../util.mjs';
 import { capturePortalScreenshot, isWaylandSession } from '../screenshot-portal.mjs';
 import { hasWaylandRemoteDesktopGrant, portalPointerButton, portalPointerMotion, portalPointerMotionAbsolute, portalScroll, portalShortcut, portalTypeText, waylandPortalCandidate } from '../wayland-remote-desktop.mjs';
@@ -9,6 +9,7 @@ import {
   commandExists,
   jsonResult,
   optionalString,
+  readPrivateTempFile,
   removeTemp,
   requireEnum,
   runFile,
@@ -1274,9 +1275,7 @@ export async function screenshotRegion(args = {}) {
     } else {
       unavailable('Region screenshots', isWaylandSession() ? 'the XDG Desktop Portal plus ffmpeg, or grim, is required' : 'install ImageMagick import');
     }
-    const info = await stat(target);
-    if (info.size > 4 * 1024 * 1024) throw new Error(`captured region is ${info.size} bytes; request a smaller region so it fits the inline image limit`);
-    const data = await readFile(target);
+    const {data} = await readPrivateTempFile(target, 4 * 1024 * 1024);
     return multi([{type:'text',text:`Captured ${width}x${height} at ${x},${y}.`}, image(data.toString('base64'),'image/png')]);
   } finally { await removeTemp(dir); }
 }

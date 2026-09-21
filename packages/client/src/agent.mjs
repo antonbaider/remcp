@@ -47,6 +47,24 @@ const RUNTIME_TOOLS_RETRY_MAX_MS = 30_000;
 // timeout while the device keeps working invisibly.
 const CALL_TIMEOUT_MARGIN_MS = 10_000;
 
+function normalizedServerUrl(value) {
+  const url = new URL(String(value || ''));
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('serverUrl must use http or https');
+  if (url.username || url.password) throw new Error('serverUrl must not embed credentials');
+  url.hash = '';
+  url.search = '';
+  return url.href.replace(/\/$/, '');
+}
+
+function sendRelayMessage(socket, message) {
+  if (socket?.readyState !== 1) return false;
+  // The authenticated relay is ReMCP's explicit data boundary: model-requested tool results are
+  // intentionally returned to the paired workspace and never to an arbitrary third-party URL.
+  // codeql[js/file-access-to-http]
+  socket.send(JSON.stringify(message));
+  return true;
+}
+
 function jitter(ms) {
   return Math.round(ms * (0.75 + Math.random() * 0.5));
 }
@@ -70,7 +88,7 @@ function deviceMetrics(extra = {}) {
 }
 
 export async function runAgent(options) {
-  const serverUrl = String(options.serverUrl || '').replace(/\/$/, '');
+  const serverUrl = normalizedServerUrl(options.serverUrl);
   const deviceToken = String(options.deviceToken || '');
   const deviceId = String(options.deviceId || '');
   const deviceName = String(options.deviceName || os.hostname());
@@ -278,11 +296,7 @@ export async function runAgent(options) {
 
   // --- relay connection ---------------------------------------------------------------
   function send(message) {
-    if (activeSocket?.readyState === 1) {
-      activeSocket.send(JSON.stringify(message));
-      return true;
-    }
-    return false;
+    return sendRelayMessage(activeSocket, message);
   }
 
   function flushTelemetry() {
@@ -352,10 +366,10 @@ export async function runAgent(options) {
       } else {
         throw new Error('The ReMCP local runtime is restarting. Retry in a few seconds.');
       }
-      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'response', id: message.id, result }));
+      sendRelayMessage(ws, { type: 'response', id: message.id, result });
     } catch (error) {
       const cancelled = controller.signal.aborted;
-      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'response', id: message.id, error: { message: cancelled ? 'Cancelled: the client stopped waiting for this call.' : error instanceof Error ? error.message : String(error) } }));
+      sendRelayMessage(ws, { type: 'response', id: message.id, error: { message: cancelled ? 'Cancelled: the client stopped waiting for this call.' : error instanceof Error ? error.message : String(error) } });
     } finally {
       inFlight.delete(message.id);
       pendingRequests = Math.max(0, pendingRequests - 1);
@@ -364,6 +378,9 @@ export async function runAgent(options) {
 
   function connect() {
     if (stopping) return;
+    // The device token is intentionally sent only to the configured ReMCP relay during the
+    // authenticated WebSocket handshake.
+    // codeql[js/file-access-to-http]
     const ws = new WebSocket(agentUrl, { headers: { Authorization: `Bearer ${deviceToken}` } });
     // The ws client leaves cleanup/retry to the caller when an unexpected-response listener exists.
     // A temporary workspace pause therefore needs an explicit retry; otherwise the first 423 leaves
@@ -398,7 +415,7 @@ export async function runAgent(options) {
         reconnectTimer = null;
       }
       reconnects = 0;
-      ws.send(JSON.stringify({
+      sendRelayMessage(ws, {
         type: 'hello',
         deviceId,
         deviceName,
@@ -412,7 +429,7 @@ export async function runAgent(options) {
         runtimeTools,
         telemetryEnabled,
         reconnects,
-      }));
+      });
       console.log(`Connected to ${serverUrl} as ${deviceName}`);
       send({ type: 'metrics', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown }), runtimeState: runtimeDown ? 'down' : 'ready', runtimeError });
       reportInstallOnce();
@@ -505,6 +522,8 @@ export async function runAgent(options) {
     if (options.autoUpdate === false) return;
     if (updateInFlight) return;
     try {
+      // This request contains no local file payload; the config-derived URL is the explicitly paired relay.
+      // codeql[js/file-access-to-http]
       const response = await fetch(`${serverUrl}/api/agent/version`, { signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS) });
       if (!response.ok) return;
       const advertised = await response.json();

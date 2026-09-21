@@ -1,9 +1,9 @@
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { access, chmod, chown, copyFile, cp, lstat, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, chown, copyFile, cp, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { liveConfig, runtimeConfig } from '../config.mjs';
 import { documentKind, readDocxText, readPdfText } from '../documents.mjs';
@@ -38,6 +38,42 @@ function assertRegularFile(info, absolute) {
   if (info.isDirectory()) fail(`${displayPath(absolute)} is a directory, not a file`);
   if (!info.isFile()) fail(`${displayPath(absolute)} is not a regular file`);
   return info;
+}
+
+const READ_NOFOLLOW = constants.O_RDONLY | (constants.O_NOFOLLOW || 0);
+const READWRITE_NOFOLLOW = constants.O_RDWR | (constants.O_NOFOLLOW || 0);
+
+async function openRegularFile(absolute, flags = READ_NOFOLLOW) {
+  const handle = await open(absolute, flags);
+  try {
+    const info = assertRegularFile(await handle.stat(), absolute);
+    return { handle, info };
+  } catch (error) {
+    await handle.close().catch(() => {});
+    throw error;
+  }
+}
+
+async function readRegularBuffer(absolute, maxBytes = Infinity) {
+  const { handle, info } = await openRegularFile(absolute);
+  try {
+    if (info.size > maxBytes) fail(`File is too large to read inline (${info.size} bytes)`);
+    return { info, buffer: await handle.readFile() };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function overwriteOpenFile(handle, content) {
+  const buffer = Buffer.from(content, 'utf8');
+  await handle.truncate(0);
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesWritten } = await handle.write(buffer, offset, buffer.length - offset, offset);
+    if (!bytesWritten) throw new Error('Could not finish writing the open file');
+    offset += bytesWritten;
+  }
+  await handle.truncate(buffer.length);
 }
 
 // Traversal helper for every multi-file tool. A symbolic link inside an allowed root can point
@@ -85,10 +121,13 @@ async function confineAll(paths) {
 }
 
 async function readTextFile(absolute) {
-  const info = await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`));
-  assertRegularFile(info, absolute);
-  if (info.size > MAX_INLINE_FILE_BYTES) fail(`File is too large to read inline (${info.size} bytes)`);
-  const buffer = await readFile(absolute);
+  let opened;
+  try { opened = await readRegularBuffer(absolute, MAX_INLINE_FILE_BYTES); }
+  catch (error) {
+    if (error?.code === 'ENOENT') fail(`File not found: ${displayPath(absolute)}`);
+    throw error;
+  }
+  const { info, buffer } = opened;
   const decoded = decodeText(buffer);
   if (decoded.encoding === 'utf8' && looksBinary(buffer)) {
     fail(`${displayPath(absolute)} looks like a binary file and cannot be read as text. Use read_image for images, or get_file_info and hash_file for other binaries.`);
@@ -101,10 +140,7 @@ export async function readFileTool(args) {
   // Documents first: a .docx or .pdf is not text, and the binary guard below would refuse it.
   const kind = documentKind(absolute);
   if (kind) {
-    const info = await stat(absolute);
-    assertRegularFile(info, absolute);
-    if (info.size > MAX_INLINE_FILE_BYTES) fail(`File is too large to read inline (${info.size} bytes)`);
-    const buffer = await readFile(absolute);
+    const { buffer } = await readRegularBuffer(absolute, MAX_INLINE_FILE_BYTES);
     const extracted = kind === 'docx' ? readDocxText(buffer) : readPdfText(buffer);
     const documentLines = splitLines(extracted);
     const offset = Number.isFinite(Number(args.offset)) ? Math.trunc(Number(args.offset)) : 0;
@@ -157,15 +193,20 @@ export async function readMultipleFilesTool(args) {
 
 export async function readImageTool(args) {
   const absolute = await resolveSafePath(args.path);
-  const info = assertRegularFile(await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`)), absolute);
-  if (info.size > MAX_IMAGE_BYTES) fail(`Image is ${info.size} bytes, above the ${MAX_IMAGE_BYTES}-byte inline limit`);
+  let opened;
+  try { opened = await readRegularBuffer(absolute, MAX_IMAGE_BYTES); }
+  catch (error) {
+    if (error?.code === 'ENOENT') fail(`File not found: ${displayPath(absolute)}`);
+    throw error;
+  }
+  const { info, buffer } = opened;
   const mimeType = IMAGE_TYPES.get(path.extname(absolute).toLowerCase());
   if (!mimeType) fail(`${displayPath(absolute)} is not a supported image type (${[...IMAGE_TYPES.keys()].join(', ')})`);
   if (mimeType === 'image/svg+xml') {
-    const { content } = await readTextFile(absolute);
-    return text(`SVG image ${displayPath(absolute)} (${info.size} bytes):\n${content}`);
+    const decoded = decodeText(buffer);
+    if (decoded.encoding === 'utf8' && looksBinary(buffer)) fail(`${displayPath(absolute)} looks like a binary file`);
+    return text(`SVG image ${displayPath(absolute)} (${info.size} bytes):\n${decoded.text}`);
   }
-  const buffer = await readFile(absolute);
   return multi([
     { type: 'text', text: `${displayPath(absolute)} — ${mimeType}, ${info.size} bytes` },
     image(buffer.toString('base64'), mimeType),
@@ -174,12 +215,22 @@ export async function readImageTool(args) {
 
 export async function hashFileTool(args) {
   const absolute = await resolveSafePath(args.path);
-  const info = assertRegularFile(await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`)), absolute);
+  let opened;
+  try { opened = await openRegularFile(absolute); }
+  catch (error) {
+    if (error?.code === 'ENOENT') fail(`File not found: ${displayPath(absolute)}`);
+    throw error;
+  }
+  const { handle, info } = opened;
   const algorithm = String(args.algorithm || 'sha256').toLowerCase();
-  if (!['sha256', 'sha1', 'md5'].includes(algorithm)) fail('algorithm must be sha256, sha1, or md5');
+  if (!['sha256', 'sha1', 'md5'].includes(algorithm)) { await handle.close(); fail('algorithm must be sha256, sha1, or md5'); }
   const hash = createHash(algorithm);
-  await pipeline(createReadStream(absolute), hash);
-  return text(`${algorithm} ${hash.digest('hex')}  ${displayPath(absolute)} (${info.size} bytes)`);
+  try {
+    await pipeline(createReadStream(absolute, { fd: handle.fd, autoClose: false }), hash);
+    return text(`${algorithm} ${hash.digest('hex')}  ${displayPath(absolute)} (${info.size} bytes)`);
+  } finally {
+    await handle.close();
+  }
 }
 
 async function listEntry(base, depth, maxDepth, prefix, pattern) {
@@ -230,11 +281,11 @@ export async function getFileInfoTool(args) {
     permissions: `0${(info.mode & 0o777).toString(8)}`,
   };
   if (info.isFile() && info.size <= MAX_INLINE_FILE_BYTES) {
-    const buffer = await readFile(absolute).catch(() => null);
-    if (buffer) {
-      const decoded = decodeText(buffer);
+    const opened = await readRegularBuffer(absolute, MAX_INLINE_FILE_BYTES).catch(() => null);
+    if (opened) {
+      const decoded = decodeText(opened.buffer);
       if (decoded.encoding !== 'utf8') payload.encoding = decoded.encoding;
-      if (decoded.encoding !== 'utf8' || !looksBinary(buffer)) {
+      if (decoded.encoding !== 'utf8' || !looksBinary(opened.buffer)) {
         const lines = splitLines(decoded.text);
         payload.lineCount = lines.length;
         payload.lastLine = Math.max(0, lines.length - 1);
@@ -284,12 +335,17 @@ export async function writeFileTool(args) {
 // large file is read as a sequence of base64 slices and written back the same way.
 export async function readBinaryTool(args) {
   const absolute = await resolveSafePath(args.path);
-  const info = assertRegularFile(await stat(absolute).catch(() => fail(`File not found: ${displayPath(absolute)}`)), absolute);
+  let opened;
+  try { opened = await openRegularFile(absolute); }
+  catch (error) {
+    if (error?.code === 'ENOENT') fail(`File not found: ${displayPath(absolute)}`);
+    throw error;
+  }
+  const { handle, info } = opened;
   const offset = Math.max(0, Number.isFinite(Number(args.offset_bytes)) ? Math.trunc(Number(args.offset_bytes)) : 0);
   const length = clampInteger(args.length_bytes, MAX_BINARY_CHUNK_BYTES, 1, MAX_BINARY_CHUNK_BYTES);
   const start = Math.min(offset, info.size);
   const end = Math.min(info.size, start + length);
-  const handle = await open(absolute, 'r');
   try {
     const buffer = Buffer.alloc(end - start);
     if (buffer.length) await handle.read(buffer, 0, buffer.length, start);
@@ -449,23 +505,29 @@ export async function replaceInFilesTool(args) {
   for (const file of files) {
     if (changed.length >= maxFiles) break;
     if (glob && !glob.test(path.basename(file))) continue;
-    const fileInfo = await stat(file).catch(() => null);
-    if (!fileInfo || fileInfo.size > MAX_INLINE_FILE_BYTES) continue;
-    const buffer = await readFile(file).catch(() => null);
-    if (!buffer) continue;
-    const decoded = decodeText(buffer);
-    if (decoded.encoding === 'utf8' && looksBinary(buffer)) continue;
-    scanned += 1;
-    const original = decoded.text;
-    const count = isRegex ? (original.match(matcher) || []).length : original.split(pattern).length - 1;
-    if (!count) continue;
-    if (isRegex) matcher.lastIndex = 0;
-    const updated = isRegex ? original.replace(matcher, replacement) : original.split(pattern).join(replacement);
-    if (updated === original) continue;
-    assertWritableSize(updated);
-    if (!dryRun) await writeFile(file, updated, 'utf8');
-    const stats = diffStats(original, updated);
-    changed.push({ file: displayPath(file), replacements: count, added: stats.added, removed: stats.removed });
+    let opened;
+    try { opened = await openRegularFile(file, dryRun ? READ_NOFOLLOW : READWRITE_NOFOLLOW); }
+    catch { continue; }
+    const { handle, info: fileInfo } = opened;
+    try {
+      if (fileInfo.size > MAX_INLINE_FILE_BYTES) continue;
+      const buffer = await handle.readFile();
+      const decoded = decodeText(buffer);
+      if (decoded.encoding === 'utf8' && looksBinary(buffer)) continue;
+      scanned += 1;
+      const original = decoded.text;
+      const count = isRegex ? (original.match(matcher) || []).length : original.split(pattern).length - 1;
+      if (!count) continue;
+      if (isRegex) matcher.lastIndex = 0;
+      const updated = isRegex ? original.replace(matcher, replacement) : original.split(pattern).join(replacement);
+      if (updated === original) continue;
+      assertWritableSize(updated);
+      if (!dryRun) await overwriteOpenFile(handle, updated);
+      const stats = diffStats(original, updated);
+      changed.push({ file: displayPath(file), replacements: count, added: stats.added, removed: stats.removed });
+    } finally {
+      await handle.close();
+    }
   }
   if (!changed.length) return text(`No matches for ${JSON.stringify(pattern)} in ${displayPath(root)} (${scanned} text files scanned).`);
   const rows = changed.map(entry => `${dryRun ? 'would change' : 'changed'} ${entry.file} · ${entry.replacements} replacement(s) · +${entry.added}/-${entry.removed} lines`);
@@ -963,55 +1025,62 @@ function windowsScreenshotScript(file) {
 }
 
 export async function takeScreenshotTool(args) {
-  const directory = await resolveSafePath(args.directory || os.tmpdir(), 'directory');
-  await mkdir(directory, { recursive: true });
-  const file = path.join(directory, `remcp-screenshot-${Date.now()}.png`);
+  const requestedDirectory = args.directory ? await resolveSafePath(args.directory, 'directory') : '';
+  const temporaryDirectory = requestedDirectory ? '' : await mkdtemp(path.join(os.tmpdir(), 'remcp-screenshot-'));
+  const directory = requestedDirectory || temporaryDirectory;
+  if (requestedDirectory) await mkdir(directory, { recursive: true });
+  const file = path.join(directory, `capture-${randomUUID()}.png`);
   const attempts = [];
-  if (process.platform === 'win32') {
-    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', windowsScreenshotScript(file)], { encoding: 'utf8', timeout: 30000 });
-    attempts.push(`powershell: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
-  } else {
-    // GNOME and other modern Wayland compositors intentionally prevent X11/wlroots
-    // screenshot commands from reading the desktop. The freedesktop Screenshot portal
-    // is the compositor-supported API and must run before command-line fallbacks.
-    if (process.platform === 'linux' && isWaylandSession()) {
-      try {
-        await capturePortalScreenshot(file);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : `xdg-desktop-portal: ${String(error)}`;
-        attempts.push(message);
-        if (error && typeof error === 'object' && error.code === 'PORTAL_CANCELLED') {
-          fail(`Screen capture was cancelled in the desktop permission dialog (${message}).`);
+  let preserveCapture = false;
+  try {
+    if (process.platform === 'win32') {
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', windowsScreenshotScript(file)], { encoding: 'utf8', timeout: 30000 });
+      attempts.push(`powershell: ${(result.stderr || '').trim() || ('exit ' + result.status)}`);
+    } else {
+      if (process.platform === 'linux' && isWaylandSession()) {
+        try {
+          await capturePortalScreenshot(file);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : `xdg-desktop-portal: ${String(error)}`;
+          attempts.push(message);
+          if (error && typeof error === 'object' && error.code === 'PORTAL_CANCELLED') {
+            fail(`Screen capture was cancelled in the desktop permission dialog (${message}).`);
+          }
+        }
+      }
+      if (!await pathExists(file)) {
+        for (const candidate of SCREENSHOT_COMMANDS) {
+          if (spawnSync('which', [candidate.command], { encoding: 'utf8' }).status !== 0) continue;
+          const result = spawnSync(candidate.command, candidate.args(file), { encoding: 'utf8', timeout: 30000 });
+          if (result.status === 0 && await pathExists(file)) break;
+          attempts.push(`${candidate.command}: ${(result.stderr || '').trim() || ('exit ' + result.status)}`);
         }
       }
     }
-    if (!await pathExists(file)) {
-      for (const candidate of SCREENSHOT_COMMANDS) {
-        if (spawnSync('which', [candidate.command], { encoding: 'utf8' }).status !== 0) continue;
-        const result = spawnSync(candidate.command, candidate.args(file), { encoding: 'utf8', timeout: 30000 });
-        if (result.status === 0 && await pathExists(file)) break;
-        attempts.push(`${candidate.command}: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+    if (!await pathExists(file)) fail(screenshotAdvice(attempts));
+
+    const { handle, info } = await openRegularFile(file);
+    try {
+      if (info.size <= MAX_IMAGE_BYTES) {
+        const buffer = await handle.readFile();
+        preserveCapture = args.keep === true;
+        return multi([
+          { type: 'text', text: `Screenshot of ${os.hostname()} (${info.size} bytes)${preserveCapture ? (' saved at ' + displayPath(file)) : ''}` },
+          image(buffer.toString('base64'), 'image/png'),
+        ]);
       }
+      preserveCapture = true;
+      return text(`Screenshot of ${os.hostname()} captured: ${info.size} bytes, above the ${MAX_IMAGE_BYTES}-byte inline limit, so it is saved at ${displayPath(file)} instead of being returned as an image. Fetch it with read_binary using chunks of up to ${MAX_BINARY_CHUNK_BYTES} bytes (offset_bytes and length_bytes), or ask for a smaller region.`);
+    } finally {
+      await handle.close();
+    }
+  } finally {
+    if (!preserveCapture) {
+      if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => {});
+      else await rm(file, { force: true }).catch(() => {});
     }
   }
-  if (!await pathExists(file)) {
-    fail(screenshotAdvice(attempts));
-  }
-  const info = await stat(file);
-  if (info.size <= MAX_IMAGE_BYTES) {
-    const buffer = await readFile(file);
-    if (args.keep !== true) await rm(file, { force: true });
-    return multi([
-      { type: 'text', text: `Screenshot of ${os.hostname()} (${info.size} bytes)${args.keep === true ? ` saved at ${displayPath(file)}` : ''}` },
-      image(buffer.toString('base64'), 'image/png'),
-    ]);
-  }
-  // A big screen is not an error: the PNG stays on the computer and the model is told how to fetch it
-  // in chunks, which is the same path every other large file takes. Failing here used to lose the
-  // screenshot entirely.
-  return text(`Screenshot of ${os.hostname()} captured: ${info.size} bytes, above the ${MAX_IMAGE_BYTES}-byte inline limit, so it is saved at ${displayPath(file)} instead of being returned as an image. Fetch it with read_binary using chunks of up to ${MAX_BINARY_CHUNK_BYTES} bytes (offset_bytes and length_bytes), or ask for a smaller region.`);
 }
-
 export const fileToolHandlers = {
   read_file: readFileTool,
   read_files: readFilesTool,

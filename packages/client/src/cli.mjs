@@ -14,6 +14,13 @@ import { configFile, npm, officialOrigin, runtimeConfigFile } from './cli/env.mj
 import { currentInstallationInfo, ensureMacCliCommand, installPersistentAgent, persistentServiceState, rememberCurrentInstallation, restartPersistentServiceIfInstalled, serviceInstallationInfo, uninstallPersistentService } from './cli/service.mjs';
 import { run } from './cli/shell.mjs';
 import { updateCommand } from './cli/update.mjs';
+function fetchConfiguredServer(url, options) {
+  // The URL comes from the locally paired ReMCP config and is used only as the destination;
+  // status checks do not upload local file contents.
+  // codeql[js/file-access-to-http]
+  return fetch(url, options);
+}
+
 function parse(argv) {
   const [command = 'help', ...rest] = argv;
   const flags = {};
@@ -188,10 +195,10 @@ export async function main(argv = process.argv.slice(2)) {
   if (command === 'status' || command === 'doctor') {
     const cfg = rememberCurrentInstallation(loadConfig());
     const [health, advertised] = await Promise.all([
-      fetch(`${cfg.serverUrl}/health?fresh=${Date.now()}`, { cache:'no-store' })
+      fetchConfiguredServer(`${cfg.serverUrl}/health?fresh=${Date.now()}`, { cache:'no-store' })
         .then(async response => ({ reachable:response.ok && (await response.json().catch(() => null))?.ok === true }))
         .catch(error => ({ reachable:false, error:error.message })),
-      fetch(`${cfg.serverUrl}/api/agent/version?fresh=${Date.now()}`, { cache:'no-store' })
+      fetchConfiguredServer(`${cfg.serverUrl}/api/agent/version?fresh=${Date.now()}`, { cache:'no-store' })
         .then(response => response.ok ? response.json() : null)
         .catch(() => null),
     ]);

@@ -1,12 +1,13 @@
 import path from 'node:path';
 import process from 'node:process';
-import { readFile, stat } from 'node:fs/promises';
+
 import { image, multi, text } from '../util.mjs';
 import {
   clamp,
   escapePowerShellSingle,
   jsonResult,
   optionalString,
+  readPrivateTempFile,
   removeTemp,
   requireEnum,
   runPowerShell,
@@ -486,8 +487,7 @@ export async function screenshotRegion(args = {}) {
   try{
     const safe=escapePowerShellSingle(target);
     await runPowerShell(`Add-Type -AssemblyName System.Drawing;$b=New-Object System.Drawing.Bitmap(${width},${height});$g=[System.Drawing.Graphics]::FromImage($b);$g.CopyFromScreen(${x},${y},0,0,$b.Size);$b.Save('${safe}',[System.Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$b.Dispose()`,{label:'screenshot region'});
-    const info=await stat(target);if(info.size>4*1024*1024)throw new Error(`captured region is ${info.size} bytes; request a smaller region so it fits the inline image limit`);
-    const data=await readFile(target);
+    const {data}=await readPrivateTempFile(target,4*1024*1024);
     return multi([{type:'text',text:`Captured ${width}x${height} at ${x},${y}.`},image(data.toString('base64'),'image/png')]);
   }finally{await removeTemp(dir);}
 }
