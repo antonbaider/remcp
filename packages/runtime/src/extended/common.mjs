@@ -4,6 +4,7 @@ import process from 'node:process';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { StringDecoder } from 'node:string_decoder';
 import { promisify } from 'node:util';
 import { ToolError, fail, structured, text } from '../util.mjs';
 
@@ -98,6 +99,85 @@ export async function runWithInput(file, args = [], input = '', options = {}) {
       else finish(reject, new ToolError(`${options.label || file} failed: ${stderr.trim() || `exit ${code}`}`));
     });
     child.stdin.end(String(input));
+  });
+}
+
+export async function runFileHeadLines(file, args = [], lineLimit = 200, options = {}) {
+  const timeout = clamp(options.timeout, 15_000, 100, 120_000);
+  const limit = clamp(lineLimit, 200, 1, 5000);
+  const maxBuffer = clamp(options.maxBuffer, 1024 * 1024, 1024, 64 * 1024 * 1024);
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args.map(String), {
+      cwd: options.cwd,
+      env: options.env || process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    const decoder = new StringDecoder('utf8');
+    const lines = [];
+    const err = [];
+    let pending = '';
+    let buffered = 0;
+    let settled = false;
+    let reachedLimit = false;
+    let hardKillTimer = null;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (hardKillTimer) clearTimeout(hardKillTimer);
+      fn(value);
+    };
+    const stopAfterLimit = () => {
+      if (reachedLimit) return;
+      reachedLimit = true;
+      child.kill('SIGTERM');
+      hardKillTimer = setTimeout(() => child.kill('SIGKILL'), 250);
+      hardKillTimer.unref?.();
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(reject, new ToolError(`${options.label || file} timed out after ${timeout} ms`));
+    }, timeout);
+    child.stdout.on('data', chunk => {
+      if (settled || reachedLimit) return;
+      buffered += chunk.length;
+      if (buffered > maxBuffer) {
+        child.kill('SIGKILL');
+        finish(reject, new ToolError(`${options.label || file} exceeded the ${maxBuffer} byte output limit before producing ${limit} lines`));
+        return;
+      }
+      pending += decoder.write(chunk);
+      while (lines.length < limit) {
+        const newline = pending.indexOf('\n');
+        if (newline < 0) break;
+        lines.push(pending.slice(0, newline));
+        pending = pending.slice(newline + 1);
+      }
+      if (lines.length >= limit) stopAfterLimit();
+    });
+    child.stderr.on('data', chunk => {
+      if (settled || reachedLimit) return;
+      buffered += chunk.length;
+      if (buffered > maxBuffer) {
+        child.kill('SIGKILL');
+        finish(reject, new ToolError(`${options.label || file} exceeded the ${maxBuffer} byte output limit`));
+        return;
+      }
+      err.push(chunk);
+    });
+    child.on('error', error => finish(reject, new ToolError(`${options.label || file} failed: ${error.message}`)));
+    child.on('close', code => {
+      if (settled) return;
+      if (!reachedLimit) {
+        pending += decoder.end();
+        if (pending && lines.length < limit) lines.push(pending);
+      }
+      const stdout = lines.slice(0, limit).join('\n');
+      const stderr = Buffer.concat(err).toString('utf8');
+      if (code === 0 || reachedLimit || options.allowFailure) finish(resolve, { stdout, stderr, code, truncated: reachedLimit });
+      else finish(reject, new ToolError(`${options.label || file} failed: ${stderr.trim() || `exit ${code}`}`));
+    });
   });
 }
 

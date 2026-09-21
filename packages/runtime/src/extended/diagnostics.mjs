@@ -15,6 +15,7 @@ import {
   optionalString,
   requireEnum,
   runFile,
+  runFileHeadLines,
   runOsa,
   runPowerShell,
   safeEnvironment,
@@ -92,8 +93,8 @@ export async function eventLog(args) {
   if (process.platform === 'darwin') {
     const argv = ['show','--last',since,'--style','ndjson'];
     if (filter) argv.push('--predicate', `eventMessage CONTAINS[c] ${JSON.stringify(filter)}`);
-    const { stdout } = await runFile('/usr/bin/log', argv, { label: 'macOS unified log', timeout: 30_000, maxBuffer: 32 * 1024 * 1024 });
-    return text(stdout.split('\n').slice(0, limit).join('\n'));
+    const { stdout } = await runFileHeadLines('/usr/bin/log', argv, limit, { label: 'macOS unified log', timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
+    return text(stdout);
   }
   if (!commandExists('journalctl')) unavailable('Event logs', 'journalctl is required on Linux');
   const n = Number.parseInt(since, 10), unit = since.at(-1);

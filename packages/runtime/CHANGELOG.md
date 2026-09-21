@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.86 — 2026-09-21
+
+- macOS `event_log` now streams unified-log output and terminates `/usr/bin/log show` after the requested line limit instead of buffering the whole selected time window.
+- The shared bounded line reader preserves UTF-8 boundaries, caps memory/stderr, enforces timeouts, and force-kills a child that ignores graceful termination.
+- Regression coverage proves a noisy process is stopped after the requested number of lines; the runtime catalog remains 83 tools.
+
 ## 0.2.85 — 2026-09-21
 
 - Runtime capability remains 83 granular tools; no device-side operation is removed or renamed in this patch.

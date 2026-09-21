@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import process from 'node:process';
 import { environmentTool } from '../src/extended/diagnostics.mjs';
-import { runWithInput, safeEnvironment } from '../src/extended/common.mjs';
+import { runFileHeadLines, runWithInput, safeEnvironment } from '../src/extended/common.mjs';
 
 test('environment variables are opt-in and credential-bearing values are redacted', async t => {
   const previous = {
@@ -33,6 +33,13 @@ test('environment variables are opt-in and credential-bearing values are redacte
 
   const sanitized = safeEnvironment();
   assert.equal(sanitized.DATABASE_URL, '***');
+});
+
+test('runFileHeadLines stops a noisy child after the requested number of lines', async () => {
+  const result = await runFileHeadLines(process.execPath, ['-e', "for(let i=0;i<100000;i++) console.log('line-'+i)"], 7, { label:'line head fixture', timeout:5000 });
+  assert.equal(result.stdout.split('\n').filter(Boolean).length, 7);
+  assert.match(result.stdout, /^line-0\nline-1\n/);
+  assert.match(result.stdout, /line-6\n?$/);
 });
 
 test('runWithInput bounds child stdout and stderr before buffering them in memory', async () => {
