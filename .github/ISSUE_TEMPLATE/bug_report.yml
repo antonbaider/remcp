@@ -1,0 +1,65 @@
+name: Bug report
+description: Report reproducible behavior in the ReMCP client, runtime, tools, plugins, or release artifacts.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a ReMCP bug. Do not include credentials, OAuth/device tokens, private host details, or sensitive file contents.
+  - type: input
+    id: version
+    attributes:
+      label: ReMCP version
+      description: Run `remcp --version` or provide the package/release version.
+      placeholder: "0.2.88"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Device client / pairing
+        - Local runtime / MCP tools
+        - Desktop or browser control
+        - Files / terminal / documents
+        - Plugin or marketplace integration
+        - Release / npm package
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, Node.js version, and host application if relevant.
+      placeholder: "Windows 11 x64, Node 22.x, ChatGPT"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction
+      description: Minimal safe steps to reproduce the problem.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Remove secrets, file contents, tokens, personal data, and private host details before attaching anything.
