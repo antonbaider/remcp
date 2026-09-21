@@ -23,8 +23,11 @@ To run it directly:
 ```bash
 npx @remcp/runtime --describe   # version, limits, configuration, telemetry state
 npx @remcp/runtime --print-tools
-npx @remcp/runtime              # MCP server over stdio
+npx @remcp/runtime              # granular capability-aware MCP server over stdio
+node ./src/compact.mjs --print-tools  # compact local façade for scanners/local MCP hosts
 ```
+
+`src/compact.mjs` is a second stdio entrypoint over the **same real handlers**. It advertises `read_file` plus up to seven `verb_noun` domain tools (`manage_files`, `run_terminal`, `control_computer`, `view_image`, `control_browser`, `manage_system`, `manage_documents`) and narrows each operation enum to capabilities available on the current host. It exists for directory scanners and local MCP hosts that benefit from a small selection surface; the paired ReMCP agent continues to use the granular capability-aware entrypoint.
 
 ## Tools
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.88 — 2026-09-21
+
+- Added a real compact stdio façade over the same runtime handlers: `read_file` plus up to seven capability-filtered `verb_noun` domain tools.
+- Grouped operations keep their original closed schemas and dispatch through `invokeTool`, so the compact surface changes discovery, not execution or permissions.
+- The normal paired-agent runtime remains the granular 83-operation capability-aware server.
+- Added compact-catalog parity and end-to-end stdio tests.
+
 ## 0.2.87 — 2026-09-21
 
 - macOS `event_log` now streams only the requested head lines from `log show` and terminates the child once the limit is reached.
