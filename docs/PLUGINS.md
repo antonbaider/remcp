@@ -149,7 +149,7 @@ ReMCP is also published or indexed in the main MCP discovery layers:
 
 - **Smithery:** <https://smithery.ai/servers/antonbaider/remcp>
 - **Glama:** <https://glama.ai/mcp/servers/antonbaider/remcp>
-- **Official MCP Registry:** published as `io.github.getremcp/remcp` for registry-aware clients.
+- **Official MCP Registry:** currently published as `io.github.antonbaider/remcp`; migration to `io.github.getremcp/remcp` is pending after the public GitHub repository transfer.
 
 These are discovery/catalog surfaces rather than separate ReMCP accounts. They point users back to
 the same production service, OAuth boundary, and paired computers.

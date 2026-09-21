@@ -90,7 +90,7 @@ jobs:
       # short-lived credential, so no NPM_TOKEN secret and no one-time password are
       # involved. Configure it once per package on npmjs.com:
       #   Package settings -> Trusted Publisher -> GitHub Actions
-      #   organization/user: antonbaider, repository: remcp, workflow: ci.yml
+      #   organization/user: getremcp, repository: remcp, workflow: ci.yml
       # Re-running a failed release must be safe: an already published version is skipped
       # instead of failing the workflow with "cannot publish over the previously published
       # versions".
@@ -175,7 +175,9 @@ jobs:
 
   publish-mcp-registry:
     name: publish to official MCP Registry
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    # Manual CI is validation-only. Registry publishing is a release side effect and only
+    # belongs to immutable v* tags.
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -199,7 +201,56 @@ jobs:
           /tmp/mcp-publisher --version
       - name: Validate registry metadata
         run: /tmp/mcp-publisher validate server.json
+      - name: Check MCP Registry publication state
+        id: registry-preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          name="$(node -p "require('./server.json').name")"
+          version="$(node -p "require('./server.json').version")"
+          remote="$(node -p "require('./server.json').remotes[0].url")"
+          encode() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$1"; }
+
+          encoded="$(encode "$name")"
+          current_url="https://registry.modelcontextprotocol.io/v0/servers/$encoded/versions/$version"
+          current_status="$(curl --silent --show-error --output /tmp/remcp-registry-current.json --write-out '%{http_code}' "$current_url")"
+          if [[ "$current_status" == 200 ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "$name@$version is already present in the Official MCP Registry"
+            exit 0
+          fi
+          if [[ "$current_status" != 404 ]]; then
+            cat /tmp/remcp-registry-current.json >&2 || true
+            echo "Registry preflight failed with HTTP $current_status" >&2
+            exit 1
+          fi
+
+          # The public repository moved from antonbaider/remcp to getremcp/remcp. The
+          # Official MCP Registry keeps remote URLs unique, so the new GitHub namespace
+          # cannot be published until maintainers migrate/delete the legacy identity.
+          legacy_name='io.github.antonbaider/remcp'
+          if [[ "$name" == 'io.github.getremcp/remcp' ]]; then
+            legacy_encoded="$(encode "$legacy_name")"
+            legacy_url="https://registry.modelcontextprotocol.io/v0/servers/$legacy_encoded/versions/latest"
+            legacy_status="$(curl --silent --show-error --output /tmp/remcp-registry-legacy.json --write-out '%{http_code}' "$legacy_url")"
+            if [[ "$legacy_status" == 200 ]]; then
+              legacy_remote="$(node -e "const fs=require('fs');const x=JSON.parse(fs.readFileSync('/tmp/remcp-registry-legacy.json','utf8'));process.stdout.write(x.server?.remotes?.[0]?.url||'')")"
+              if [[ "$legacy_remote" == "$remote" ]]; then
+                echo "publish=false" >> "$GITHUB_OUTPUT"
+                echo "::warning::Official MCP Registry namespace migration is pending: $legacy_name still owns $remote. Skipping registry publication without failing this release."
+                exit 0
+              fi
+            elif [[ "$legacy_status" != 404 ]]; then
+              cat /tmp/remcp-registry-legacy.json >&2 || true
+              echo "Legacy Registry preflight failed with HTTP $legacy_status" >&2
+              exit 1
+            fi
+          fi
+
+          echo "publish=true" >> "$GITHUB_OUTPUT"
       - name: Authenticate with GitHub Actions OIDC
+        if: steps.registry-preflight.outputs.publish == 'true'
         run: /tmp/mcp-publisher login github-oidc
       - name: Publish current ReMCP version
+        if: steps.registry-preflight.outputs.publish == 'true'
         run: /tmp/mcp-publisher publish server.json
