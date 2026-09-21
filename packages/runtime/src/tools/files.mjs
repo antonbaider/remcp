@@ -1,9 +1,9 @@
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { access, chmod, chown, copyFile, cp, lstat, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, chown, copyFile, cp, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { liveConfig, runtimeConfig } from '../config.mjs';
 import { documentKind, readDocxText, readPdfText } from '../documents.mjs';
@@ -1025,59 +1025,62 @@ function windowsScreenshotScript(file) {
 }
 
 export async function takeScreenshotTool(args) {
-  const directory = await resolveSafePath(args.directory || os.tmpdir(), 'directory');
-  await mkdir(directory, { recursive: true });
-  const file = path.join(directory, `remcp-screenshot-${Date.now()}.png`);
+  const requestedDirectory = args.directory ? await resolveSafePath(args.directory, 'directory') : '';
+  const temporaryDirectory = requestedDirectory ? '' : await mkdtemp(path.join(os.tmpdir(), 'remcp-screenshot-'));
+  const directory = requestedDirectory || temporaryDirectory;
+  if (requestedDirectory) await mkdir(directory, { recursive: true });
+  const file = path.join(directory, `capture-${randomUUID()}.png`);
   const attempts = [];
-  if (process.platform === 'win32') {
-    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', windowsScreenshotScript(file)], { encoding: 'utf8', timeout: 30000 });
-    attempts.push(`powershell: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
-  } else {
-    // GNOME and other modern Wayland compositors intentionally prevent X11/wlroots
-    // screenshot commands from reading the desktop. The freedesktop Screenshot portal
-    // is the compositor-supported API and must run before command-line fallbacks.
-    if (process.platform === 'linux' && isWaylandSession()) {
-      try {
-        await capturePortalScreenshot(file);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : `xdg-desktop-portal: ${String(error)}`;
-        attempts.push(message);
-        if (error && typeof error === 'object' && error.code === 'PORTAL_CANCELLED') {
-          fail(`Screen capture was cancelled in the desktop permission dialog (${message}).`);
+  let preserveCapture = false;
+  try {
+    if (process.platform === 'win32') {
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', windowsScreenshotScript(file)], { encoding: 'utf8', timeout: 30000 });
+      attempts.push(`powershell: ${(result.stderr || '').trim() || ('exit ' + result.status)}`);
+    } else {
+      if (process.platform === 'linux' && isWaylandSession()) {
+        try {
+          await capturePortalScreenshot(file);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : `xdg-desktop-portal: ${String(error)}`;
+          attempts.push(message);
+          if (error && typeof error === 'object' && error.code === 'PORTAL_CANCELLED') {
+            fail(`Screen capture was cancelled in the desktop permission dialog (${message}).`);
+          }
+        }
+      }
+      if (!await pathExists(file)) {
+        for (const candidate of SCREENSHOT_COMMANDS) {
+          if (spawnSync('which', [candidate.command], { encoding: 'utf8' }).status !== 0) continue;
+          const result = spawnSync(candidate.command, candidate.args(file), { encoding: 'utf8', timeout: 30000 });
+          if (result.status === 0 && await pathExists(file)) break;
+          attempts.push(`${candidate.command}: ${(result.stderr || '').trim() || ('exit ' + result.status)}`);
         }
       }
     }
-    if (!await pathExists(file)) {
-      for (const candidate of SCREENSHOT_COMMANDS) {
-        if (spawnSync('which', [candidate.command], { encoding: 'utf8' }).status !== 0) continue;
-        const result = spawnSync(candidate.command, candidate.args(file), { encoding: 'utf8', timeout: 30000 });
-        if (result.status === 0 && await pathExists(file)) break;
-        attempts.push(`${candidate.command}: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+    if (!await pathExists(file)) fail(screenshotAdvice(attempts));
+
+    const { handle, info } = await openRegularFile(file);
+    try {
+      if (info.size <= MAX_IMAGE_BYTES) {
+        const buffer = await handle.readFile();
+        preserveCapture = args.keep === true;
+        return multi([
+          { type: 'text', text: `Screenshot of ${os.hostname()} (${info.size} bytes)${preserveCapture ? (' saved at ' + displayPath(file)) : ''}` },
+          image(buffer.toString('base64'), 'image/png'),
+        ]);
       }
+      preserveCapture = true;
+      return text(`Screenshot of ${os.hostname()} captured: ${info.size} bytes, above the ${MAX_IMAGE_BYTES}-byte inline limit, so it is saved at ${displayPath(file)} instead of being returned as an image. Fetch it with read_binary using chunks of up to ${MAX_BINARY_CHUNK_BYTES} bytes (offset_bytes and length_bytes), or ask for a smaller region.`);
+    } finally {
+      await handle.close();
     }
-  }
-  if (!await pathExists(file)) {
-    fail(screenshotAdvice(attempts));
-  }
-  const { handle, info } = await openRegularFile(file);
-  try {
-    if (info.size <= MAX_IMAGE_BYTES) {
-      const buffer = await handle.readFile();
-      if (args.keep !== true) await rm(file, { force: true });
-      return multi([
-        { type: 'text', text: `Screenshot of ${os.hostname()} (${info.size} bytes)${args.keep === true ? ` saved at ${displayPath(file)}` : ''}` },
-        image(buffer.toString('base64'), 'image/png'),
-      ]);
-    }
-    // A big screen is not an error: the PNG stays on the computer and the model is told how to fetch it
-    // in chunks, which is the same path every other large file takes. Failing here used to lose the
-    // screenshot entirely.
-    return text(`Screenshot of ${os.hostname()} captured: ${info.size} bytes, above the ${MAX_IMAGE_BYTES}-byte inline limit, so it is saved at ${displayPath(file)} instead of being returned as an image. Fetch it with read_binary using chunks of up to ${MAX_BINARY_CHUNK_BYTES} bytes (offset_bytes and length_bytes), or ask for a smaller region.`);
   } finally {
-    await handle.close();
+    if (!preserveCapture) {
+      if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => {});
+      else await rm(file, { force: true }).catch(() => {});
+    }
   }
 }
-
 export const fileToolHandlers = {
   read_file: readFileTool,
   read_files: readFilesTool,
