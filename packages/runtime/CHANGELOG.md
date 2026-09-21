@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.90 — 2026-09-21
+
+- Updated README tool-count documentation to the current 15 hosted / 10 model-visible / 5 app-only / 83 granular runtime architecture.
+- Clarified the separate compact local stdio surface of up to 8 tools.
+- Added regression coverage that rejects obsolete 94/91 hosted counts.
+- Runtime behavior and tool schemas are unchanged; lockstep documentation patch at `0.2.90`.
+
 ## 0.2.89 — 2026-09-21
 
 - EIS direct typing preflights every character before dispatch, so unsupported Unicode fails before any partial keyboard mutation.

@@ -52,11 +52,13 @@ support and emits `notifications/tools/list_changed` when that capability set ch
 | Diagnostics | `service`, `event_log`, `network`, `installed_apps`, `environment`, `audio`, `power_action`, `record_screen` |
 | Documents | `read_document`, `edit_spreadsheet`, `edit_document`, `pdf_action` |
 
-The hosted ReMCP endpoint adds eleven account/presentation tools — `list_devices`, `ping_device`,
-`who_am_i`, `create_pairing_command`, `get_recent_tool_calls`, `get_usage_statistics`,
-`get_configuration`, `render_file_preview`, `render_image_preview`, `render_terminal_preview`, and
-`rename_device` — for a 94-tool MCP Apps catalog. Native-only deployments receive 91 tools because the
-three presentation-only render tools are disabled by configuration.
+The hosted ReMCP endpoint does not append those 83 granular operation names to its discovery list.
+It exposes **15 hosted tool definitions** with widgets enabled: **10 model-visible** definitions
+(8 device-facing façade tools plus 2 account/fleet tools) and **5 app-only** UI helpers. Those compact
+definitions route to the same **83 granular runtime operations** after the selected computer's live
+capabilities are checked. With `REMCP_CUSTOM_WIDGETS_ENABLED=false`, hosted discovery exposes the same
+10 model-visible definitions without the five app-only helpers. Cached legacy clients can still call
+supported granular aliases without inflating discovery for new clients.
 
 `computer_snapshot` and `computer_action` keep OCR inside the compact high-level surface: when a local `tesseract` binary is available, snapshot can return bounded OCR text/boxes and click targeting can fall back through Accessibility → browser DOM/CDP → OCR → coordinates. OCR is optional and never adds another MCP tool or bundled OCR dependency.
 
@@ -76,9 +78,11 @@ A running device can advertise a smaller capability-aware subset; the runtime de
 agent forwards the refreshed tool names to the hosted relay. Browser/CDP tools are the primary dynamic
 example: they are enabled only while the runtime can use a supported loopback browser endpoint.
 
-The generated hosted reference covers the full **94-tool production surface** with custom widgets enabled: 83 device tools,
-8 account/fleet tools, and 3 chat-presentation tools. Setting `REMCP_CUSTOM_WIDGETS_ENABLED=false` on the hosted server exposes
-the 91-tool native-only surface. See https://remcp.site/docs#tools and public `docs/TOOLS.md`.
+The generated hosted reference covers the current **15 hosted tool definitions**: 10 model-visible
+definitions plus 5 app-only helpers, all routing to the 83 granular runtime operations described above.
+The separate compact local stdio entrypoint advertises `read_file` plus up to seven domain tools
+(up to 8 tools total) while the paired agent keeps using the capability-aware granular runtime.
+See https://remcp.site/docs#tools and public `docs/TOOLS.md`.
 
 ## No approval staircase
 
