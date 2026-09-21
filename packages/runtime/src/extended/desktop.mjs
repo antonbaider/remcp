@@ -618,6 +618,23 @@ export async function waitForUi(args = {}) {
   return jsonResult({ state:'timeout', wanted:state, matched:nodes.length, attempts, elapsed_ms:Date.now() - startedAt, nodes, ...(state === 'changed' ? { before:baseline } : {}) });
 }
 
+function explicitTypeTextWindowTarget(args = {}, hasElementSelector = false) {
+  const windowId = optionalString(args.window_id || args.windowId);
+  const title = optionalString(args.title);
+  if (!windowId && !title && hasElementSelector) return null;
+  const pid = Number.isInteger(Number(args.pid)) ? Number(args.pid) : null;
+  const app = optionalString(args.app);
+  const scopedTitle = optionalString(args.window_title || args.windowTitle);
+  if (!windowId && !title && pid == null && !app && !scopedTitle) return null;
+  return {
+    ...(windowId ? { id:windowId } : {}),
+    ...(pid != null ? { pid } : {}),
+    ...(app ? { app } : {}),
+    ...((title || scopedTitle) ? { title:title || scopedTitle } : {}),
+    ...(args.backend ? { backend:args.backend } : {}),
+  };
+}
+
 export async function typeText(args = {}) {
   const value = String(args.text ?? '');
   const method = requireEnum(args.method || 'auto', 'method', ['auto','accessibility','clipboard','keys']);
@@ -626,6 +643,8 @@ export async function typeText(args = {}) {
     optionalString(resolvedArgs.id) || optionalString(resolvedArgs.name) || optionalString(resolvedArgs.role) ||
     optionalString(resolvedArgs.automation_id || resolvedArgs.automationId)
   );
+  const explicitWindowTarget = explicitTypeTextWindowTarget(resolvedArgs, hasElementSelector);
+  if (explicitWindowTarget) await windowAction({ action:'focus', ...explicitWindowTarget });
   const clear = args.clear === true;
   const pressEnter = args.press_enter === true;
   const caret = requireEnum(args.caret_position || 'idle', 'caret_position', ['start','idle','end']);

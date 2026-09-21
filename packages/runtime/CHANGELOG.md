@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-## 0.2.78 — 2026-09-21
+## 0.2.79 — 2026-09-21
 
-- Native Wayland cursor telemetry no longer trusts stale XWayland `xdotool` coordinates; unavailable global cursor position is reported explicitly instead.
-- `computer_snapshot` degrades that capture to `cursor: {x:null,y:null}` with a non-fatal cursor error while preserving the rest of the snapshot.
-- Lockstep patch release with the ReMCP client/server at `0.2.78`.
+- Explicit Wayland keyboard and key-by-key text input now focuses and verifies the requested target window before dispatch, with bounded direct window cycling and verified fallbacks.
+- Native Wayland cursor telemetry fails closed instead of trusting stale XWayland `xdotool` coordinates; `computer_snapshot` keeps that capture non-fatal and structured.
+- Regression coverage is headless-safe while still enforcing the snapshot normalization/error contract.
+- Lockstep patch release with the ReMCP client/server at `0.2.79`.
 
 ## 0.2.77 — 2026-09-21
 

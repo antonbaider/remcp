@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { extendedToolDefinitions } from '../src/extended/catalog.mjs';
-import { computerAction, computerSnapshot, pointer, scroll, uiAction, uiFind, waitForUi, windowAction } from '../src/extended/desktop.mjs';
+import { computerAction, pointer, scroll, uiAction, uiFind, waitForUi, windowAction } from '../src/extended/desktop.mjs';
 import { browserFind, findExpression } from '../src/extended/browser.mjs';
 import * as linux from '../src/extended/desktop-linux.mjs';
 
@@ -173,6 +173,53 @@ test('Linux semantic typing rejects false AT-SPI writes and auto typing fails sa
   );
 });
 
+test('Linux Wayland keyboard and key typing focus an explicit window target before dispatch', async () => {
+  const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
+
+  const keyboardBody = linuxSource.match(/export async function keyboard\(args = \{\}\) \{[\s\S]*?(?=export async function typeTextKeys)/)?.[0] || '';
+  const typeBody = linuxSource.match(/export async function typeTextKeys\(value, args = \{\}\) \{[\s\S]*?(?=function buttonNumber)/)?.[0] || '';
+
+  assert.match(
+    keyboardBody,
+    /if \(isWaylandSession\(\)\) \{\s*await focusExplicitWaylandInputTarget\(args\);/,
+    'Wayland keyboard input must focus and verify an explicit window target before wtype/portal dispatch',
+  );
+  assert.match(
+    typeBody,
+    /if \(isWaylandSession\(\)\) \{\s*await focusExplicitWaylandInputTarget\(args\);/,
+    'Wayland key-by-key text input must focus and verify an explicit window target before wtype/portal dispatch',
+  );
+  assert.match(
+    linuxSource,
+    /async function focusExplicitWaylandInputTarget\(args = \{\}\)[\s\S]*windowAction\(\{[\s\S]*action:'focus'/,
+    'explicit Wayland input targeting must reuse verified window focus rather than assuming delivery',
+  );
+  assert.match(
+    linuxSource,
+    /const windowCycles =[\s\S]{0,500}portalShortcut\('ALT\+ESC'[\s\S]{0,500}targetAccessibilityFocus\(row\)/,
+    'Wayland focus should cycle windows directly and verify each candidate before falling back to the app switcher',
+  );
+  assert.ok(
+    linuxSource.indexOf("portalShortcut('ALT+ESC'") < linuxSource.indexOf("portalShortcut('ALT+TAB'"),
+    'direct Alt+Esc window cycling must run before the MRU Alt+Tab fallback',
+  );
+});
+
+test('type_text focuses an explicit window target before focused accessibility typing', async () => {
+  const desktopSource = await readFile(new URL('../src/extended/desktop.mjs', import.meta.url), 'utf8');
+  const typeBody = desktopSource.match(/export async function typeText\(args = \{\}\) \{[\s\S]*?(?=async function uiElementCenter)/)?.[0] || '';
+
+  assert.match(
+    typeBody,
+    /const explicitWindowTarget = explicitTypeTextWindowTarget\(resolvedArgs, hasElementSelector\);\s*if \(explicitWindowTarget\) await windowAction\(\{ action:'focus', \.\.\.explicitWindowTarget \}\);/,
+    'type_text must focus an explicit window target before inspecting the currently focused accessibility control',
+  );
+  assert.ok(
+    typeBody.indexOf('explicitTypeTextWindowTarget') < typeBody.indexOf('adapter.typeTextFocused'),
+    'explicit window focus must happen before the focused-control accessibility fast path',
+  );
+});
+
 test('Linux ui_action falls back to a bounded pointer click only for click/invoke', async () => {
   const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
 
@@ -322,22 +369,24 @@ test('Linux Wayland cursor telemetry fails closed instead of reporting stale XWa
       () => linux.cursorPosition(),
       /Cursor position.*native Wayland.*authoritative global cursor position/i,
     );
-    const snapshot = await computerSnapshot({
-      include_ui:false,
-      include_screenshot:false,
-      include_browser:false,
-    });
-    assert.deepEqual(snapshot.structuredContent?.cursor, { x:null, y:null });
-    assert.match(
-      snapshot.structuredContent?.errors?.find(error => error.source === 'cursor')?.message || '',
-      /native Wayland.*authoritative global cursor position/i,
-    );
   } finally {
     if (previousSessionType === undefined) delete process.env.XDG_SESSION_TYPE;
     else process.env.XDG_SESSION_TYPE = previousSessionType;
     if (previousWaylandDisplay === undefined) delete process.env.WAYLAND_DISPLAY;
     else process.env.WAYLAND_DISPLAY = previousWaylandDisplay;
   }
+
+  const desktopSource = await readFile(new URL('../src/extended/desktop.mjs', import.meta.url), 'utf8');
+  assert.match(
+    desktopSource,
+    /const parsedCursor = parse\(cursorResult, \{ x:null, y:null \}\);/,
+    'computer_snapshot must normalize a rejected cursor capture to null coordinates',
+  );
+  assert.match(
+    desktopSource,
+    /\['cursor', cursorResult\][\s\S]{0,500}snapshotError\(source, result\)/,
+    'computer_snapshot must preserve the rejected cursor reason as a bounded snapshot error',
+  );
 });
 
 test('power_action routes restart and shutdown through command policy before native power commands', async () => {

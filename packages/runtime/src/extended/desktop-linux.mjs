@@ -252,6 +252,36 @@ async function focusInputWindow(windowId) {
   if (result.code === 0) await new Promise(resolve => setTimeout(resolve, 40));
 }
 
+function explicitInputWindowSelector(args = {}) {
+  const dedicatedWindowId = optionalString(args.window_id || args.windowId);
+  const dedicatedTitle = optionalString(args.title);
+  const hasSemanticElementTarget = Boolean(
+    optionalString(args.id)
+    || optionalString(args.name)
+    || optionalString(args.role)
+    || optionalString(args.automation_id || args.automationId)
+  );
+  if (!dedicatedWindowId && !dedicatedTitle && hasSemanticElementTarget) return null;
+  const pid = Number.isInteger(Number(args.pid)) ? Number(args.pid) : null;
+  const app = optionalString(args.app);
+  const scopedTitle = optionalString(args.window_title || args.windowTitle);
+  if (!dedicatedWindowId && !dedicatedTitle && pid == null && !app && !scopedTitle) return null;
+  return {
+    ...(dedicatedWindowId ? { id:dedicatedWindowId } : {}),
+    ...(pid != null ? { pid } : {}),
+    ...(app ? { app } : {}),
+    ...((dedicatedTitle || scopedTitle) ? { title:dedicatedTitle || scopedTitle } : {}),
+  };
+}
+
+async function focusExplicitWaylandInputTarget(args = {}) {
+  const selector = explicitInputWindowSelector(args);
+  if (!selector) return null;
+  const row = await windowMatch(selector);
+  await windowAction({ action:'focus', id:row.id, backend:inputBackend(args) });
+  return row;
+}
+
 async function nativeWaylandWindowAction(row, action, args) {
   const backend = inputBackend(args);
   if (backend === 'x11') unavailable('Native Wayland window action', 'use backend=portal for compositor-managed windows');
@@ -350,23 +380,31 @@ export async function windowAction(args) {
       if (focusState.exact) return text('Window action focus already matched the target window.');
 
       const rows = JSON.parse((await listWindows()).content?.[0]?.text || '[]');
-      const appCycles = Math.min(30, Math.max(4, new Set(rows.map(item => Number(item.pid) || String(item.app || ''))).size + 2));
+      const windowCycles = Math.min(60, Math.max(8, rows.length + 4));
+      for (let index = 0; index < windowCycles; index += 1) {
+        await portalShortcut('ALT+ESC', portalOptions);
+        await new Promise(resolve => setTimeout(resolve, 140));
+        focusState = await targetAccessibilityFocus(row);
+        if (focusState.exact) return text('Window action focus completed via verified Wayland Alt+Esc.');
+      }
+
+      const appCycles = Math.min(12, Math.max(3, new Set(rows.map(item => Number(item.pid) || String(item.app || ''))).size + 1));
       for (let index = 0; index < appCycles; index += 1) {
         await portalShortcut('ALT+TAB', portalOptions);
-        await new Promise(resolve => setTimeout(resolve, 120));
+        await new Promise(resolve => setTimeout(resolve, 160));
         focusState = await targetAccessibilityFocus(row);
-        if (focusState.exact) return text('Window action focus completed via verified Wayland Alt+Tab.');
+        if (focusState.exact) return text('Window action focus completed via verified Wayland Alt+Tab fallback.');
         if (focusState.active) {
           const sameAppWindows = rows.filter(item => Number(item.pid) === Number(row.pid)).length;
-          for (let windowIndex = 0; windowIndex < Math.min(12, Math.max(2, sameAppWindows + 2)); windowIndex += 1) {
+          for (let windowIndex = 0; windowIndex < Math.min(8, Math.max(2, sameAppWindows + 1)); windowIndex += 1) {
             await portalShortcut('ALT+`', portalOptions);
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 120));
             focusState = await targetAccessibilityFocus(row);
-            if (focusState.exact) return text('Window action focus completed via verified Wayland window cycling.');
+            if (focusState.exact) return text('Window action focus completed via verified Wayland same-app fallback.');
           }
         }
       }
-      throw new Error(`Could not verify focus for ${row.title || row.app || row.id} after cycling Wayland applications`);
+      throw new Error(`Could not verify focus for ${row.title || row.app || row.id} after bounded Wayland window cycling`);
     }
     if (!commandExists('wmctrl')) unavailable('Window focus', 'install wmctrl');
     await runFile('wmctrl', ['-ia', id], { label: 'window focus' });
@@ -805,6 +843,7 @@ export async function keyboard(args = {}) {
     return argv;
   };
   if (isWaylandSession()) {
+    await focusExplicitWaylandInputTarget(args);
     if (backend !== 'portal' && commandExists('wtype')) {
       const result = await runFile('wtype', wtypeArgs(), { label: 'keyboard', allowFailure: true, timeout: 5000 });
       if (result.code === 0) return text(`Sent ${shortcut} via wtype.`);
@@ -842,6 +881,7 @@ export async function typeTextKeys(value, args = {}) {
   const delay = clamp(args.delay_ms, 1, 0, 1000);
   const backend = inputBackend(args);
   if (isWaylandSession()) {
+    await focusExplicitWaylandInputTarget(args);
     if (backend !== 'portal' && commandExists('wtype')) {
       const result = await runFile('wtype', ['-d', String(delay), '--', String(value)], { label: 'type text', timeout: 30_000, allowFailure: true });
       if (result.code === 0) return { ...result, backend: 'wtype' };
