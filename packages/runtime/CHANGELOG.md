@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.83 — 2026-09-21
+
+- Linux X11 `record_screen` capability now requires both `ffmpeg` and a real `DISPLAY`; headless hosts no longer advertise a recorder that will fail.
+- The runtime no longer invents `:0.0` for headless X11 calls and fails closed with a clear display requirement before ffmpeg runs.
+- `wf-recorder` is selected only for actual Wayland sessions.
+- Regression coverage locks the headless capability and handler behavior; lockstep patch release at `0.2.83`.
+
 ## 0.2.82 — 2026-09-21
 
 - Clarified `set_config_value` routing so local runtime preferences stay separate from hosted account-level `device_action` administration.

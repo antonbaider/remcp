@@ -247,11 +247,12 @@ export async function powerAction(args) {
 export function recordScreenAvailable({
   platform = process.platform,
   wayland = platform === 'linux' ? isWaylandSession() : false,
+  display = process.env.DISPLAY || '',
   commandExistsFn = commandExists,
 } = {}) {
   if (platform === 'linux') {
     if (wayland) return commandExistsFn('wf-recorder') && commandExistsFn('timeout');
-    return commandExistsFn('ffmpeg');
+    return Boolean(String(display).trim()) && commandExistsFn('ffmpeg');
   }
   if (platform === 'darwin' || platform === 'win32') return commandExistsFn('ffmpeg');
   return false;
@@ -261,12 +262,16 @@ export async function recordScreen(args) {
   const seconds = clamp(args.duration_seconds, 5, 1, 120);
   const fps = clamp(args.fps, 15, 1, 60);
   const destination = args.destination ? await resolveSafePath(args.destination, 'destination') : path.join(os.tmpdir(), `remcp-screen-${Date.now()}.mp4`);
-  if (process.platform === 'linux' && commandExists('wf-recorder') && commandExists('timeout')) {
+  const wayland = process.platform === 'linux' && isWaylandSession();
+  if (wayland && commandExists('wf-recorder') && commandExists('timeout')) {
     const result = await runFile('timeout', ['--signal=INT', `${seconds}s`, 'wf-recorder', '-f',destination,'-r',String(fps),'-c','libx264'], { label:'screen recording', timeout:(seconds+10)*1000, allowFailure:true });
     if (![0, 124, 130].includes(Number(result.code))) throw new Error(result.stderr.trim() || `wf-recorder exited ${result.code}`);
   } else {
-    if (process.platform === 'linux' && isWaylandSession()) {
+    if (wayland) {
       unavailable('Screen recording', 'wf-recorder and timeout are required on Wayland');
+    }
+    if (process.platform === 'linux' && !String(process.env.DISPLAY || '').trim()) {
+      unavailable('Screen recording', 'an active X11 DISPLAY is required on Linux X11');
     }
     if (!commandExists('ffmpeg')) {
       if (process.platform === 'darwin') unavailable('Screen recording', 'ffmpeg is required on macOS');
@@ -276,7 +281,7 @@ export async function recordScreen(args) {
     let argv;
     if (process.platform === 'win32') argv=['-y','-f','gdigrab','-framerate',String(fps),'-i','desktop','-t',String(seconds),'-pix_fmt','yuv420p',destination];
     else if (process.platform === 'darwin') argv=['-y','-f','avfoundation','-framerate',String(fps),'-i','1:none','-t',String(seconds),'-pix_fmt','yuv420p',destination];
-    else argv=['-y','-f','x11grab','-framerate',String(fps),'-i',process.env.DISPLAY || ':0.0','-t',String(seconds),'-pix_fmt','yuv420p',destination];
+    else argv=['-y','-f','x11grab','-framerate',String(fps),'-i',process.env.DISPLAY,'-t',String(seconds),'-pix_fmt','yuv420p',destination];
     await runFile('ffmpeg', argv, { label:'screen recording', timeout:(seconds+20)*1000, maxBuffer:8*1024*1024 });
   }
   const info = await stat(destination);

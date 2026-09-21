@@ -9,7 +9,7 @@ import {
   extendedToolHandlers,
 } from '../src/extended/catalog.mjs';
 import { browserActionInputValue, browserAutoLaunchAvailable, browserNavigate, browserSnapshot, browserTabs } from '../src/extended/browser.mjs';
-import { recordScreenAvailable } from '../src/extended/diagnostics.mjs';
+import { recordScreen, recordScreenAvailable } from '../src/extended/diagnostics.mjs';
 import { hasTool, invokeTool } from '../src/invoke.mjs';
 
 const EXPECTED = [
@@ -182,8 +182,34 @@ test('record_screen capability is advertised only when a real recorder backend e
   assert.equal(recordScreenAvailable({ platform:'linux', wayland:true, commandExistsFn:none }), false);
   assert.equal(recordScreenAvailable({ platform:'linux', wayland:true, commandExistsFn:waylandOnly }), true);
   assert.equal(recordScreenAvailable({ platform:'linux', wayland:true, commandExistsFn:ffmpegOnly }), false);
-  assert.equal(recordScreenAvailable({ platform:'linux', wayland:false, commandExistsFn:none }), false);
-  assert.equal(recordScreenAvailable({ platform:'linux', wayland:false, commandExistsFn:ffmpegOnly }), true);
+  assert.equal(recordScreenAvailable({ platform:'linux', wayland:false, display:'', commandExistsFn:none }), false);
+  assert.equal(recordScreenAvailable({ platform:'linux', wayland:false, display:'', commandExistsFn:ffmpegOnly }), false);
+  assert.equal(recordScreenAvailable({ platform:'linux', wayland:false, display:':0', commandExistsFn:ffmpegOnly }), true);
+});
+
+test('record_screen never invents an X11 display for a headless Linux host', async () => {
+  const source = await readFile(new URL('../src/extended/diagnostics.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /process\.env\.DISPLAY\s*\|\|\s*['"]:\d/);
+});
+
+test('record_screen fails closed on a headless Linux X11 host before invoking ffmpeg', async t => {
+  if (process.platform !== 'linux') return t.skip('Linux-specific regression');
+  const previousSession = process.env.XDG_SESSION_TYPE;
+  const previousWayland = process.env.WAYLAND_DISPLAY;
+  const previousDisplay = process.env.DISPLAY;
+  try {
+    process.env.XDG_SESSION_TYPE = 'x11';
+    delete process.env.WAYLAND_DISPLAY;
+    delete process.env.DISPLAY;
+    await assert.rejects(
+      recordScreen({ duration_seconds:1, fps:1 }),
+      /active X11 DISPLAY is required/
+    );
+  } finally {
+    if (previousSession == null) delete process.env.XDG_SESSION_TYPE; else process.env.XDG_SESSION_TYPE = previousSession;
+    if (previousWayland == null) delete process.env.WAYLAND_DISPLAY; else process.env.WAYLAND_DISPLAY = previousWayland;
+    if (previousDisplay == null) delete process.env.DISPLAY; else process.env.DISPLAY = previousDisplay;
+  }
 });
 
 test('browser_snapshot restores page scroll after selector screenshot capture', async () => {

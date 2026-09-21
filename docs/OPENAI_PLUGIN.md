@@ -45,7 +45,7 @@ rename, or regenerate the files described here.
 - `skills/` — five skills exported over the MCP skills extension (`skills/list`, `skills/get`,
   `resources/read` with SHA-256 digests): the operator guide, code change and verification,
   process supervision, safe destructive operations, and transfers between machines.
-- `assets/remcp-icon.png` — canonical square icon used directly for both the ChatGPT plugin logo and composer icon; the same mark feeds the browser/PWA icon pack and public GitHub branding.
+- `assets/remcp-icon.png` — canonical square icon used directly for both the ChatGPT plugin logo and composer icon and for the browser/PWA icon pack; the public GitHub README uses the dedicated reviewed `assets/remcp-readme-logo.png` mark.
 - `chatgpt-app-submission.json` — generated tool annotations and 5 positive / 3 negative review cases.
 - `submission/plugin-form.md` — copy-ready portal values.
 
