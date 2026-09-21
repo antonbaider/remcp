@@ -1,10 +1,16 @@
 # Changelog
 
+## 0.2.87 — 2026-09-21
+
+- macOS `event_log` now streams only the requested head lines from `log show` and terminates the child once the limit is reached.
+- Added a bounded child-process line reader with UTF-8-safe decoding, timeout and byte caps, plus regression coverage for noisy output.
+- Runtime tool schemas and the 83-tool release catalog are unchanged.
+
 ## 0.2.86 — 2026-09-21
 
-- macOS `event_log` now streams unified-log output and terminates `/usr/bin/log show` after the requested line limit instead of buffering the whole selected time window.
-- The shared bounded line reader preserves UTF-8 boundaries, caps memory/stderr, enforces timeouts, and force-kills a child that ignores graceful termination.
-- Regression coverage proves a noisy process is stopped after the requested number of lines; the runtime catalog remains 83 tools.
+- Runtime capability remains the same 83 granular operations; this patch changes hosted tool metadata only.
+- No runtime schema, permission, handler, or operation name changed.
+- Lockstep patch release with the ReMCP client/server at `0.2.86`.
 
 ## 0.2.85 — 2026-09-21
 
