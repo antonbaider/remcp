@@ -9,6 +9,7 @@ const claudePlugin = readJson('.claude-plugin/plugin.json');
 const claudeMcp = readJson('.mcp.json');
 const gemini = readJson('gemini-extension.json');
 const registry = readJson('server.json');
+const glama = readJson('glama.json');
 const codexMarketplace = readJson('.agents/plugins/marketplace.json');
 const copilotMarketplace = readJson('.github/plugin/marketplace.json');
 
@@ -40,6 +41,9 @@ check(registry?.repository?.url === 'https://github.com/antonbaider/remcp', 'MCP
 check(registry?.remotes?.length === 1, 'MCP Registry record must expose exactly one production remote');
 check(registry?.remotes?.[0]?.type === 'streamable-http', 'MCP Registry remote must use Streamable HTTP');
 check(registry?.remotes?.[0]?.url === endpoint, 'MCP Registry remote must point at the production MCP endpoint');
+
+check(glama.$schema === 'https://glama.ai/mcp/schemas/server.json', 'glama.json must use the official Glama server schema');
+check(Array.isArray(glama.maintainers) && glama.maintainers.includes('antonbaider'), 'glama.json must keep antonbaider as a maintainer');
 
 check(codexMarketplace.name === 'remcp', 'Codex marketplace name must be remcp');
 check(codexMarketplace?.interface?.displayName === 'ReMCP', 'Codex marketplace display name must be ReMCP');
