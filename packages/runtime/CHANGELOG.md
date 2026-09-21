@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.78 — 2026-09-21
+
+- Native Wayland cursor telemetry no longer trusts stale XWayland `xdotool` coordinates; unavailable global cursor position is reported explicitly instead.
+- `computer_snapshot` degrades that capture to `cursor: {x:null,y:null}` with a non-fatal cursor error while preserving the rest of the snapshot.
+- Lockstep patch release with the ReMCP client/server at `0.2.78`.
+
 ## 0.2.77 — 2026-09-21
 
 - Fixed `browser_action` typing so the documented `text` argument reaches CDP `Input.insertText` with Unicode intact; `value` and `text_value` remain compatible aliases.

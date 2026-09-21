@@ -1063,6 +1063,9 @@ export async function scroll(args = {}) {
 }
 
 export async function cursorPosition() {
+  if (isWaylandSession()) {
+    unavailable('Cursor position', 'native Wayland does not expose an authoritative global cursor position; XWayland xdotool coordinates may be stale');
+  }
   if (!commandExists('xdotool')) unavailable('Cursor position', 'install xdotool');
   const result = await runFile('xdotool', ['getmouselocation','--shell'], { label:'cursor position', allowFailure:true, timeout:2000 });
   const x = Number(result.stdout.match(/^X=(-?\d+)$/m)?.[1]);

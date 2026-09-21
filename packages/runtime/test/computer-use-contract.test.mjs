@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { extendedToolDefinitions } from '../src/extended/catalog.mjs';
-import { computerAction, pointer, scroll, uiAction, uiFind, waitForUi, windowAction } from '../src/extended/desktop.mjs';
+import { computerAction, computerSnapshot, pointer, scroll, uiAction, uiFind, waitForUi, windowAction } from '../src/extended/desktop.mjs';
 import { browserFind, findExpression } from '../src/extended/browser.mjs';
 import * as linux from '../src/extended/desktop-linux.mjs';
 
@@ -310,6 +310,34 @@ test('browser_find ranks exact semantic text targets ahead of ancestor text cont
   assert.equal(buttonMatches.length, 1);
   assert.equal(buttonMatches[0].tag, 'button');
   assert.equal(buttonMatches[0].role, 'button');
+});
+
+test('Linux Wayland cursor telemetry fails closed instead of reporting stale XWayland coordinates', { skip: process.platform !== 'linux' }, async () => {
+  const previousSessionType = process.env.XDG_SESSION_TYPE;
+  const previousWaylandDisplay = process.env.WAYLAND_DISPLAY;
+  process.env.XDG_SESSION_TYPE = 'wayland';
+  process.env.WAYLAND_DISPLAY = 'wayland-test';
+  try {
+    await assert.rejects(
+      () => linux.cursorPosition(),
+      /Cursor position.*native Wayland.*authoritative global cursor position/i,
+    );
+    const snapshot = await computerSnapshot({
+      include_ui:false,
+      include_screenshot:false,
+      include_browser:false,
+    });
+    assert.deepEqual(snapshot.structuredContent?.cursor, { x:null, y:null });
+    assert.match(
+      snapshot.structuredContent?.errors?.find(error => error.source === 'cursor')?.message || '',
+      /native Wayland.*authoritative global cursor position/i,
+    );
+  } finally {
+    if (previousSessionType === undefined) delete process.env.XDG_SESSION_TYPE;
+    else process.env.XDG_SESSION_TYPE = previousSessionType;
+    if (previousWaylandDisplay === undefined) delete process.env.WAYLAND_DISPLAY;
+    else process.env.WAYLAND_DISPLAY = previousWaylandDisplay;
+  }
 });
 
 test('power_action routes restart and shutdown through command policy before native power commands', async () => {
