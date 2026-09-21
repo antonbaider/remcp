@@ -33,7 +33,7 @@ After authorization and pairing:
 
 1. Call `list_devices`.
 2. Select the returned device id.
-3. Call `ping_device` with that exact id.
+3. Call `device_action` with that exact id and `action: ping`.
 4. Use file or terminal tools only on the computer the user explicitly selected.
 
 If no computer is paired yet, `list_devices` returns the current connection instructions.

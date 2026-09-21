@@ -20,16 +20,16 @@
         "destructive_justification": "Not destructive: returns a list; nothing is created, changed or removed."
       }
     },
-    "ping_device": {
+    "device_action": {
       "annotations": {
-        "readOnlyHint": true,
+        "readOnlyHint": false,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Read only: it sends a liveness request to one paired computer through the relay and returns the result without writing anything.",
-        "open_world_justification": "Not open world: contacts only the paired computer through the ReMCP relay.",
-        "destructive_justification": "Not destructive: the device agent answers with its own facts; nothing is created, changed or removed."
+        "read_only_justification": "Not read only: it administers one paired computer at the account boundary: ping, account-visible rename, reversible enable/disable, or permanent pairing revocation, which changes state on the selected computer or in a running session.",
+        "open_world_justification": "Not open world: ping contacts only the selected paired computer through the ReMCP relay; rename/enable/disable/remove write only the signed-in account’s device record.",
+        "destructive_justification": "Destructive: the tool is conservatively marked destructive because action=remove permanently revokes that pairing; disable is reversible and rename changes only the account-visible label."
       }
     },
     "who_am_i": {
@@ -126,18 +126,6 @@
         "read_only_justification": "Read only: it resolves one short-lived terminal preview id created by a process-output tool and presents the already-returned output through the terminal MCP App without rerunning the command and returns the result without writing anything.",
         "open_world_justification": "Not open world: reads only the bounded account-scoped ReMCP preview store; the presentation layer has no external network allow-list.",
         "destructive_justification": "Not destructive: renders previously returned process output without starting, stopping, or interacting with the process; refresh is a separate read_process_output call."
-      }
-    },
-    "rename_device": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Not read only: it renames one computer paired to the signed-in account, which changes state on the selected computer or in a running session.",
-        "open_world_justification": "Not open world: writes the account’s own device record; no machine is contacted.",
-        "destructive_justification": "Not destructive: changes a display name only: accepted keys are limited to device_name, and access roots, command guardrails and resource limits cannot be set through any tool."
       }
     },
     "read_file": {

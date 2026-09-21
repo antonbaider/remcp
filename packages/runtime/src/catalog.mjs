@@ -814,7 +814,7 @@ export const toolDefinitions = [
   {
     name: 'set_config_value',
     title: 'Change runtime setting',
-    description: 'Change one of this local runtime’s own preferences on the selected computer: telemetryEnabled, maxReadLines, maxBufferedLines or maxOutputBytes. This does not rename the paired device; use hosted rename_device for that label. Access roots, blocked commands, shell/guardrails and the write limit remain local-only.',
+    description: 'Change one of this local runtime’s own preferences on the selected computer: telemetryEnabled, maxReadLines, maxBufferedLines or maxOutputBytes. This is not account-level device administration; use hosted device_action for ping, rename, enable/disable or removal. Access roots, blocked commands, shell/guardrails and the write limit remain local-only.',
     inputSchema: {
       type: 'object',
       properties: {

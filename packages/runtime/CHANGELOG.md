@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.82 — 2026-09-21
+
+- Clarified `set_config_value` routing so local runtime preferences stay separate from hosted account-level `device_action` administration.
+- Runtime functionality remains at 83 release tools; this release keeps client/runtime versions in lockstep with the hosted MCP catalog consolidation.
+
 ## Unreleased
 
 ## 0.2.81 — 2026-09-21

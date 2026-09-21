@@ -32,11 +32,11 @@ rename, or regenerate the files described here.
 | Manifest | `plugin.json` |
 | MCP configuration | `mcp.json` |
 | Shared skills | 5 |
-| Hosted tool surface | 94 tools with custom widgets enabled; 91 in native-only mode |
+| Hosted tool surface | 93 tools with custom widgets enabled; 90 in native-only mode |
 | Rich UI | Production file editor/diff with syntax highlighting and save, fullscreen image viewer, and terminal output viewer. When custom widgets are enabled, file/image/terminal source tools carry their MCP Apps resource directly; three app-only recovery helpers can consume short-lived preview references without rerunning source actions |
 | Authentication | OAuth authorization code + PKCE, OIDC/UserInfo metadata |
 | Public overview | [`docs/PLUGINS.md`](PLUGINS.md) |
-| Full tool reference | [`docs/TOOLS.md`](TOOLS.md) — 94-tool production surface with custom widgets enabled; 91-tool native-only surface when disabled |
+| Full tool reference | [`docs/TOOLS.md`](TOOLS.md) — 93-tool production surface with custom widgets enabled; 90-tool native-only surface when disabled |
 
 ## Package layout
 

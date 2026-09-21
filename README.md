@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/remcp-readme-logo.png" width="132" alt="ReMCP icon">
+  <img src="./assets/remcp-icon.png" width="132" alt="ReMCP icon">
 </p>
 
 <p align="center"><strong>Your computer. Your tools. One secure MCP connection.</strong></p>
@@ -167,7 +167,7 @@ either host-specific contract drifts from the shared ReMCP version or production
 with, [DesktopCommanderMCP](https://github.com/wonderwhy-er/DesktopCommanderMCP) or any other MCP
 server.
 
-**83 device tools.** The hosted production catalog adds 8 account/fleet tools and 3 chat-presentation tools for **94 tools total** whenever custom widgets are enabled; native-only deployments expose 91 tools. See the generated **[full tool reference](docs/TOOLS.md)**.
+**83 device tools.** The hosted production catalog adds 7 account/fleet tools and 3 chat-presentation tools for **93 tools total** whenever custom widgets are enabled; native-only deployments expose 90 tools. See the generated **[full tool reference](docs/TOOLS.md)**.
 
 **Device runtime surface:**
 
@@ -187,7 +187,7 @@ server.
 | Diagnostics | `service`, `event_log`, `network`, `installed_apps`, `environment`, `audio`, `power_action`, `record_screen` |
 | Documents | `read_document`, `edit_spreadsheet`, `edit_document`, `pdf_action` |
 
-The hosted ReMCP endpoint has eleven hosted account/presentation tools in its normal production catalog, for **94 tools**. Setting `REMCP_CUSTOM_WIDGETS_ENABLED=false` omits the three app-only preview recovery helpers and returns the 91-tool native-only surface. With widgets enabled, file/image/terminal source tools own their UI resource directly and hydrate it from the same tool result; `structuredContent.preview` remains a short-lived retry reference for the app only, so no second model-selected render call or device RPC is required. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
+The hosted ReMCP endpoint has ten hosted account/presentation tools in its normal production catalog, for **93 tools**. Setting `REMCP_CUSTOM_WIDGETS_ENABLED=false` omits the three app-only preview recovery helpers and returns the 90-tool native-only surface. With widgets enabled, file/image/terminal source tools own their UI resource directly and hydrate it from the same tool result; `structuredContent.preview` remains a short-lived retry reference for the app only, so no second model-selected render call or device RPC is required. Each online device returned by `list_devices` also reports its live supported subset; platform-specific tools that are unavailable on that computer fail closed rather than being guessed.
 
 ### Tool selection for AI agents
 
