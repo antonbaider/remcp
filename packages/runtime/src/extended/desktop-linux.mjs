@@ -583,8 +583,28 @@ while queue:
   for i in range(e.childCount):queue.append((e.getChildAtIndex(i),app_name,pid,window_name,node_path+"."+str(i)))
  except:pass
 if target is None:raise Exception("UI element not found")
-if action in ("click","invoke","select","toggle"):
- target.queryAction().doAction(0)
+pointer_fallback=None
+if action in ("click","invoke"):
+ try:
+  applied=target.queryAction().doAction(0)
+  if applied is False: raise Exception("accessibility action returned false")
+ except Exception as action_error:
+  try:
+   extents=target.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+   def _rect_value(rect,name,index):
+    try: return int(getattr(rect,name))
+    except:
+     try: return int(rect[index])
+     except: return 0
+   px=_rect_value(extents,"x",0);py=_rect_value(extents,"y",1)
+   pw=_rect_value(extents,"width",2);ph=_rect_value(extents,"height",3)
+   if pw<=0 or ph<=0: raise Exception("target has no usable screen bounds")
+   pointer_fallback={"x":px+pw//2,"y":py+ph//2,"width":pw,"height":ph,"reason":str(action_error)}
+  except Exception as bounds_error:
+   raise Exception("accessibility action failed: %s; coordinate fallback unavailable: %s"%(action_error,bounds_error))
+elif action in ("select","toggle"):
+ applied=target.queryAction().doAction(0)
+ if applied is False: raise Exception(action+" accessibility action returned false")
 elif action=="focus":
  if target.queryComponent().grabFocus() is False: raise Exception("focus accessibility action returned false")
 elif action=="set_value":
@@ -618,10 +638,28 @@ elif action in ("add_to_selection","remove_from_selection"):
   if not selection.selectChild(idx): raise Exception("could not add item to selection")
  else:
   if not selection.deselectChild(idx): raise Exception("could not remove item from selection")
-print(json.dumps({"action":action,"name":target.name or "","role":target.getRoleName(),**target_meta}))`;
+out={"action":action,"name":target.name or "","role":target.getRoleName(),**target_meta}
+if pointer_fallback is not None: out["pointer_fallback"]=pointer_fallback
+print(json.dumps(out))`;
   const result = await runFile('python3', ['-c', script], { label: 'AT-SPI action', timeout: 30_000, allowFailure: true });
   let payload = null;
   try { payload = JSON.parse(result.stdout || ''); } catch {}
+  if (payload?.pointer_fallback) {
+    const fallback = payload.pointer_fallback;
+    const x = Number(fallback.x), y = Number(fallback.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) unavailable('Linux accessibility action', 'coordinate fallback returned invalid screen bounds');
+    await pointer({ action:'click', x, y, ...(args.backend ? { backend:args.backend } : {}) });
+    return jsonResult({
+      action,
+      id:id || null,
+      name:payload.name || '',
+      role:payload.role || '',
+      backend:'pointer_fallback',
+      x,
+      y,
+      fallback_reason:String(fallback.reason || 'accessibility action unavailable').slice(0, 500),
+    });
+  }
   if (payload && !payload.error) return text(JSON.stringify(payload));
   if (payload?.error) unavailable('Linux accessibility action', payload.error);
   if (result.code !== 0) {

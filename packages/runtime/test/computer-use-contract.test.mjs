@@ -173,6 +173,32 @@ test('Linux semantic typing rejects false AT-SPI writes and auto typing fails sa
   );
 });
 
+test('Linux ui_action falls back to a bounded pointer click only for click/invoke', async () => {
+  const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
+
+  assert.match(
+    linuxSource,
+    /if action in \("click","invoke"\):[\s\S]{0,500}queryAction\(\)\.doAction\(0\)[\s\S]{0,700}getExtents\(pyatspi\.DESKTOP_COORDS\)/,
+    'click/invoke should derive fallback coordinates from the same AT-SPI target when Action is unavailable',
+  );
+  assert.match(
+    linuxSource,
+    /if pw<=0 or ph<=0: raise Exception\("target has no usable screen bounds"\)/,
+    'coordinate fallback must fail closed when the target has no usable bounds',
+  );
+  assert.match(
+    linuxSource,
+    /if \(payload\?\.pointer_fallback\)[\s\S]{0,500}await pointer\(\{ action:'click'/,
+    'Linux adapter should execute the fallback through the existing pointer backend',
+  );
+  assert.match(linuxSource, /backend:'pointer_fallback'/);
+  assert.match(
+    linuxSource,
+    /elif action in \("select","toggle"\):[\s\S]{0,160}queryAction\(\)\.doAction\(0\)/,
+    'non-click semantic actions must remain semantic and fail closed',
+  );
+});
+
 test('Linux direct app launch honors cwd rather than silently accepting it', { skip: process.platform !== 'linux' }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'remcp-launch-cwd-'));
   try {
