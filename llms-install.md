@@ -83,7 +83,7 @@ submission is tracked in the marketplace source of truth at <https://github.com/
 The same production remote is published or indexed at:
 
 - Smithery: <https://smithery.ai/servers/antonbaider/remcp>
-- Glama: <https://glama.ai/mcp/servers/antonbaider/remcp>
-- Official MCP Registry name: `io.github.getremcp/remcp`
+- Glama: <https://glama.ai/mcp/connectors/site.remcp/re-mcp>
+- Official MCP Registry: `io.github.antonbaider/remcp` today; migration to `io.github.getremcp/remcp` is pending after the GitHub repository transfer.
 
 These directories do not create a second ReMCP account or a separate device fleet.

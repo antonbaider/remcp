@@ -15,7 +15,7 @@ ReMCP keeps one public source repository and publishes host-native discovery met
 | Kiro Powers | Kiro Powers registry + direct GitHub import | submitted September 19, 2026; pending review |
 | Cline | Cline MCP Marketplace ([PR #125](https://github.com/cline/marketplace/pull/125)) | submitted in current `cline/marketplace`; pending review |
 | Smithery | smithery.ai/servers/antonbaider/remcp | published |
-| Glama | glama.ai/mcp/servers/antonbaider/remcp | indexed / listed |
+| Glama | glama.ai/mcp/connectors/site.remcp/re-mcp | verified / healthy |
 | Official MCP Registry | registry.modelcontextprotocol.io | published remote Streamable HTTP server |
 
 For ordinary users, the product flow is always:

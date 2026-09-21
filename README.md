@@ -25,7 +25,7 @@
   <a href="https://kiro.dev/powers/"><img alt="Kiro Power" src="https://img.shields.io/badge/Kiro-power-1f2328?style=flat-square"></a>
   <a href="https://github.com/cline/marketplace/pull/125"><img alt="Cline MCP Marketplace" src="https://img.shields.io/badge/Cline-MCP-1f2328?style=flat-square"></a>
   <a href="https://smithery.ai/servers/antonbaider/remcp"><img alt="Smithery directory" src="https://img.shields.io/badge/Smithery-directory-1f2328?style=flat-square"></a>
-  <a href="https://glama.ai/mcp/servers/antonbaider/remcp"><img alt="Glama quality score" src="https://glama.ai/mcp/servers/antonbaider/remcp/badges/score.svg"></a>
+  <a href="https://glama.ai/mcp/connectors/site.remcp/re-mcp"><img alt="Glama quality score" src="https://glama.ai/mcp/connectors/site.remcp/re-mcp/badges/score.svg"></a>
   <a href="docs/PLUGINS.md#smithery-glama-and-the-official-mcp-registry"><img alt="Official MCP Registry" src="https://img.shields.io/badge/MCP%20Registry-published-1f2328?style=flat-square"></a>
 </p>
 
@@ -140,7 +140,7 @@ ReMCP publishes host-native metadata for coding agents plus directory records fo
 | **Kiro Powers** | Import `https://github.com/getremcp/remcp` from **Add Custom Power → Import power from GitHub** while the curated listing is reviewed. | submitted |
 | **Cline** | Use the Cline MCP Marketplace after review; the current submission is tracked in [`cline/marketplace` PR #125](https://github.com/cline/marketplace/pull/125). | submitted |
 | **Smithery** | Open <https://smithery.ai/servers/antonbaider/remcp>. | published |
-| **Glama** | Open <https://glama.ai/mcp/servers/antonbaider/remcp>. | listed |
+| **Glama** | Open the ownership-verified connector at <https://glama.ai/mcp/connectors/site.remcp/re-mcp>. | verified / healthy |
 | **Official MCP Registry** | Search for `io.github.antonbaider/remcp` today; migration to `io.github.getremcp/remcp` is pending after the repository transfer. | published (legacy identity) |
 
 The same ReMCP OAuth account and paired computers sit behind every route. Marketplace and directory
