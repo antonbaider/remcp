@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.89 — 2026-09-21
+
+- EIS direct typing preflights every character before dispatch, so unsupported Unicode fails before any partial keyboard mutation.
+- Added regression coverage proving `abc✓` sends zero EIS events before the ASCII-only error.
+- Compact and granular runtime catalogs remain unchanged; lockstep patch release at `0.2.89`.
+
 ## 0.2.88 — 2026-09-21
 
 - Added a real compact stdio façade over the same runtime handlers: `read_file` plus up to seven capability-filtered `verb_noun` domain tools.

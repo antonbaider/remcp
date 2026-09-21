@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { createWaylandRemoteDesktopSession, portalPointerMotionAbsolute, waylandPortalCandidate } from '../src/wayland-remote-desktop.mjs';
+import { createWaylandRemoteDesktopSession, portalPointerMotionAbsolute, portalTypeText, waylandPortalCandidate } from '../src/wayland-remote-desktop.mjs';
 
 const PORTAL_PATH = '/org/freedesktop/portal/desktop';
 const REMOTE = 'org.freedesktop.portal.RemoteDesktop';
@@ -153,6 +153,21 @@ test('remote desktop portal clears a stale restore token and disconnects when St
   assert.equal(fake.disconnected(), true);
 });
 
+
+test('EIS direct typing rejects unsupported Unicode before sending any partial input', async () => {
+  const sent = [];
+  await assert.rejects(
+    portalTypeText('abc✓', {
+      delayMs:0,
+      state:{
+        backend:'xdg-eis',
+        async send(payload) { sent.push(payload); },
+      },
+    }),
+    /supports ASCII only/,
+  );
+  assert.deepEqual(sent, []);
+});
 
 test('EIS absolute pointer motion sends desktop coordinates without relative calibration', async () => {
   const sent = [];

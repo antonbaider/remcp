@@ -564,19 +564,25 @@ function eisStrokeForChar(char) {
 
 export async function portalTypeText(value, { delayMs = 1, timeoutMs, state: suppliedState } = {}) {
   const state = suppliedState || await ensureWaylandRemoteDesktop({ timeoutMs });
-  for (const char of String(value ?? '')) {
-    if (state.backend === 'xdg-eis') {
-      const stroke = eisStrokeForChar(char);
-      if (!stroke) throw new ToolError('EIS 1.2 direct typing supports ASCII only; use accessibility or clipboard-paste input for Unicode text');
+  const input = String(value ?? '');
+  if (state.backend === 'xdg-eis') {
+    const strokes = [...input].map(eisStrokeForChar);
+    if (strokes.some(stroke => !stroke)) {
+      throw new ToolError('EIS 1.2 direct typing supports ASCII only; use accessibility or clipboard-paste input for Unicode text');
+    }
+    for (const stroke of strokes) {
       if (stroke.shift) await notifyKeycode(state, 42, 1);
       await notifyKeycode(state, stroke.keycode, 1);
       await notifyKeycode(state, stroke.keycode, 0);
       if (stroke.shift) await notifyKeycode(state, 42, 0);
-    } else {
+      if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, Math.min(1000, delayMs)));
+    }
+    return;
+  }
+  for (const char of input) {
       const keysym = char === '\n' ? 0xff0d : char === '\t' ? 0xff09 : keysymForToken(char);
       await notifyKeysym(state, keysym, 1);
       await notifyKeysym(state, keysym, 0);
-    }
     if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, Math.min(1000, delayMs)));
   }
 }
