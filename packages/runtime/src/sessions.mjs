@@ -188,6 +188,7 @@ export function createSearchSession({ type, pattern, path, filePattern }) {
     results: [],
     status: 'running',
     error: null,
+    warning: null,
     cancel: null,
     waiters: [],
     lastActivityAt: Date.now(),

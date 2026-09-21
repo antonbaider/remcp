@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { body, freshWorkspace, isError, waitFor } from './helpers.mjs';
 
@@ -75,4 +75,30 @@ test('the fallback scanner reports an invalid regular expression', async () => {
 test('the fallback scanner fails on a missing path', async () => {
   const result = await invokeTool('start_search', { path: join(root, 'project', 'nope'), pattern: 'x', searchType: 'content' });
   assert.equal(isError(result), true);
+});
+
+test('the fallback scanner skips unreadable descendants and keeps readable matches', {
+  skip: process.platform === 'win32' || process.getuid?.() === 0,
+}, async () => {
+  const project = join(root, 'permission-subtree-fallback');
+  const blocked = join(project, 'blocked');
+  mkdirSync(blocked, { recursive: true });
+  writeFileSync(join(project, 'visible.txt'), 'needle-visible\n');
+  writeFileSync(join(blocked, 'hidden.txt'), 'hidden\n');
+  chmodSync(blocked, 0o000);
+  try {
+    const started = await invokeTool('start_search', {
+      path: project,
+      pattern: 'needle-visible',
+      searchType: 'content',
+      literalSearch: true,
+    });
+    const output = await finalResults(sessionIdOf(started));
+    assert.match(output, /visible\.txt:1: needle-visible/);
+    assert.match(output, /status: completed/);
+    assert.match(output, /warning: .*Permission denied/i);
+    assert.doesNotMatch(output, /status: failed/);
+  } finally {
+    chmodSync(blocked, 0o700);
+  }
 });

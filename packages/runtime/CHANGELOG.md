@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.95 — 2026-09-22
+
+- Search sessions preserve readable matches when ripgrep encounters unreadable descendant paths, reporting the partial traversal problem as a warning instead of a fatal session error.
+- The dependency-free fallback scanner now skips unreadable descendant directories/files with the same warning semantics.
+- Requested-root failures and non-traversal ripgrep errors still fail closed.
+- Added ripgrep and fallback regressions; runtime tool names and schemas remain unchanged.
+
 ## 0.2.94 — 2026-09-22
 
 - Replaced DOCX/PDF regex-heavy extraction with bounded scanners and added adversarial parser regressions.

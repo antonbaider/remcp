@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { body, freshWorkspace, isError, waitFor } from './helpers.mjs';
 
@@ -120,4 +120,35 @@ test('filePattern supports the documented alternation form and reports capped se
 test('an unreadable search path fails instead of reporting success', async () => {
   const result = await invokeTool('start_search', { path: join(root, 'project', 'does-not-exist'), pattern: 'x', searchType: 'content' });
   assert.equal(isError(result), true);
+});
+
+test('ripgrep search keeps readable matches when a descendant is unreadable', {
+  skip: process.platform === 'win32' || process.getuid?.() === 0,
+}, async () => {
+  const project = join(root, 'permission-subtree-rg');
+  const blocked = join(project, 'blocked');
+  mkdirSync(blocked, { recursive: true });
+  writeFileSync(join(project, 'visible.txt'), 'needle-visible\n');
+  writeFileSync(join(blocked, 'hidden.txt'), 'hidden\n');
+  chmodSync(blocked, 0o000);
+  try {
+    const started = await invokeTool('start_search', {
+      path: project,
+      pattern: 'needle-visible',
+      searchType: 'content',
+      literalSearch: true,
+    });
+    const sessionId = sessionIdOf(started);
+    await waitFor(async () => {
+      const page = body(await invokeTool('get_more_search_results', { sessionId, offset: 0, length: 100 }));
+      return /status: (completed|capped|failed)/.test(page);
+    });
+    const output = body(await invokeTool('get_more_search_results', { sessionId, offset: 0, length: 100 }));
+    assert.match(output, /visible\.txt:1:needle-visible/);
+    assert.match(output, /status: completed/);
+    assert.match(output, /warning: .*Permission denied/i);
+    assert.doesNotMatch(output, /status: failed/);
+  } finally {
+    chmodSync(blocked, 0o700);
+  }
 });
