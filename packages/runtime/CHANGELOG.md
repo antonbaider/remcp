@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.92 — 2026-09-21
+
+- Lockstep documentation release for the hosted 10-tool native-only production contract.
+- Generated/public tool references now omit dormant widget helpers from current production tables while documenting the optional 15-tool widget-enabled mode separately.
+- Runtime handlers, schemas, the 83 granular operations, and compact/granular stdio behavior are unchanged.
+
 ## 0.2.91 — 2026-09-21
 
 - Lockstep release for the hosted server's temporary custom-widget disablement.

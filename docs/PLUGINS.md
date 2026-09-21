@@ -14,7 +14,7 @@ You do **not** need to paste an MCP server URL, edit a manifest, clone the repos
 Shareable install guides:
 
 - All integrations and current status: <https://remcp.site/plugins>
-- [Complete tool reference](TOOLS.md): 15 hosted definitions (8 device-facing façade tools + 2 account/fleet + 5 app-only UI helpers) cover all 83 granular runtime operations; only 10 definitions are model-visible, and native-only deployments expose that same 10-tool model-facing surface.
+- [Complete tool reference](TOOLS.md): current production exposes 10 model-visible hosted definitions (8 device-facing façade tools + 2 account/fleet) covering all 83 granular runtime operations; explicitly re-enabling widgets adds 5 app-only UI helpers for 15 total definitions.
 - ChatGPT & Codex: <https://remcp.site/install/chatgpt>
 - Claude Code: <https://remcp.site/install/claude>
 - Cursor Marketplace: <https://cursor.com/marketplace>

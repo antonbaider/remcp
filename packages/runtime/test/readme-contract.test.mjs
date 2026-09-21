@@ -17,9 +17,10 @@ test('runtime README describes the tool surface that the package actually advert
     'README tool count must come from the runtime contract, not an old release',
   );
   assert.doesNotMatch(readme, /\b35 tools\b|\b43 tools\b|\b94-tool\b|\b91-tool\b/i);
-  assert.match(readme, /15 hosted (?:tool )?definitions/i, 'README must describe the compact hosted discovery surface');
-  assert.match(readme, /10 model-visible/i, 'README must distinguish model-visible hosted tools');
-  assert.match(readme, /5 app-only/i, 'README must distinguish app-only presentation helpers');
+  assert.match(readme, /10 hosted (?:tool )?definitions/i, 'README must describe the current compact hosted discovery surface');
+  assert.match(readme, /15 definitions/i, 'README must describe the optional widget-enabled hosted surface');
+  assert.match(readme, /all model-visible/i, 'README must distinguish the current model-visible hosted tools');
+  assert.match(readme, /5 app-only/i, 'README must distinguish optional app-only presentation helpers');
   assert.match(readme, /83 granular runtime operations/i, 'README must explain what the compact hosted facade routes to');
   assert.match(
     readme,

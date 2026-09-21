@@ -24,7 +24,7 @@ For ordinary users, the product flow is always:
 
 The production MCP URL and host-specific manifests are implementation details, not normal installation steps.
 
-Every host reaches the same capability-aware ReMCP contract. Hosted `remcp.site` discovery exposes a stable 15-tool release surface (10 model-visible + 5 app-only) that routes to 83 granular runtime operations; cached clients can still call 105 unique compatibility names including legacy granular aliases. The selected computer is checked against its live runtime capabilities immediately before dispatch. Local runtimes remain dynamic and emit `tools/list_changed` when their own available set changes. See the [generated tool contract](TOOLS.md) for façade schemas, operation lists, and safety hints.
+Every host reaches the same capability-aware ReMCP contract. Current hosted `remcp.site` discovery exposes 10 model-visible tools (8 device façade + 2 account/fleet) that route to 83 granular runtime operations; cached clients can still call 100 unique compatibility names including legacy granular aliases. If custom widgets are explicitly re-enabled, discovery expands to 15 definitions by adding 5 app-only helpers and the compatibility surface becomes 105 names. The selected computer is checked against its live runtime capabilities immediately before dispatch. Local runtimes remain dynamic and emit `tools/list_changed` when their own available set changes. See the [generated tool contract](TOOLS.md) for façade schemas, operation lists, and safety hints.
 
 ## Portable core
 

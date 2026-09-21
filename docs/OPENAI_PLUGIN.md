@@ -36,7 +36,7 @@ rename, or regenerate the files described here.
 | Rich UI | Production file editor/diff with syntax highlighting and save, fullscreen image viewer, and terminal output viewer. When custom widgets are enabled, file/image/terminal source tools carry their MCP Apps resource directly; three app-only recovery helpers can consume short-lived preview references without rerunning source actions |
 | Authentication | OAuth authorization code + PKCE, OIDC/UserInfo metadata |
 | Public overview | [`docs/PLUGINS.md`](PLUGINS.md) |
-| Full tool reference | [`docs/TOOLS.md`](TOOLS.md) — 15-tool production surface, 10-tool model/native-only surface, and the operation lists that cover all 83 runtime capabilities |
+| Full tool reference | [`docs/TOOLS.md`](TOOLS.md) — current 10-tool production surface, optional 15-tool widget-enabled surface, and the operation lists that cover all 83 runtime capabilities |
 
 ## Package layout
 
