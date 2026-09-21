@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.76 — 2026-09-21
+
+- `browser_find(text=...)` ranks exact semantic targets ahead of broad ancestor text containers, prefers actionable/semantic nodes, and de-duplicates nested matches before applying the result limit.
+- Native `h1`–`h6` elements derive the `heading` role, improving browser text targeting and follow-up actions.
+- Lockstep patch release with the ReMCP client/server at `0.2.76`.
+
 ## 0.2.63 — 2026-09-20
 
 - Lockstep MCP Apps production-surface release with the ReMCP client/server at `0.2.63`; device runtime tool behavior is unchanged from `0.2.62`.

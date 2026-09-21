@@ -447,7 +447,7 @@ export async function browserSnapshot(args) {
   });
 }
 
-function findExpression(args) {
+export function findExpression(args) {
   const selector = optionalString(args.selector);
   const needle = optionalString(args.text);
   const role = optionalString(args.role);
@@ -474,6 +474,7 @@ function findExpression(args) {
       const explicit = (el.getAttribute('role') || '').trim().toLowerCase();
       if (explicit) return explicit;
       const tag = el.tagName.toLowerCase();
+      if (/^h[1-6]$/.test(tag)) return 'heading';
       if (tag === 'button') return 'button';
       if (tag === 'a' && el.hasAttribute('href')) return 'link';
       if (tag === 'textarea') return 'textbox';
@@ -495,15 +496,57 @@ function findExpression(args) {
       }
       return '';
     }
-    return source.filter(el => {
+    function visibleText(el) {
+      return (el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim();
+    }
+    function textQuality(value) {
+      if (!needle) return 0;
+      const hay = value.toLowerCase();
+      const wanted = needle.toLowerCase();
+      if (hay === wanted) return 0;
+      if (hay.startsWith(wanted)) return 1;
+      return 2;
+    }
+    function depthOf(el) {
+      let depth = 0;
+      for (let current = el.parentElement; current; current = current.parentElement) depth += 1;
+      return depth;
+    }
+    const candidates = source.filter(el => {
       const style = getComputedStyle(el);
       const visible = style.visibility !== 'hidden' && style.display !== 'none' && el.getClientRects().length > 0;
-      const hay = (el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim();
+      const hay = visibleText(el);
       const r = semanticRole(el);
       return visible && (!needle || hay.toLowerCase().includes(needle.toLowerCase())) && (!role || r === role.toLowerCase());
-    }).slice(0, ${limit}).map(el => {
+    }).map((el, index) => ({
+      el,
+      index,
+      text: visibleText(el),
+      role: semanticRole(el),
+      depth: depthOf(el),
+    }));
+    let selected = candidates;
+    if (needle && !selector) {
+      selected = [...candidates].sort((a, b) =>
+        textQuality(a.text) - textQuality(b.text)
+        || Number(!a.role) - Number(!b.role)
+        || a.text.length - b.text.length
+        || b.depth - a.depth
+        || a.index - b.index
+      );
+      const deduped = [];
+      for (const candidate of selected) {
+        if (deduped.some(existing => existing.el.contains(candidate.el) || candidate.el.contains(existing.el))) continue;
+        deduped.push(candidate);
+        if (deduped.length >= ${limit}) break;
+      }
+      selected = deduped;
+    } else {
+      selected = selected.slice(0, ${limit});
+    }
+    return selected.map(({ el }) => {
       const b = el.getBoundingClientRect();
-      return { selector: cssPath(el), tag: el.tagName.toLowerCase(), role: semanticRole(el), name: el.getAttribute('aria-label') || el.getAttribute('name') || '', text: (el.innerText || el.textContent || '').trim().slice(0, 500), value: 'value' in el ? String(el.value).slice(0, 500) : '', x: b.x, y: b.y, width: b.width, height: b.height, disabled: Boolean(el.disabled) };
+      return { selector: cssPath(el), tag: el.tagName.toLowerCase(), role: semanticRole(el), name: el.getAttribute('aria-label') || el.getAttribute('name') || '', text: visibleText(el).slice(0, 500), value: 'value' in el ? String(el.value).slice(0, 500) : '', x: b.x, y: b.y, width: b.width, height: b.height, disabled: Boolean(el.disabled) };
     });
   })()`;
 }

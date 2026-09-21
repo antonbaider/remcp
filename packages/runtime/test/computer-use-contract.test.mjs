@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { extendedToolDefinitions } from '../src/extended/catalog.mjs';
 import { computerAction, pointer, scroll, uiAction, uiFind, waitForUi, windowAction } from '../src/extended/desktop.mjs';
-import { browserFind } from '../src/extended/browser.mjs';
+import { browserFind, findExpression } from '../src/extended/browser.mjs';
 import * as linux from '../src/extended/desktop-linux.mjs';
 
 const tool = name => {
@@ -230,6 +230,7 @@ test('browser_find derives native HTML roles when no explicit ARIA role is prese
   const browserSource = await readFile(new URL('../src/extended/browser.mjs', import.meta.url), 'utf8');
 
   assert.match(browserSource, /function semanticRole\(el\)/);
+  assert.match(browserSource, /\^h\[1-6\]\$/);
   assert.match(browserSource, /if \(tag === 'button'\) return 'button'/);
   assert.match(browserSource, /tag === 'a' && el\.hasAttribute\('href'\)/);
   assert.match(browserSource, /type === 'checkbox'.*return 'checkbox'/s);
@@ -237,6 +238,78 @@ test('browser_find derives native HTML roles when no explicit ARIA role is prese
   assert.match(browserSource, /type === 'range'.*return 'slider'/s);
   assert.match(browserSource, /tag === 'select'.*'listbox'.*'combobox'/s);
   assert.match(browserSource, /role: semanticRole\(el\)/);
+});
+
+test('browser_find ranks exact semantic text targets ahead of ancestor text containers', () => {
+  const makeElement = (tag, text, attributes = {}) => ({
+    tagName: tag.toUpperCase(),
+    nodeType: 1,
+    id: attributes.id || '',
+    innerText: text,
+    textContent: text,
+    type: attributes.type || '',
+    multiple: false,
+    size: 0,
+    disabled: false,
+    parentElement: null,
+    children: [],
+    getAttribute(name) {
+      if (name === 'role') return attributes.role || null;
+      if (name === 'aria-label') return attributes.ariaLabel || null;
+      if (name === 'name') return attributes.name || null;
+      return null;
+    },
+    hasAttribute(name) {
+      if (name === 'href') return Boolean(attributes.href);
+      return false;
+    },
+    getClientRects() { return [{}]; },
+    getBoundingClientRect() { return { x:0, y:0, width:100, height:20 }; },
+    contains(other) {
+      for (let current = other; current; current = current.parentElement) {
+        if (current === this) return true;
+      }
+      return false;
+    },
+  });
+  const append = (parent, child) => {
+    child.parentElement = parent;
+    parent.children.push(child);
+    return child;
+  };
+
+  const html = makeElement('html', 'Sign in to ReMCP Continue with Google');
+  const body = append(html, makeElement('body', 'Sign in to ReMCP Continue with Google'));
+  const main = append(body, makeElement('main', 'Sign in to ReMCP Continue with Google'));
+  const section = append(main, makeElement('section', 'Sign in to ReMCP Continue with Google'));
+  append(section, makeElement('h1', 'Sign in to ReMCP'));
+  const button = append(section, makeElement('button', 'Continue with Google'));
+  append(button, makeElement('span', 'Continue with Google'));
+
+  const all = [html, body, main, section, ...section.children, ...button.children];
+  const document = {
+    documentElement: html,
+    querySelectorAll(selector) {
+      if (selector === '*') return all;
+      return all.filter(element => element.tagName.toLowerCase() === selector.toLowerCase());
+    },
+  };
+  const run = args => Function(
+    'document',
+    'getComputedStyle',
+    'CSS',
+    `return ${findExpression(args)};`,
+  )(document, () => ({ visibility:'visible', display:'block' }), { escape:value => String(value) });
+
+  const headingMatches = run({ text:'Sign in to ReMCP', limit:20 });
+  assert.equal(headingMatches.length, 1);
+  assert.equal(headingMatches[0].tag, 'h1');
+  assert.equal(headingMatches[0].role, 'heading');
+
+  const buttonMatches = run({ text:'Continue with Google', limit:20 });
+  assert.equal(buttonMatches.length, 1);
+  assert.equal(buttonMatches[0].tag, 'button');
+  assert.equal(buttonMatches[0].role, 'button');
 });
 
 test('power_action routes restart and shutdown through command policy before native power commands', async () => {
