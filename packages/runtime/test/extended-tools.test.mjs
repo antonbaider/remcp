@@ -8,7 +8,7 @@ import {
   extendedToolDefinitions,
   extendedToolHandlers,
 } from '../src/extended/catalog.mjs';
-import { browserAutoLaunchAvailable, browserNavigate, browserSnapshot, browserTabs } from '../src/extended/browser.mjs';
+import { browserActionInputValue, browserAutoLaunchAvailable, browserNavigate, browserSnapshot, browserTabs } from '../src/extended/browser.mjs';
 import { hasTool, invokeTool } from '../src/invoke.mjs';
 
 const EXPECTED = [
@@ -174,6 +174,16 @@ test('browser_snapshot restores page scroll after selector screenshot capture', 
   assert.match(source, /originalScrollX=scrollX, originalScrollY=scrollY/);
   assert.match(source, /finally\s*\{/);
   assert.match(source, /window\.scrollTo\(\{left:\$\{restoreScroll\.x\},top:\$\{restoreScroll\.y\}/);
+});
+
+test('browser_action type honors the public text argument while set_value prefers value', () => {
+  assert.equal(
+    browserActionInputValue({ text:'Антон ✓ ReMCP' }, 'type'),
+    'Антон ✓ ReMCP',
+    'the public browser_action text field must reach Input.insertText',
+  );
+  assert.equal(browserActionInputValue({ text:'typed', value:'explicit' }, 'type'), 'typed');
+  assert.equal(browserActionInputValue({ text:'typed', value:'explicit' }, 'set_value'), 'explicit');
 });
 
 test('browser_navigate new_tab bootstraps CDP when no page target exists', async () => {

@@ -572,6 +572,12 @@ function elementLookup(args) {
   })()`;
 }
 
+export function browserActionInputValue(args = {}, action = '') {
+  // text is the public field models naturally use for type, while set_value/select historically
+  // used value/text_value. Keep all aliases compatible but give each action its semantic field.
+  return String(action === 'type' ? (args.text ?? args.text_value ?? args.value ?? '') : (args.value ?? args.text_value ?? args.text ?? ''));
+}
+
 export async function browserAction(args) {
   const action = requireEnum(args.action, 'action', ['click', 'focus', 'type', 'set_value', 'select', 'scroll_into_view', 'upload', 'press', 'set_viewport']);
   return withTarget(args, async (session, target) => {
@@ -611,7 +617,7 @@ export async function browserAction(args) {
       return jsonResult({ target_id: target.id, action, key });
     }
     const lookup = elementLookup(args);
-    const value = String(args.value ?? args.text_value ?? '');
+    const value = browserActionInputValue(args, action);
     const option = String(args.option ?? value);
 
     if (action === 'click') {

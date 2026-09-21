@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.77 — 2026-09-21
+
+- Fixed `browser_action` typing so the documented `text` argument reaches CDP `Input.insertText` with Unicode intact; `value` and `text_value` remain compatible aliases.
+- Clarified the browser action schema so agents use `text` for typing and reusable selectors from `browser_find`.
+- Lockstep patch release with the ReMCP client/server at `0.2.77`.
+
 ## 0.2.76 — 2026-09-21
 
 - `browser_find(text=...)` ranks exact semantic targets ahead of broad ancestor text containers, prefers actionable/semantic nodes, and de-duplicates nested matches before applying the result limit.
