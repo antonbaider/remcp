@@ -607,8 +607,11 @@ test('update synchronizes an exact release pair into a distinct canonical servic
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const calls = readFileSync(log, 'utf8');
   const needle = 'npm install --global @remcp/remcp@' + VERSION + ' @remcp/runtime@' + VERSION;
-  assert.ok(calls.split('\n').filter(line => line.includes(needle)).length >= 2,
+  const exactPairInstalls = calls.split('\n').filter(line => line.includes(needle));
+  assert.ok(exactPairInstalls.length >= 2,
     'the exact release pair is installed in the invoking prefix and canonical service prefix');
+  assert.ok(exactPairInstalls.every(line => line.includes('--prefer-online')),
+    'every exact release-pair update must revalidate npm metadata instead of trusting a stale packument');
   const launcher = readFileSync(path.join(configDir, 'remcp-agent-launcher'), 'utf8');
   assert.ok(launcher.includes(serviceNode));
   assert.ok(launcher.includes(serviceCli));

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.93 — 2026-09-21
+
+- Lockstep release for the device client's fresher npm metadata revalidation during exact release updates.
+- Runtime handlers, schemas, the 83 granular operations, and compact/granular stdio behavior are unchanged.
+- The client still installs the runtime as the trusted exact release pair; this patch only changes how npm metadata is refreshed before installation.
+
 ## 0.2.92 — 2026-09-21
 
 - Lockstep documentation release for the hosted 10-tool native-only production contract.

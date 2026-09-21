@@ -25,8 +25,20 @@ export function globalCliPath() {
   return servicePlatform() === 'win32' ? path.join(prefix, 'remcp.cmd') : path.join(prefix, 'bin', 'remcp');
 }
 
+function npmGlobalInstallArgs(specs, { preferOnline = false } = {}) {
+  return [
+    'install',
+    '--global',
+    ...specs,
+    ...(preferOnline ? ['--prefer-online'] : []),
+    '--no-audit',
+    '--no-fund',
+    '--loglevel=error',
+  ];
+}
+
 export function npmGlobalInstall(...specs) {
-  run(npm.command, [...npm.args, 'install', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
+  run(npm.command, [...npm.args, ...npmGlobalInstallArgs(specs)]);
 }
 
 function pathEntryExists(file) {
@@ -47,7 +59,7 @@ function globalPackagePath(prefix, packageName) {
   return path.join(prefix, 'lib', 'node_modules', ...parts);
 }
 
-function transactionalMacGlobalInstall({ resolved, prefix, packageNames, specs }) {
+function transactionalMacGlobalInstall({ resolved, prefix, packageNames, specs, preferOnline = false }) {
   prefix = String(prefix || '').trim();
   if (!path.isAbsolute(prefix)) throw new Error(`npm global prefix must be absolute for a macOS update: ${prefix || '(empty)'}`);
   const backupRoot = path.join(prefix, `.remcp-update-backup-${process.pid}-${Date.now()}`);
@@ -85,7 +97,7 @@ function transactionalMacGlobalInstall({ resolved, prefix, packageNames, specs }
     uniqueNames.forEach((name, index) => moveAside(globalPackagePath(prefix, name), `package-${index}`));
     if (uniqueNames.includes(PACKAGE_NAME)) moveAside(path.join(prefix, 'bin', 'remcp'), 'bin-remcp');
 
-    run(resolved.command, [...resolved.args, 'install', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
+    run(resolved.command, [...resolved.args, ...npmGlobalInstallArgs(specs, { preferOnline })]);
   } catch (error) {
     restore(error);
     throw error;
@@ -98,23 +110,26 @@ function transactionalMacGlobalInstall({ resolved, prefix, packageNames, specs }
   }
 }
 
+// Release updates use exact versions that may have been published only moments ago. npm can keep a
+// cached pre-publication packument long enough to answer ETARGET after the registry already serves the
+// version, so updates revalidate metadata while retaining npm's cache for package bytes.
 export function npmGlobalUpdate(packageNames, ...specs) {
   if (servicePlatform() !== 'darwin') {
-    npmGlobalInstall(...specs);
+    run(npm.command, [...npm.args, ...npmGlobalInstallArgs(specs, { preferOnline:true })]);
     return;
   }
   const prefix = globalPrefix();
-  transactionalMacGlobalInstall({ resolved:npm, prefix, packageNames, specs });
+  transactionalMacGlobalInstall({ resolved:npm, prefix, packageNames, specs, preferOnline:true });
 }
 
 export function npmGlobalUpdateForNode(nodePath, packageNames, ...specs) {
   const resolved = resolveNpm({ nodePath, home, platform:servicePlatform() });
   if (servicePlatform() !== 'darwin') {
-    run(resolved.command, [...resolved.args, 'install', '--global', ...specs, '--no-audit', '--no-fund', '--loglevel=error']);
+    run(resolved.command, [...resolved.args, ...npmGlobalInstallArgs(specs, { preferOnline:true })]);
     return;
   }
   const prefix = output(resolved.command, [...resolved.args, 'prefix', '--global']);
-  transactionalMacGlobalInstall({ resolved, prefix, packageNames, specs });
+  transactionalMacGlobalInstall({ resolved, prefix, packageNames, specs, preferOnline:true });
 }
 
 export function quoteSystemd(value) {

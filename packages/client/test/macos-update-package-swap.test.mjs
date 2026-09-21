@@ -58,6 +58,7 @@ test('macOS global update moves the live ReMCP package trees aside before npm mu
     '  exit 0',
     'fi',
     'if [ "$1" = "install" ]; then',
+    '  case " $* " in *" --prefer-online "*) ;; *) echo "update did not revalidate npm metadata" >&2; exit 94;; esac',
     '  test ! -e "$REMCP_TEST_PREFIX/lib/node_modules/@remcp/remcp" || { echo "client tree was still live" >&2; exit 91; }',
     '  test ! -e "$REMCP_TEST_PREFIX/lib/node_modules/@remcp/runtime" || { echo "runtime tree was still live" >&2; exit 92; }',
     '  test ! -e "$REMCP_TEST_PREFIX/bin/remcp" || { echo "client bin was still live" >&2; exit 93; }',
