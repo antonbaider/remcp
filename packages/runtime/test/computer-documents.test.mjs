@@ -21,6 +21,76 @@ function zipTree(base, output) {
   execFileSync('zip', ['-qr', output, '.'], { cwd: base });
 }
 
+test('XLSX can be created from scratch through edit_spreadsheet', { skip: !zipReady }, async () => {
+  const xlsx = join(root, 'created-book.xlsx');
+  const { editSpreadsheet, readDocument } = await import('../src/extended/documents.mjs');
+  const created = await editSpreadsheet({
+    path: xlsx,
+    create: true,
+    sheet: 'Data',
+    edits: [
+      { cell: 'A1', value: 'Name' },
+      { cell: 'B1', value: 'Amount' },
+      { range: 'A2:B3', values: [['Alpha', 12], ['Beta', 30]] },
+      { cell: 'C2', formula: '=SUM(B2:B3)' },
+    ],
+  });
+  const summary = JSON.parse(created.content[0].text);
+  assert.equal(summary.path, xlsx);
+  assert.equal(summary.sheet, 'Data');
+  assert.equal(summary.created, true);
+
+  const read = await readDocument({ path: xlsx, sheet: 'Data' });
+  const parsed = JSON.parse(read.content[0].text);
+  assert.equal(parsed.cells.find(cell => cell.ref === 'A1')?.value, 'Name');
+  assert.equal(parsed.cells.find(cell => cell.ref === 'B3')?.value, 30);
+  assert.equal(parsed.cells.find(cell => cell.ref === 'C2')?.formula, 'SUM(B2:B3)');
+
+  await assert.rejects(
+    () => editSpreadsheet({ path: xlsx, create:true, edits:[{ cell:'A1', value:'overwrite' }] }),
+    /already exists/i,
+  );
+  await assert.rejects(
+    () => editSpreadsheet({ path: join(root,'bad-sheet.xlsx'), create:true, sheet:'bad/name', edits:[{ cell:'A1', value:'x' }] }),
+    /characters Excel does not allow/i,
+  );
+  await assert.rejects(
+    () => editSpreadsheet({ path: join(root,'create-with-output.xlsx'), create:true, output:join(root,'other.xlsx'), edits:[{ cell:'A1', value:'x' }] }),
+    /output is not used with create=true/i,
+  );
+});
+
+test('DOCX can be created from scratch through edit_document', { skip: !zipReady }, async () => {
+  const docx = join(root, 'created-note.docx');
+  const { editDocument, readDocument } = await import('../src/extended/documents.mjs');
+  const created = await editDocument({
+    path: docx,
+    create: true,
+    operations: [
+      { action: 'append_paragraph', text: 'Created by ReMCP' },
+      { action: 'prepend_paragraph', text: 'Document title' },
+      { action: 'append_paragraph', text: 'Final paragraph' },
+    ],
+  });
+  const summary = JSON.parse(created.content[0].text);
+  assert.equal(summary.path, docx);
+  assert.equal(summary.created, true);
+
+  const read = await readDocument({ path: docx });
+  assert.match(read.content[0].text, /Document title/);
+  assert.match(read.content[0].text, /Created by ReMCP/);
+  assert.match(read.content[0].text, /Final paragraph/);
+
+  await assert.rejects(
+    () => editDocument({ path: docx, create:true, operations:[{ action:'append_paragraph', text:'overwrite' }] }),
+    /already exists/i,
+  );
+  await assert.rejects(
+    () => editDocument({ path: join(root,'create-with-output.docx'), create:true, output:join(root,'other.docx'), operations:[{ action:'append_paragraph', text:'x' }] }),
+    /output is not used with create=true/i,
+  );
+});
+
 test('XLSX edit and read round-trip without a bundled spreadsheet dependency', { skip: !zipReady }, async () => {
   const sourceDir = join(root, 'xlsx-src');
   mkdirSync(sourceDir, { recursive: true });
@@ -39,6 +109,7 @@ test('XLSX edit and read round-trip without a bundled spreadsheet dependency', {
     { cell: 'E1', formula: '=SUM(C2:D2)' },
   ] });
   assert.equal(edited.isError, undefined);
+  assert.equal(JSON.parse(edited.content[0].text).created, false);
   const read = await readDocument({ path: xlsx, sheet: 'Sheet1' });
   const parsed = JSON.parse(read.content[0].text);
   assert.deepEqual(parsed.cells.find(cell => cell.ref === 'A1')?.value, 'new');
@@ -57,13 +128,14 @@ test('DOCX edit and read round-trip preserves plain paragraph text', { skip: !zi
   const docx = join(root, 'note.docx');
   zipTree(sourceDir, docx);
   const { editDocument, readDocument } = await import('../src/extended/documents.mjs');
-  await editDocument({ path: docx, operations: [
+  const edited = await editDocument({ path: docx, operations: [
     { action: 'replace', search: 'world', replacement: 'ReMCP' },
     { action: 'prepend_paragraph', text: 'First paragraph' },
     { action: 'append_paragraph', text: 'Second paragraph' },
     { action: 'insert_paragraph_after', search: 'Hello ReMCP', text: 'Inserted paragraph' },
     { action: 'delete_paragraph', search: 'Second paragraph' },
   ] });
+  assert.equal(JSON.parse(edited.content[0].text).created, false);
   const read = await readDocument({ path: docx });
   assert.match(read.content[0].text, /First paragraph/);
   assert.match(read.content[0].text, /Hello ReMCP/);

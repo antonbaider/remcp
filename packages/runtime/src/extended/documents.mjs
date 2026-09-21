@@ -71,6 +71,47 @@ async function createZip(sourceDir, destination) {
   await runFile('zip', ['-qr',destination,'.'], { cwd:sourceDir, label:'create OOXML archive', timeout:30_000 });
 }
 
+async function ensureCreateTargetIsNew(filePath) {
+  try {
+    await stat(filePath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  throw new Error(`Cannot create document because path already exists: ${filePath}`);
+}
+
+async function writeOoxmlPart(root, relative, content) {
+  const target = path.join(root, ...relative.split('/'));
+  await mkdir(path.dirname(target), { recursive:true });
+  await writeFile(target, content, 'utf8');
+}
+
+function newWorksheetName(value) {
+  const name = optionalString(value) || 'Sheet1';
+  if (name.length > 31) throw new Error('Worksheet name must be 31 characters or fewer');
+  if (/[\\/*?:\[\]]/.test(name) || name.startsWith("'") || name.endsWith("'")) {
+    throw new Error('Worksheet name contains characters Excel does not allow');
+  }
+  return name;
+}
+
+async function createBlankXlsxTree(root, sheetName) {
+  const name = newWorksheetName(sheetName);
+  await writeOoxmlPart(root, '[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>');
+  await writeOoxmlPart(root, '_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
+  await writeOoxmlPart(root, 'xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xmlEscape(name)}" sheetId="1" r:id="rId1"/></sheets></workbook>`);
+  await writeOoxmlPart(root, 'xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>');
+  await writeOoxmlPart(root, 'xl/worksheets/sheet1.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData></sheetData></worksheet>');
+  return name;
+}
+
+async function createBlankDocxTree(root) {
+  await writeOoxmlPart(root, '[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+  await writeOoxmlPart(root, '_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  await writeOoxmlPart(root, 'word/document.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>');
+}
+
 function workbookSheetPath(workbookXml, relsXml, requestedName) {
   const sheets = [...workbookXml.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*(?:r:id|id)="([^"]+)"[^>]*\/?>(?:<\/sheet>)?/g)].map(match => ({ name:xmlUnescape(match[1]), rid:match[2] }));
   const sheet = requestedName ? sheets.find(item => item.name.toLowerCase() === requestedName.toLowerCase()) : sheets[0];
@@ -227,14 +268,21 @@ function expandSpreadsheetEdits(edits) {
 export async function editSpreadsheet(args) {
   const filePath = await resolveSafePath(args.path,'path');
   if (!filePath.toLowerCase().endsWith('.xlsx')) throw new Error('edit_spreadsheet supports .xlsx files');
+  const create = args.create === true;
+  if (create && args.output) throw new Error('output is not used with create=true; path is the new workbook destination');
   const requestedEdits = Array.isArray(args.edits) ? args.edits : [];
   if (!requestedEdits.length || requestedEdits.length > 500) throw new Error('edits must contain 1..500 cell/range edits');
   const edits = expandSpreadsheetEdits(requestedEdits);
   const output = args.output ? await resolveSafePath(args.output,'output') : filePath;
-  const dir = await tempDir('remcp-xlsx-edit-');
+  const dir = await tempDir(create ? 'remcp-xlsx-create-' : 'remcp-xlsx-edit-');
   const tempOut = path.join(path.dirname(output), `.remcp-${Date.now()}-${path.basename(output)}`);
   try {
-    await extractZip(filePath,dir);
+    if (create) {
+      await ensureCreateTargetIsNew(filePath);
+      await createBlankXlsxTree(dir, optionalString(args.sheet));
+    } else {
+      await extractZip(filePath,dir);
+    }
     const workbook = await readFile(path.join(dir,'xl','workbook.xml'),'utf8');
     const rels = await readFile(path.join(dir,'xl','_rels','workbook.xml.rels'),'utf8');
     const sheet = workbookSheetPath(workbook,rels,optionalString(args.sheet));
@@ -242,9 +290,10 @@ export async function editSpreadsheet(args) {
     let xml = await readFile(worksheetPath,'utf8');
     for (const edit of edits) xml = setWorksheetCell(xml,String(edit.cell || '').toUpperCase(),edit.value,edit.formula);
     await writeFile(worksheetPath,xml,'utf8');
+    await mkdir(path.dirname(output), { recursive:true });
     await createZip(dir,tempOut);
     await copyFile(tempOut,output);
-    return jsonResult({ path:output, sheet:sheet.name, edited_cells:edits.length, bytes:(await stat(output)).size });
+    return jsonResult({ path:output, sheet:sheet.name, edited_cells:edits.length, bytes:(await stat(output)).size, created:create });
   } finally {
     await rm(tempOut,{force:true}).catch(() => {});
     await removeTemp(dir);
@@ -301,14 +350,21 @@ function mutateMatchingParagraphs(xml, op) {
 export async function editDocument(args) {
   const filePath = await resolveSafePath(args.path,'path');
   if (!filePath.toLowerCase().endsWith('.docx')) throw new Error('edit_document supports .docx files');
+  const create = args.create === true;
+  if (create && args.output) throw new Error('output is not used with create=true; path is the new document destination');
   const operations = Array.isArray(args.operations) ? args.operations : [];
   if (!operations.length || operations.length > 100) throw new Error('operations must contain 1..100 edits');
   const output = args.output ? await resolveSafePath(args.output,'output') : filePath;
-  const dir = await tempDir('remcp-docx-edit-');
+  const dir = await tempDir(create ? 'remcp-docx-create-' : 'remcp-docx-edit-');
   const tempOut = path.join(path.dirname(output), `.remcp-${Date.now()}-${path.basename(output)}`);
   let changes = 0;
   try {
-    await extractZip(filePath,dir);
+    if (create) {
+      await ensureCreateTargetIsNew(filePath);
+      await createBlankDocxTree(dir);
+    } else {
+      await extractZip(filePath,dir);
+    }
     const documentPath = path.join(dir,'word','document.xml');
     let xml = await readFile(documentPath,'utf8');
     for (const op of operations) {
@@ -327,9 +383,10 @@ export async function editDocument(args) {
       }
     }
     await writeFile(documentPath,xml,'utf8');
+    await mkdir(path.dirname(output), { recursive:true });
     await createZip(dir,tempOut);
     await copyFile(tempOut,output);
-    return jsonResult({ path:output, operations:operations.length, changes, bytes:(await stat(output)).size });
+    return jsonResult({ path:output, operations:operations.length, changes, bytes:(await stat(output)).size, created:create });
   } finally {
     await rm(tempOut,{force:true}).catch(() => {});
     await removeTemp(dir);

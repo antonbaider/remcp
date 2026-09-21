@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.84 — 2026-09-21
+
+- `edit_document` can create a new DOCX with `create=true`, refusing to overwrite an existing destination.
+- `edit_spreadsheet` can create a new XLSX workbook with an optional first-sheet name and existing cell/range/formula edits.
+- Added OOXML creation, overwrite-safety, invalid-sheet-name, schema/output, and read-back regression coverage; the runtime catalog remains 83 tools.
+
 ## 0.2.83 — 2026-09-21
 
 - Linux X11 `record_screen` capability now requires both `ffmpeg` and a real `DISPLAY`; headless hosts no longer advertise a recorder that will fail.

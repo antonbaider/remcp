@@ -29,11 +29,26 @@ export function openInBrowser(url) {
   } catch {}
 }
 
+const TRANSIENT_FETCH_RETRY_DELAY_MS = 150;
+
+async function fetchWithTransientRetry(url, options) {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    // Node/undici reports transport failures (connection reset/refused, socket close, timeout)
+    // as TypeError("fetch failed"). HTTP responses never enter this branch, so auth/server
+    // rejections remain fail-closed and are not retried here.
+    if (!(error instanceof TypeError)) throw error;
+    await sleep(TRANSIENT_FETCH_RETRY_DELAY_MS);
+    return fetch(url, options);
+  }
+}
+
 // Device authorization (RFC 8628): the computer asks for a code, the person approves it in the
 // browser while signed in, and this process collects the credential by polling. The device never
 // sees a browser session or an account password.
 export async function pairWithDeviceCode(server, flags) {
-  const authorization = await fetch(`${server}/oauth/device_authorization`, {
+  const authorization = await fetchWithTransientRetry(`${server}/oauth/device_authorization`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -56,7 +71,7 @@ export async function pairWithDeviceCode(server, flags) {
   const intervalMs = Math.max(1, Number(grant.interval) || 5) * 1000;
   while (Date.now() < deadline) {
     await sleep(intervalMs);
-    const response = await fetch(`${server}/oauth/token`, {
+    const response = await fetchWithTransientRetry(`${server}/oauth/token`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({

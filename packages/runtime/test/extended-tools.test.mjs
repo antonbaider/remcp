@@ -69,6 +69,11 @@ test('extended tool schemas are written for agent selection rather than name gue
   assert.match(byName.get('browser_evaluate').description, /escape hatch/i);
   assert.match(byName.get('browser_snapshot').description, /scroll position is restored/i);
   assert.match(byName.get('read_document').description, /without opening|launching/i);
+  for (const name of ['edit_spreadsheet','edit_document']) {
+    assert.match(byName.get(name).description, /create/i, `${name} advertises explicit creation without adding another tool`);
+    assert.ok(byName.get(name).inputSchema.properties.create, `${name} exposes create mode`);
+    assert.ok(byName.get(name).outputSchema.properties.created, `${name} reports whether it created a new file`);
+  }
   for (const name of ['computer_snapshot','browser_tabs','browser_snapshot','browser_find','browser_wait','scroll','display_inventory','installed_apps','environment','read_document']) {
     assert.equal(byName.get(name).annotations.openWorldHint, false, name + ' stays within local/private state');
   }
