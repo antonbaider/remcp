@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.81 — 2026-09-21
+
+- `record_screen` is advertised only when the current OS/session has a recorder backend the runtime can actually invoke.
+- macOS/Windows require `ffmpeg`; Linux Wayland requires `wf-recorder + timeout`; Linux X11 requires `ffmpeg`.
+- Availability errors are platform-specific, and regression coverage locks the capability matrix.
+- Lockstep patch release with the ReMCP client/server at `0.2.81`.
+
 ## 0.2.80 — 2026-09-21
 
 - Wayland `type_text` can replace text in an inactive explicitly targeted native window without compositor focus when exactly one editable accessibility control is present.

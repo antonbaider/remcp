@@ -9,6 +9,7 @@ import {
   extendedToolHandlers,
 } from '../src/extended/catalog.mjs';
 import { browserActionInputValue, browserAutoLaunchAvailable, browserNavigate, browserSnapshot, browserTabs } from '../src/extended/browser.mjs';
+import { recordScreenAvailable } from '../src/extended/diagnostics.mjs';
 import { hasTool, invokeTool } from '../src/invoke.mjs';
 
 const EXPECTED = [
@@ -167,6 +168,22 @@ test('installed Chromium keeps the browser tool group discoverable before CDP st
     if (previousBinary == null) delete process.env.REMCP_BROWSER_BINARY; else process.env.REMCP_BROWSER_BINARY = previousBinary;
     if (previousEndpoint == null) delete process.env.REMCP_CDP_URL; else process.env.REMCP_CDP_URL = previousEndpoint;
   }
+});
+
+test('record_screen capability is advertised only when a real recorder backend exists', () => {
+  const none = () => false;
+  const ffmpegOnly = name => name === 'ffmpeg';
+  const waylandOnly = name => name === 'wf-recorder' || name === 'timeout';
+
+  assert.equal(recordScreenAvailable({ platform:'darwin', commandExistsFn:none }), false);
+  assert.equal(recordScreenAvailable({ platform:'darwin', commandExistsFn:ffmpegOnly }), true);
+  assert.equal(recordScreenAvailable({ platform:'win32', commandExistsFn:none }), false);
+  assert.equal(recordScreenAvailable({ platform:'win32', commandExistsFn:ffmpegOnly }), true);
+  assert.equal(recordScreenAvailable({ platform:'linux', wayland:true, commandExistsFn:none }), false);
+  assert.equal(recordScreenAvailable({ platform:'linux', wayland:true, commandExistsFn:waylandOnly }), true);
+  assert.equal(recordScreenAvailable({ platform:'linux', wayland:true, commandExistsFn:ffmpegOnly }), false);
+  assert.equal(recordScreenAvailable({ platform:'linux', wayland:false, commandExistsFn:none }), false);
+  assert.equal(recordScreenAvailable({ platform:'linux', wayland:false, commandExistsFn:ffmpegOnly }), true);
 });
 
 test('browser_snapshot restores page scroll after selector screenshot capture', async () => {

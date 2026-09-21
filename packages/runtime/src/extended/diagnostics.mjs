@@ -5,6 +5,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { stat } from 'node:fs/promises';
 import { assertAllowedCommand } from '../policy.mjs';
+import { isWaylandSession } from '../screenshot-portal.mjs';
 import { resolveSafePath, text } from '../util.mjs';
 import {
   clamp,
@@ -243,6 +244,19 @@ export async function powerAction(args) {
   return text(`${policy.note ? `${policy.note}\n` : ''}Power action ${action} requested.`);
 }
 
+export function recordScreenAvailable({
+  platform = process.platform,
+  wayland = platform === 'linux' ? isWaylandSession() : false,
+  commandExistsFn = commandExists,
+} = {}) {
+  if (platform === 'linux') {
+    if (wayland) return commandExistsFn('wf-recorder') && commandExistsFn('timeout');
+    return commandExistsFn('ffmpeg');
+  }
+  if (platform === 'darwin' || platform === 'win32') return commandExistsFn('ffmpeg');
+  return false;
+}
+
 export async function recordScreen(args) {
   const seconds = clamp(args.duration_seconds, 5, 1, 120);
   const fps = clamp(args.fps, 15, 1, 60);
@@ -251,7 +265,14 @@ export async function recordScreen(args) {
     const result = await runFile('timeout', ['--signal=INT', `${seconds}s`, 'wf-recorder', '-f',destination,'-r',String(fps),'-c','libx264'], { label:'screen recording', timeout:(seconds+10)*1000, allowFailure:true });
     if (![0, 124, 130].includes(Number(result.code))) throw new Error(result.stderr.trim() || `wf-recorder exited ${result.code}`);
   } else {
-    if (!commandExists('ffmpeg')) unavailable('Screen recording', 'install wf-recorder on Wayland or ffmpeg');
+    if (process.platform === 'linux' && isWaylandSession()) {
+      unavailable('Screen recording', 'wf-recorder and timeout are required on Wayland');
+    }
+    if (!commandExists('ffmpeg')) {
+      if (process.platform === 'darwin') unavailable('Screen recording', 'ffmpeg is required on macOS');
+      if (process.platform === 'win32') unavailable('Screen recording', 'ffmpeg is required on Windows');
+      unavailable('Screen recording', 'ffmpeg is required on X11');
+    }
     let argv;
     if (process.platform === 'win32') argv=['-y','-f','gdigrab','-framerate',String(fps),'-i','desktop','-t',String(seconds),'-pix_fmt','yuv420p',destination];
     else if (process.platform === 'darwin') argv=['-y','-f','avfoundation','-framerate',String(fps),'-i','1:none','-t',String(seconds),'-pix_fmt','yuv420p',destination];

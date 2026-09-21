@@ -9,7 +9,7 @@ import { isWaylandSession } from '../screenshot-portal.mjs';
 import { waylandPortalCandidate } from '../wayland-remote-desktop.mjs';
 import { commandExists, runFile } from './common.mjs';
 import { desktopHandlers } from './desktop.mjs';
-import { diagnosticHandlers } from './diagnostics.mjs';
+import { diagnosticHandlers, recordScreenAvailable } from './diagnostics.mjs';
 import { documentHandlers } from './documents.mjs';
 
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -623,7 +623,7 @@ export async function capabilitySnapshot() {
     apps: win || mac || commandExists('dpkg-query') || commandExists('rpm'),
     audio: win || mac || commandExists('wpctl') || commandExists('pactl') || commandExists('amixer'),
     power: win || mac || commandExists('systemctl') || commandExists('loginctl'),
-    record: win || mac || commandExists('wf-recorder') || commandExists('ffmpeg'),
+    record: recordScreenAvailable({ platform:process.platform, wayland }),
     ooxml: win || (commandExists('zip') && commandExists('unzip')),
   };
 }
