@@ -1203,11 +1203,32 @@ export async function dragDrop(args = {}) {
   const runPortal = async timeoutMs => {
     const button = String(args.button || 'left').toLowerCase();
     const portalOptions = { timeoutMs };
-    await portalMoveTo(Number(args.from_x), Number(args.from_y), portalOptions);
+    const fromX = Number(args.from_x), fromY = Number(args.from_y);
+    const toX = Number(args.to_x), toY = Number(args.to_y);
+    await portalMoveTo(fromX, fromY, portalOptions);
+    // Give the compositor/toolkit one frame to observe the source position before
+    // button-down. A transport ACK only proves that the portal accepted the event.
+    await new Promise(resolve => setTimeout(resolve, 60));
     await portalPointerButton(button, true, portalOptions);
-    await new Promise(resolve => setTimeout(resolve, clamp(args.hold_ms, 120, 0, 5000)));
-    await portalMoveTo(Number(args.to_x), Number(args.to_y), portalOptions);
-    await new Promise(resolve => setTimeout(resolve, clamp(args.duration_ms, 120, 0, 5000)));
+    await new Promise(resolve => setTimeout(resolve, clamp(args.hold_ms, 120, 60, 5000)));
+
+    // A single absolute jump while the button is held can be coalesced by Mutter/
+    // XWayland and never become a target-visible pointermove. Send a short,
+    // human-like path so drag-aware toolkits observe movement before button-up.
+    const distance = Math.hypot(toX - fromX, toY - fromY);
+    const steps = Math.max(4, Math.min(20, Math.ceil(distance / 24)));
+    const durationMs = clamp(args.duration_ms, 160, 80, 5000);
+    const stepDelay = Math.max(8, Math.round(durationMs / steps));
+    for (let step = 1; step <= steps; step += 1) {
+      const ratio = step / steps;
+      await portalMoveTo(
+        fromX + (toX - fromX) * ratio,
+        fromY + (toY - fromY) * ratio,
+        portalOptions,
+      );
+      await new Promise(resolve => setTimeout(resolve, stepDelay));
+    }
+    await new Promise(resolve => setTimeout(resolve, 40));
     await portalPointerButton(button, false, portalOptions);
     await new Promise(resolve => setTimeout(resolve, 80));
   };
@@ -1408,6 +1429,24 @@ async function pngDimensions(file) {
   }
 }
 
+export function regionScreenshotBackends({
+  wayland = isWaylandSession(),
+  grim = commandExists('grim'),
+  gnomeScreenshot = commandExists('gnome-screenshot'),
+  ffmpeg = commandExists('ffmpeg'),
+  imagemagick = commandExists('import'),
+} = {}) {
+  const backends = [];
+  if (grim) backends.push('grim');
+  if (wayland) {
+    if (gnomeScreenshot && ffmpeg) backends.push('gnome-screenshot');
+    if (ffmpeg) backends.push('portal');
+  } else if (imagemagick) {
+    backends.push('imagemagick');
+  }
+  return backends;
+}
+
 export function portalCropGeometry(rect, displays = [], bitmap = null) {
   const requested = {
     x: Math.trunc(Number(rect?.x)),
@@ -1475,28 +1514,54 @@ export async function screenshotRegion(args = {}) {
   const full = path.join(dir, 'full.png');
   let captured = { x, y, width, height };
   let clipped = false;
+  let backend = '';
   try {
-    if (commandExists('grim')) {
-      await runFile('grim', ['-g',`${x},${y} ${width}x${height}`,target], { label:'screenshot region' });
-    } else if (isWaylandSession() && commandExists('ffmpeg')) {
-      await capturePortalScreenshot(full);
+    const cropFullDesktop = async () => {
       const inventory = await displayInventory().catch(() => null);
       const displays = Array.isArray(inventory?.structuredContent?.data) ? inventory.structuredContent.data : [];
       const bitmap = await pngDimensions(full);
       const crop = portalCropGeometry({ x, y, width, height }, displays, bitmap);
       captured = crop.visible;
       clipped = crop.clipped;
-      await runFile('ffmpeg', ['-hide_banner','-loglevel','error','-y','-i',full,'-vf',`crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`,'-frames:v','1',target], { label:'crop portal screenshot', timeout:30_000, maxBuffer:4*1024*1024 });
-    } else if (commandExists('import')) {
-      await runFile('import', ['-window','root','-crop',`${width}x${height}+${x}+${y}`,target], { label:'screenshot region' });
-    } else {
-      unavailable('Region screenshots', isWaylandSession() ? 'the XDG Desktop Portal plus ffmpeg, or grim, is required' : 'install ImageMagick import');
+      await runFile('ffmpeg', ['-hide_banner','-loglevel','error','-y','-i',full,'-vf',`crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`,'-frames:v','1',target], { label:'crop desktop screenshot', timeout:30_000, maxBuffer:4*1024*1024 });
+    };
+
+    const candidates = regionScreenshotBackends();
+    if (!candidates.length) {
+      unavailable('Region screenshots', isWaylandSession()
+        ? 'install grim, or gnome-screenshot/ffmpeg, or provide the XDG Desktop Portal plus ffmpeg'
+        : 'install ImageMagick import');
     }
+
+    let lastError = null;
+    for (const candidate of candidates) {
+      try {
+        if (candidate === 'grim') {
+          await runFile('grim', ['-g',`${x},${y} ${width}x${height}`,target], { label:'screenshot region' });
+        } else if (candidate === 'gnome-screenshot') {
+          await runFile('gnome-screenshot', ['-f',full], { label:'GNOME screenshot', timeout:10_000, maxBuffer:1024*1024 });
+          await cropFullDesktop();
+        } else if (candidate === 'portal') {
+          await capturePortalScreenshot(full);
+          await cropFullDesktop();
+        } else if (candidate === 'imagemagick') {
+          await runFile('import', ['-window','root','-crop',`${width}x${height}+${x}+${y}`,target], { label:'screenshot region' });
+        }
+        backend = candidate;
+        lastError = null;
+        break;
+      } catch (error) {
+        if (error?.code === 'PORTAL_CANCELLED') throw error;
+        lastError = error;
+      }
+    }
+    if (lastError) throw lastError;
+
     const {data} = await readPrivateTempFile(target, 4 * 1024 * 1024);
-    const summary = clipped
+    const baseSummary = clipped
       ? `Captured visible ${captured.width}x${captured.height} at ${captured.x},${captured.y}; clipped from requested ${width}x${height} at ${x},${y}.`
       : `Captured ${width}x${height} at ${x},${y}.`;
-    return multi([{type:'text',text:summary}, image(data.toString('base64'),'image/png')]);
+    return multi([{type:'text',text:`${baseSummary} Backend: ${backend}.`}, image(data.toString('base64'),'image/png')]);
   } finally { await removeTemp(dir); }
 }
 

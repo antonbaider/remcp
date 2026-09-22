@@ -183,6 +183,31 @@ test('Linux Wayland portal clicks keep a real press interval before release', as
   );
 });
 
+test('Wayland EIS helper releases a button through the same device that received its press', async () => {
+  const helper = await readFile(new URL('../src/helpers/wayland-eis-helper.py', import.meta.url), 'utf8');
+  assert.match(helper, /self\.button_device_keys = \{\}/);
+  assert.match(
+    helper,
+    /if pressed:[\s\S]{0,260}self\.button_device_keys\[button\] = self\._device_key\(device\)[\s\S]{0,420}key = self\.button_device_keys\.pop\(button, None\)[\s\S]{0,520}device = state\["ptr"\]/,
+    'button release must reuse the exact EIS device selected for button press',
+  );
+});
+
+test('Linux Wayland portal drag settles the source and emits intermediate motion before release', async () => {
+  const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
+  const dragBody = linuxSource.match(/export async function dragDrop\(args = \{\}\) \{[\s\S]*?(?=export async function scroll)/)?.[0] || '';
+  assert.match(
+    dragBody,
+    /portalMoveTo\(fromX, fromY, portalOptions\);[\s\S]{0,420}setTimeout\(resolve, 60\)[\s\S]{0,220}portalPointerButton\(button, true, portalOptions\)/,
+    'Wayland portal drag must let the target observe the source position before button-down',
+  );
+  assert.match(
+    dragBody,
+    /const steps = Math\.max\(4,[\s\S]{0,500}for \(let step = 1; step <= steps; step \+= 1\)[\s\S]{0,500}portalMoveTo\([\s\S]{0,500}portalPointerButton\(button, false, portalOptions\)/,
+    'Wayland portal drag must deliver intermediate pointer motion before button-up',
+  );
+});
+
 test('Linux Wayland keyboard and key typing focus an explicit window target before dispatch', async () => {
   const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
 

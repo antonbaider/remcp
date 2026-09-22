@@ -248,6 +248,9 @@ class EiSender:
         self.connected = False
         self.pointer_device_key = None
         self.pointer_position = None
+        # A press/release pair must stay on the same emulated device even if
+        # absolute motion crosses an EIS region and changes pointer_device_key.
+        self.button_device_keys = {}
 
     def _device_key(self, ptr):
         return int(ptr or 0)
@@ -267,6 +270,9 @@ class EiSender:
         if key == self.pointer_device_key:
             self.pointer_device_key = None
             self.pointer_position = None
+        for button, device_key in list(self.button_device_keys.items()):
+            if device_key == key:
+                self.button_device_keys.pop(button, None)
         if state:
             if state["emulating"]:
                 try:
@@ -313,10 +319,14 @@ class EiSender:
                             state["emulating"] = True
                 elif event_type == EI_EVENT_DEVICE_PAUSED:
                     device = self.lib.ei_event_get_device(event)
-                    state = self.devices.get(self._device_key(device))
+                    key = self._device_key(device)
+                    state = self.devices.get(key)
                     if state:
                         state["resumed"] = False
                         state["emulating"] = False
+                    for button, device_key in list(self.button_device_keys.items()):
+                        if device_key == key:
+                            self.button_device_keys.pop(button, None)
                 elif event_type == EI_EVENT_DEVICE_REMOVED:
                     self._drop_device(self.lib.ei_event_get_device(event))
             finally:
@@ -419,8 +429,24 @@ class EiSender:
             self.remember_pointer(device, (x, y))
             self.frame(device)
         elif op == "button":
-            device = self.device_for_pointer_context(EI_CAP_BUTTON)
-            self.lib.ei_device_button_button(device, int(payload["button"]), bool(payload.get("pressed")))
+            button = int(payload["button"])
+            pressed = bool(payload.get("pressed"))
+            if pressed:
+                device = self.device_for_pointer_context(EI_CAP_BUTTON)
+                self.button_device_keys[button] = self._device_key(device)
+            else:
+                key = self.button_device_keys.pop(button, None)
+                state = self.devices.get(key) if key else None
+                if (
+                    state
+                    and state["resumed"]
+                    and state["emulating"]
+                    and self.lib.ei_device_has_capability(state["ptr"], EI_CAP_BUTTON)
+                ):
+                    device = state["ptr"]
+                else:
+                    device = self.device_for_pointer_context(EI_CAP_BUTTON)
+            self.lib.ei_device_button_button(device, button, pressed)
             self.frame(device)
         elif op == "scroll":
             device = self.device_for_pointer_context(EI_CAP_SCROLL)
@@ -446,6 +472,7 @@ class EiSender:
             except Exception:
                 pass
         self.devices.clear()
+        self.button_device_keys.clear()
         if self.ei:
             self.lib.ei_unref(self.ei)
             self.ei = None

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { capturePortalScreenshot, isWaylandSession } from '../src/screenshot-portal.mjs';
-import { portalCropGeometry } from '../src/extended/desktop-linux.mjs';
+import { portalCropGeometry, regionScreenshotBackends } from '../src/extended/desktop-linux.mjs';
 
 class FakeVariant {
   constructor(signature, value) {
@@ -73,6 +73,21 @@ test('Wayland detection accepts session type or WAYLAND_DISPLAY', () => {
   assert.equal(isWaylandSession({ XDG_SESSION_TYPE: 'wayland' }), true);
   assert.equal(isWaylandSession({ WAYLAND_DISPLAY: 'wayland-0' }), true);
   assert.equal(isWaylandSession({ XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' }), false);
+});
+
+test('Wayland region screenshots prefer native compositor capture before the portal', () => {
+  assert.deepEqual(
+    regionScreenshotBackends({ wayland:true, grim:false, gnomeScreenshot:true, ffmpeg:true, imagemagick:true }),
+    ['gnome-screenshot','portal'],
+  );
+  assert.deepEqual(
+    regionScreenshotBackends({ wayland:true, grim:true, gnomeScreenshot:true, ffmpeg:true, imagemagick:true }),
+    ['grim','gnome-screenshot','portal'],
+  );
+  assert.deepEqual(
+    regionScreenshotBackends({ wayland:false, grim:false, gnomeScreenshot:true, ffmpeg:true, imagemagick:true }),
+    ['imagemagick'],
+  );
 });
 
 test('portal crop clips oversized and off-screen window bounds to the visible desktop', () => {

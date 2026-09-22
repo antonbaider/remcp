@@ -34,6 +34,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Scan git history for committed secrets
+        run: bash scripts/check-secrets.sh
       - run: npm ci --no-audit --no-fund
       - run: npm run check
       - run: npm test

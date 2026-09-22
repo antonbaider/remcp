@@ -141,7 +141,7 @@ ReMCP publishes host-native metadata for coding agents plus directory records fo
 | **Cline** | Use the Cline MCP Marketplace after review; the current submission is tracked in [`cline/marketplace` PR #125](https://github.com/cline/marketplace/pull/125). | submitted |
 | **Smithery** | Open <https://smithery.ai/servers/antonbaider/remcp>. | published |
 | **Glama** | Open the ownership-verified connector at <https://glama.ai/mcp/connectors/site.remcp/re-mcp>. | verified / healthy |
-| **Official MCP Registry** | Search for `io.github.antonbaider/remcp` today; migration to `io.github.getremcp/remcp` is pending after the repository transfer. | published (legacy identity) |
+| **Official MCP Registry** | Search for `io.github.getremcp/remcp`; this is the canonical active Registry identity for the public `getremcp/remcp` repository. | published |
 
 The same ReMCP OAuth account and paired computers sit behind every route. Marketplace and directory
 surfaces change discovery; they do not create separate ReMCP backends.

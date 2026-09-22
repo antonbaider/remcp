@@ -1,10 +1,18 @@
 # Changelog
 
+## 0.2.106 — 2026-09-22
+
+- Wayland EIS records the emulated device used for each button press and sends the matching release through that same device, preventing cross-region/device drags from losing `pointerup`.
+- Portal drag-and-drop adds source settle time plus bounded intermediate absolute motion events; live ASUS DOM read-back verified the complete `down → move → … → up` gesture.
+- Semantic-target scroll validation moves to a known visible target before wheel injection, and Wayland `screenshot_region` prefers `grim` or GNOME Screenshot before the interactive portal when available.
+- Current-tree validation passed 215/215 runtime tests and the full 80/80 live ASUS computer-use smoke.
+- macOS runtime code and runtime tool names/schemas are unchanged from 0.2.105.
+
 ## 0.2.105 — 2026-09-22
 
-- macOS top-level window IDs now include a snapshot generation and retain cached app/title/bounds identity, so a changed process-local window index cannot silently retarget an action.
+- macOS top-level window IDs include a snapshot generation and retain cached app/title/bounds identity, so a changed process-local window index cannot silently retarget an action.
 - Older cached handles recover the same unambiguous window after reorder; stale, fabricated, expired, or ambiguous handles fail closed and require `list_windows` refresh.
-- Real Mac proof on a multi-window Chrome process verified `g1 → g2` refresh, old-handle exact focus/capture resolution, fabricated-generation rejection, and Accessibility traversal.
+- Unit/regression coverage verifies generation-scoped IDs, PID consistency, legacy/fabricated handle rejection, and fail-closed stale-handle behavior.
 - Runtime tool names and schemas are unchanged from 0.2.104.
 
 ## 0.2.104 — 2026-09-22
