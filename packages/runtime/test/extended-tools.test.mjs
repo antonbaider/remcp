@@ -9,7 +9,7 @@ import {
   extendedToolHandlers,
 } from '../src/extended/catalog.mjs';
 import { browserActionInputValue, browserAutoLaunchAvailable, browserNavigate, browserSnapshot, browserTabs } from '../src/extended/browser.mjs';
-import { recordScreen, recordScreenAvailable } from '../src/extended/diagnostics.mjs';
+import { parseAvfoundationScreenInput, recordScreen, recordScreenAvailable, resolveRecordScreenFfmpeg } from '../src/extended/diagnostics.mjs';
 import { hasTool, invokeTool } from '../src/invoke.mjs';
 
 const EXPECTED = [
@@ -173,6 +173,32 @@ test('installed Chromium keeps the browser tool group discoverable before CDP st
     if (previousBinary == null) delete process.env.REMCP_BROWSER_BINARY; else process.env.REMCP_BROWSER_BINARY = previousBinary;
     if (previousEndpoint == null) delete process.env.REMCP_CDP_URL; else process.env.REMCP_CDP_URL = previousEndpoint;
   }
+});
+
+test('macOS record_screen resolves Homebrew ffmpeg even when launchd PATH cannot see it', () => {
+  const none = () => false;
+  const homebrewOnly = file => file === '/opt/homebrew/bin/ffmpeg';
+  assert.equal(resolveRecordScreenFfmpeg({
+    platform:'darwin',
+    commandExistsFn:none,
+    existsSyncFn:homebrewOnly,
+  }), '/opt/homebrew/bin/ffmpeg');
+  assert.equal(recordScreenAvailable({
+    platform:'darwin',
+    commandExistsFn:none,
+    existsSyncFn:homebrewOnly,
+  }), true);
+});
+
+test('macOS record_screen selects the actual AVFoundation screen input instead of a fixed camera index', () => {
+  const inventory = `
+[AVFoundation indev @ 0x1] [0] FaceTime HD Camera
+[AVFoundation indev @ 0x1] [1] OBS Virtual Camera
+[AVFoundation indev @ 0x1] [2] Elgato Virtual Camera
+[AVFoundation indev @ 0x1] [3] Capture screen 0
+`;
+  assert.equal(parseAvfoundationScreenInput(inventory), '3');
+  assert.equal(parseAvfoundationScreenInput('[AVFoundation indev @ 0x1] [1] OBS Virtual Camera'), null);
 });
 
 test('record_screen capability is advertised only when a real recorder backend exists', () => {

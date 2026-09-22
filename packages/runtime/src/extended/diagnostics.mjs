@@ -3,6 +3,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { assertAllowedCommand } from '../policy.mjs';
 import { isWaylandSession } from '../screenshot-portal.mjs';
@@ -245,17 +246,54 @@ export async function powerAction(args) {
   return text(`${policy.note ? `${policy.note}\n` : ''}Power action ${action} requested.`);
 }
 
+export function resolveRecordScreenFfmpeg({
+  platform = process.platform,
+  commandExistsFn = commandExists,
+  existsSyncFn = existsSync,
+} = {}) {
+  if (commandExistsFn('ffmpeg')) return 'ffmpeg';
+  if (platform === 'darwin') {
+    for (const candidate of ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']) {
+      if (existsSyncFn(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
+export function parseAvfoundationScreenInput(output) {
+  for (const line of String(output || '').split(/\r?\n/)) {
+    const match = line.match(/\[(\d+)\]\s+Capture screen(?:\s+\d+)?\s*$/i);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+async function avfoundationScreenInput(ffmpeg) {
+  const result = await runFile(ffmpeg, [
+    '-hide_banner',
+    '-f','avfoundation',
+    '-list_devices','true',
+    '-i','',
+  ], { label:'AVFoundation device inventory', timeout:10_000, allowFailure:true });
+  const index = parseAvfoundationScreenInput(`${result.stderr || ''}\n${result.stdout || ''}`);
+  if (!index) unavailable('Screen recording', 'ffmpeg could not find an AVFoundation Capture screen input');
+  return index;
+}
+
 export function recordScreenAvailable({
   platform = process.platform,
   wayland = platform === 'linux' ? isWaylandSession() : false,
   display = process.env.DISPLAY || '',
   commandExistsFn = commandExists,
+  existsSyncFn = existsSync,
 } = {}) {
   if (platform === 'linux') {
     if (wayland) return commandExistsFn('wf-recorder') && commandExistsFn('timeout');
     return Boolean(String(display).trim()) && commandExistsFn('ffmpeg');
   }
-  if (platform === 'darwin' || platform === 'win32') return commandExistsFn('ffmpeg');
+  if (platform === 'darwin' || platform === 'win32') {
+    return Boolean(resolveRecordScreenFfmpeg({ platform, commandExistsFn, existsSyncFn }));
+  }
   return false;
 }
 
@@ -268,22 +306,26 @@ export async function recordScreen(args) {
     const result = await runFile('timeout', ['--signal=INT', `${seconds}s`, 'wf-recorder', '-f',destination,'-r',String(fps),'-c','libx264'], { label:'screen recording', timeout:(seconds+10)*1000, allowFailure:true });
     if (![0, 124, 130].includes(Number(result.code))) throw new Error(result.stderr.trim() || `wf-recorder exited ${result.code}`);
   } else {
+    const ffmpeg = resolveRecordScreenFfmpeg();
     if (wayland) {
       unavailable('Screen recording', 'wf-recorder and timeout are required on Wayland');
     }
     if (process.platform === 'linux' && !String(process.env.DISPLAY || '').trim()) {
       unavailable('Screen recording', 'an active X11 DISPLAY is required on Linux X11');
     }
-    if (!commandExists('ffmpeg')) {
+    if (!ffmpeg) {
       if (process.platform === 'darwin') unavailable('Screen recording', 'ffmpeg is required on macOS');
       if (process.platform === 'win32') unavailable('Screen recording', 'ffmpeg is required on Windows');
       unavailable('Screen recording', 'ffmpeg is required on X11');
     }
     let argv;
     if (process.platform === 'win32') argv=['-y','-f','gdigrab','-framerate',String(fps),'-i','desktop','-t',String(seconds),'-pix_fmt','yuv420p',destination];
-    else if (process.platform === 'darwin') argv=['-y','-f','avfoundation','-framerate',String(fps),'-i','1:none','-t',String(seconds),'-pix_fmt','yuv420p',destination];
+    else if (process.platform === 'darwin') {
+      const input = await avfoundationScreenInput(ffmpeg);
+      argv=['-y','-f','avfoundation','-framerate',String(fps),'-i',`${input}:none`,'-t',String(seconds),'-pix_fmt','yuv420p',destination];
+    }
     else argv=['-y','-f','x11grab','-framerate',String(fps),'-i',process.env.DISPLAY,'-t',String(seconds),'-pix_fmt','yuv420p',destination];
-    await runFile('ffmpeg', argv, { label:'screen recording', timeout:(seconds+20)*1000, maxBuffer:8*1024*1024 });
+    await runFile(ffmpeg, argv, { label:'screen recording', timeout:(seconds+20)*1000, maxBuffer:8*1024*1024 });
   }
   const info = await stat(destination);
   return jsonResult({ path:destination, bytes:info.size, duration_seconds:seconds, format:path.extname(destination).slice(1) || 'mp4' });

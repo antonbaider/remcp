@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.101 — 2026-09-22
+
+- macOS `record_screen` resolves FFmpeg from standard Homebrew locations when launchd's minimal `PATH` cannot see it.
+- AVFoundation screen capture now enumerates devices and selects the actual `Capture screen` index instead of assuming input 1.
+- Capability discovery stays conservative: no recorder backend means no `record_screen`; Linux Wayland still requires `wf-recorder`.
+- Added regression coverage for Homebrew discovery and real-world AVFoundation ordering where input 1 is OBS Virtual Camera and the screen is input 3.
+
 ## 0.2.100 — 2026-09-22
 
 - Wayland portal-backed region screenshots clip compositor window bounds to the visible virtual desktop before FFmpeg cropping.
