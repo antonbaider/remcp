@@ -1,11 +1,19 @@
 # Changelog
 
+## 0.2.105 — 2026-09-22
+
+- macOS top-level window IDs now include a snapshot generation and retain cached app/title/bounds identity, so a changed process-local window index cannot silently retarget an action.
+- Older cached handles recover the same unambiguous window after reorder; stale, fabricated, expired, or ambiguous handles fail closed and require `list_windows` refresh.
+- Real Mac proof on a multi-window Chrome process verified `g1 → g2` refresh, old-handle exact focus/capture resolution, fabricated-generation rejection, and Accessibility traversal.
+- Runtime tool names and schemas are unchanged from 0.2.104.
+
 ## 0.2.104 — 2026-09-22
 
-- Fresh installations default the narrow catastrophic-command guardrail to block; ordinary development, file, Git, package-manager, Docker, database and browser workflows remain available, and explicit warn, allow, or unrestricted/godmode remain operator-controlled opt-ins.
-- macOS top-level window handles include a snapshot generation and retain short-lived app/title/bounds identity so window reordering cannot silently retarget a previous id.
-- A valid prior macOS handle resolves the same uniquely identifiable window after reorder; unknown, ambiguous, expired, PID-mismatched and legacy ids fail closed and request a fresh list_windows.
-- Added 73 Desktop Commander prompt scenarios as an isolated compatibility smoke matrix; all 73 passed on the release tree with no guardrail false positives. GNOME Wayland live computer-use passed 80/80 checks.
+- Fresh installations default the narrow catastrophic-command guardrail to `block`; ordinary development, file, Git, package-manager, Docker, database, browser, and document workflows remain available.
+- Explicit `warn`, `allow`, and unrestricted/godmode remain operator-controlled local opt-ins.
+- Added an isolated 73-scenario Desktop Commander compatibility smoke matrix; all 73 scenarios pass with zero guardrail false positives, while genuinely catastrophic host power/destructive commands remain blocked before execution.
+- Wayland portal pointer clicks now keep a 60 ms button-down interval before release so a transport-level success is not collapsed into a zero-duration gesture; the fix passed three consecutive full 80/80 live ASUS smoke runs.
+- Runtime tool names and schemas are unchanged from 0.2.103.
 
 ## 0.2.103 — 2026-09-22
 

@@ -173,6 +173,16 @@ test('Linux semantic typing rejects false AT-SPI writes and auto typing fails sa
   );
 });
 
+test('Linux Wayland portal clicks keep a real press interval before release', async () => {
+  const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
+  const pointerBody = linuxSource.match(/export async function pointer\(args = \{\}\) \{[\s\S]*?(?=export async function dragDrop)/)?.[0] || '';
+  assert.match(
+    pointerBody,
+    /portalPointerButton\(buttonName, true, portalOptions\);[\s\S]{0,300}setTimeout\(resolve, 60\)[\s\S]{0,200}portalPointerButton\(buttonName, false, portalOptions\)/,
+    'Wayland portal click must not collapse button-down and button-up into a zero-duration gesture',
+  );
+});
+
 test('Linux Wayland keyboard and key typing focus an explicit window target before dispatch', async () => {
   const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
 

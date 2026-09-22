@@ -1147,6 +1147,10 @@ export async function pointer(args = {}) {
     else if (action === 'move') throw new Error('x and y are required for pointer move');
     const click = async () => {
       await portalPointerButton(buttonName, true, portalOptions);
+      // A zero-duration press/release can be accepted by the portal transport but
+      // coalesced before the target toolkit observes a real click. Keep a short,
+      // human-scale hold so successful return means a deliverable button gesture.
+      await new Promise(resolve => setTimeout(resolve, 60));
       await portalPointerButton(buttonName, false, portalOptions);
       await new Promise(resolve => setTimeout(resolve, 40));
     };

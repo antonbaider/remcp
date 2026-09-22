@@ -355,11 +355,7 @@ export async function uiAction(args = {}) {
   if (['set_value','set_range_value'].includes(action) && resolved.value == null) throw new Error(`ui_action ${action} requires value`);
   return adapter.uiAction(resolved);
 }
-export async function keyboard(args = {}) {
-  const explicitWindowTarget = explicitTypeTextWindowTarget(args, false);
-  if (explicitWindowTarget) await windowAction({ action:'focus', ...explicitWindowTarget });
-  return adapter.keyboard(args);
-}
+export async function keyboard(args = {}) { return adapter.keyboard(args); }
 export async function pointer(args = {}) {
   if (args.action === 'move' && ![args.x,args.y].every(value => Number.isFinite(Number(value)))) throw new Error('pointer move requires x and y');
   return adapter.pointer(args);
