@@ -147,10 +147,10 @@ in `~/.config/remcp/runtime.json`. `--describe` always reports the current state
   against the resolved real path of the deepest existing ancestor rather than the lexical string, so
   `<allowed>/link -> /etc` cannot be used to read or write outside the allowed directories.
   `allowedRoots: ["/"]` means the whole filesystem and works as written.
-- **Command guardrail.** `dangerousCommands` defaults to `warn`: a catastrophic command still runs and
-  the result carries a note. `allow` silences the note, `block` refuses before running. Rules match the
-  *command word* of each shell segment, so `grep -n format README.md` is never affected. User
-  `blockedCommands` entries are always enforced.
+- **Command guardrail.** `dangerousCommands` defaults to `block`: a catastrophic command is refused
+  before execution. Operators can explicitly choose `warn` to run it with an advisory note or `allow`
+  to disable the built-in guardrail. Rules match the *command word* of each shell segment, so
+  `grep -n format README.md` is never affected. User `blockedCommands` entries are always enforced.
 - **A bad configuration is loud.** If `runtime.json` cannot be parsed, the device refuses to start and
   says why, instead of quietly dropping your `allowedRoots` and re-enabling usage metrics.
 - **Secret masking.** `list_processes` masks command arguments that look like tokens, passwords, or
@@ -182,7 +182,7 @@ Optional settings live in `~/.config/remcp/runtime.json` (override the directory
   "name": "workstation",
   "allowedRoots": ["~/projects", "/srv/data"],
   "blockedCommands": ["rm -rf /", "shutdown"],
-  "dangerousCommands": "warn",
+  "dangerousCommands": "block",
   "telemetryEnabled": true,
   "maxOutputBytes": 1048576,
   "maxReadLines": 2000,

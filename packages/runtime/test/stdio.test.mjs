@@ -202,7 +202,7 @@ test('--print-tools and --describe expose contract metadata', async () => {
   assert.equal(described.configFile.endsWith('runtime.json'), true);
   assert.equal(described.telemetryEnabled, true, 'usage metrics are opt-out, so they start on');
   assert.equal(described.telemetryTransport, 'paired-agent-only');
-  assert.equal(described.dangerousCommands, 'warn', 'the destructive-command guardrail annotates but never blocks by default');
+  assert.equal(described.dangerousCommands, 'block', 'the destructive-command guardrail blocks catastrophic commands by default');
 });
 
 test('contract metadata works from a bare package with no node_modules', async () => {

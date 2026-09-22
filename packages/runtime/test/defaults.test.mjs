@@ -4,22 +4,22 @@ import { join } from 'node:path';
 import { body, freshWorkspace, isError } from './helpers.mjs';
 
 const root = freshWorkspace('defaults');
-// No REMCP_RUNTIME_DANGEROUS_COMMANDS here on purpose: this file documents what a device
-// does out of the box, and the out-of-the-box answer is "whatever you could do at a shell".
+// No REMCP_RUNTIME_DANGEROUS_COMMANDS here on purpose: this file documents the secure
+// out-of-the-box policy. Operators can still opt in to warn/allow locally, and godmode remains explicit.
 process.env.REMCP_RUNTIME_MAX_OUTPUT_BYTES = String(20 * 1024 * 1024);
 
 const { invokeTool } = await import('../src/invoke.mjs');
 const { describeConfig } = await import('../src/config.mjs');
 
-test('nothing is blocked by default: the agent can run anything the account can run', async () => {
+test('catastrophic commands are blocked by default', async () => {
   const result = await invokeTool('start_process', { command: 'mkfs 2>&1 | head -2', timeout_ms: 3000 });
-  assert.equal(isError(result), false, body(result));
-  assert.doesNotMatch(body(result), /blocked by ReMCP device policy/);
+  assert.equal(isError(result), true, body(result));
+  assert.match(body(result), /blocked by ReMCP device policy/);
 });
 
-test('the destructive-command guardrail only annotates by default', () => {
+test('the destructive-command guardrail blocks by default', () => {
   const described = describeConfig();
-  assert.equal(described.dangerousCommands, 'warn');
+  assert.equal(described.dangerousCommands, 'block');
   assert.equal(described.blockedCommands.length, 0);
 });
 

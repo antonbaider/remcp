@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.104 — 2026-09-22
+
+- Fresh installations default the narrow catastrophic-command guardrail to block; ordinary development, file, Git, package-manager, Docker, database and browser workflows remain available, and explicit warn, allow, or unrestricted/godmode remain operator-controlled opt-ins.
+- macOS top-level window handles include a snapshot generation and retain short-lived app/title/bounds identity so window reordering cannot silently retarget a previous id.
+- A valid prior macOS handle resolves the same uniquely identifiable window after reorder; unknown, ambiguous, expired, PID-mismatched and legacy ids fail closed and request a fresh list_windows.
+- Added 73 Desktop Commander prompt scenarios as an isolated compatibility smoke matrix; all 73 passed on the release tree with no guardrail false positives. GNOME Wayland live computer-use passed 80/80 checks.
+
 ## 0.2.103 — 2026-09-22
 
 - Native Wayland `window_action` targets exact PID/title Accessibility windows for `close` and verifies that the requested window disappeared.

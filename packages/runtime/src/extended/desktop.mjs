@@ -355,7 +355,11 @@ export async function uiAction(args = {}) {
   if (['set_value','set_range_value'].includes(action) && resolved.value == null) throw new Error(`ui_action ${action} requires value`);
   return adapter.uiAction(resolved);
 }
-export async function keyboard(args = {}) { return adapter.keyboard(args); }
+export async function keyboard(args = {}) {
+  const explicitWindowTarget = explicitTypeTextWindowTarget(args, false);
+  if (explicitWindowTarget) await windowAction({ action:'focus', ...explicitWindowTarget });
+  return adapter.keyboard(args);
+}
 export async function pointer(args = {}) {
   if (args.action === 'move' && ![args.x,args.y].every(value => Number.isFinite(Number(value)))) throw new Error('pointer move requires x and y');
   return adapter.pointer(args);
@@ -373,13 +377,23 @@ export async function screenshotRegion(args = {}) {
     const title = optionalString(args.title);
     const pid = Number.isInteger(Number(args.pid)) ? Number(args.pid) : null;
     if (windowId || app || title || pid != null) {
-      const rows = resultValue(await listWindows({ include_monitor:false }));
-      const row = Array.isArray(rows) ? rows.find(item =>
-        (!windowId || item.id === windowId)
-        && (pid == null || Number(item.pid) === pid)
-        && (!app || String(item.app || '').toLowerCase().includes(app.toLowerCase()))
-        && (!title || String(item.title || '').toLowerCase().includes(title.toLowerCase()))
-      ) : null;
+      let row = null;
+      if (windowId && typeof adapter.resolveWindowTarget === 'function') {
+        row = resultValue(await adapter.resolveWindowTarget({
+          id:windowId,
+          ...(pid != null ? { pid } : {}),
+          ...(app ? { app } : {}),
+          ...(title ? { title } : {}),
+        }));
+      } else {
+        const rows = resultValue(await listWindows({ include_monitor:false }));
+        row = Array.isArray(rows) ? rows.find(item =>
+          (!windowId || item.id === windowId)
+          && (pid == null || Number(item.pid) === pid)
+          && (!app || String(item.app || '').toLowerCase().includes(app.toLowerCase()))
+          && (!title || String(item.title || '').toLowerCase().includes(title.toLowerCase()))
+        ) : null;
+      }
       if (!row) throw new Error('No matching window found for screenshot_region');
       x = Number(row.x); y = Number(row.y); width = Number(row.width); height = Number(row.height);
     } else if (args.monitor != null || args.monitor_index != null) {

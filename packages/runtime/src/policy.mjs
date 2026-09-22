@@ -2,10 +2,10 @@ import { runtimeConfig } from './config.mjs';
 import { recordEvent } from './telemetry.mjs';
 import { fail } from './util.mjs';
 
-// Optional hardening rules for catastrophic host-level commands. The default is `allow`:
-// ReMCP is a remote-control tool for computers you own, and the agent needs to be able to
-// do anything you could do at a shell. Deployments that want a safety net can set
-// `dangerousCommands` to `warn` (run and report) or `block` (refuse before running).
+// Built-in hardening rules for catastrophic host-level commands. The default is `block`:
+// fresh installations refuse these commands before execution. Operators can explicitly choose
+// `warn` (run and report) or `allow` (disable this built-in guardrail); unrestricted/godmode
+// also forces `allow` and remains a local-only opt-in.
 //
 // Rules are matched against the *command word* of each shell segment, so a read-only
 // command that merely mentions a dangerous word (`grep -n format README.md`,

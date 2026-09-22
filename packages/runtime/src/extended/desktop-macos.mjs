@@ -23,6 +23,72 @@ function parseTsv(value, fields) {
   });
 }
 
+const macWindowTargets = new Map();
+const MAC_WINDOW_TARGET_TTL_MS = 5 * 60 * 1000;
+let macWindowGeneration = 0;
+
+function rememberMacWindowTarget(row) {
+  macWindowTargets.set(row.id, {
+    pid:row.pid,
+    app:row.app,
+    title:row.title,
+    x:row.x,
+    y:row.y,
+    width:row.width,
+    height:row.height,
+    at:Date.now(),
+  });
+}
+
+function cachedMacWindowTarget(id) {
+  const cached = macWindowTargets.get(id);
+  if (!cached) return null;
+  if ((Date.now() - cached.at) > MAC_WINDOW_TARGET_TTL_MS) {
+    macWindowTargets.delete(id);
+    return null;
+  }
+  return cached;
+}
+
+export function macWindowId(pid, windowIndex, generation) {
+  const numericPid = Number(pid);
+  const numericIndex = Number(windowIndex);
+  const numericGeneration = Number(generation);
+  if (!Number.isInteger(numericPid) || numericPid <= 0
+    || !Number.isInteger(numericIndex) || numericIndex < 0
+    || !Number.isInteger(numericGeneration) || numericGeneration <= 0) {
+    throw new Error('Could not construct a macOS window id from invalid PID/index/generation');
+  }
+  return `mac:${numericPid}:w${numericIndex}:g${numericGeneration}`;
+}
+
+export function normalizeMacWindowTarget(args = {}, { useWindowId = false } = {}) {
+  const explicitPid = Number.isInteger(Number(args.pid)) && Number(args.pid) > 0 ? Number(args.pid) : 0;
+  let idPid = 0;
+  let windowIndex = null;
+  const rawId = useWindowId ? optionalString(args.id) : '';
+  let cached = null;
+  if (rawId) {
+    const match = /^mac:(\d+):w(\d+):g(\d+)$/.exec(rawId);
+    if (!match) throw new Error('macOS window id is stale or unsupported; call list_windows again');
+    idPid = Number(match[1]);
+    windowIndex = Number(match[2]);
+    if (explicitPid && explicitPid !== idPid) throw new Error('macOS window id and pid refer to different processes');
+    cached = cachedMacWindowTarget(rawId);
+  }
+  return {
+    id:rawId,
+    idCached:Boolean(cached),
+    pid:idPid || explicitPid,
+    windowIndex,
+    app:optionalString(args.app) || '',
+    title:optionalString(args.window_title || args.windowTitle || args.title) || '',
+    expectedApp:cached?.app || '',
+    expectedTitle:cached?.title || '',
+    expectedBounds:cached ? [cached.x,cached.y,cached.width,cached.height] : null,
+  };
+}
+
 export async function listWindows() {
   const script = `
 set output to ""
@@ -31,22 +97,30 @@ tell application "System Events"
   try
    set appName to name of p
    set appPid to unix id of p
+   set windowIndex to 0
    repeat with w in windows of p
     try
      set pos to position of w
      set sz to size of w
-     set output to output & appPid & tab & appName & tab & (name of w) & tab & (item 1 of pos) & tab & (item 2 of pos) & tab & (item 1 of sz) & tab & (item 2 of sz) & linefeed
+     set output to output & appPid & tab & windowIndex & tab & appName & tab & (name of w) & tab & (item 1 of pos) & tab & (item 2 of pos) & tab & (item 1 of sz) & tab & (item 2 of sz) & linefeed
     end try
+    set windowIndex to windowIndex + 1
    end repeat
   end try
  end repeat
 end tell
 return output`;
   const { stdout } = await runOsa(script, { label: 'list windows' });
-  const rows = parseTsv(stdout, ['pid','app','title','x','y','width','height']).map((row,index)=>({
-    id:`mac:${row.pid}:${index}`,pid:Number(row.pid),app:row.app,title:row.title,
+  macWindowGeneration += 1;
+  const generation = macWindowGeneration;
+  const rows = parseTsv(stdout, ['pid','window_index','app','title','x','y','width','height']).map(row=>({
+    id:macWindowId(row.pid,row.window_index,generation),pid:Number(row.pid),app:row.app,title:row.title,
     x:Number(row.x),y:Number(row.y),width:Number(row.width),height:Number(row.height),
   }));
+  for (const [id,cached] of macWindowTargets.entries()) {
+    if ((Date.now() - cached.at) > MAC_WINDOW_TARGET_TTL_MS) macWindowTargets.delete(id);
+  }
+  for (const row of rows) rememberMacWindowTarget(row);
   return jsonResult(rows);
 }
 
@@ -67,7 +141,7 @@ export async function windowAction(args = {}) {
   if((action==='move'||action==='move_resize')&&(!Number.isFinite(x)||!Number.isFinite(y)))throw new Error('x and y are required for window move');
   if((action==='resize'||action==='move_resize')&&(!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0))throw new Error('width and height must be positive for window resize');
   const script=`(function(){
-${macJxaTargetPrelude(args)}
+${macJxaTargetPrelude(args,{useWindowId:true})}
 function perform(e,wanted){let acts=[];try{acts=e.actions()}catch(_){};for(let i=0;i<acts.length;i++){let n='';try{n=String(acts[i].name())}catch(_){};if(n===wanted){acts[i].perform();return true}}return false}
 function setAttr(e,n,v){try{e.attributes.byName(n).value=v;return true}catch(_){return false}}
 const action=${JSON.stringify(action)};
@@ -86,21 +160,58 @@ return JSON.stringify({action,pid:Number(proc.unixId()),app:safeName(proc),windo
   let parsed;try{parsed=JSON.parse(stdout.trim())}catch{parsed={action,backend:'macos-accessibility'}}
   return jsonResult(parsed);
 }
-function macJxaTargetPrelude(args = {}) {
-  const pid = Number.isInteger(Number(args.pid)) ? Number(args.pid) : 0;
-  const app = JSON.stringify(optionalString(args.app) || '');
-  const title = JSON.stringify(optionalString(args.window_title || args.windowTitle || args.title) || '');
+export async function resolveWindowTarget(args = {}) {
+  const script=`(function(){
+${macJxaTargetPrelude(args,{useWindowId:true})}
+let p={};try{p=win.properties()}catch(_){};
+return JSON.stringify({
+  id:${JSON.stringify(optionalString(args.id || args.window_id || args.windowId) || '')},
+  pid:Number(proc.unixId()),app:safeName(proc),title:safeName(win),
+  x:Array.isArray(p.position)?Number(p.position[0]):null,
+  y:Array.isArray(p.position)?Number(p.position[1]):null,
+  width:Array.isArray(p.size)?Number(p.size[0]):null,
+  height:Array.isArray(p.size)?Number(p.size[1]):null,
+  backend:'macos-accessibility'
+});
+})()`;
+  const {stdout}=await runOsa(script,{javascript:true,label:'resolve window target',timeout:30_000});
+  let parsed;try{parsed=JSON.parse(stdout.trim())}catch{throw new Error('Could not resolve macOS window target')}
+  return jsonResult(parsed);
+}
+
+function macJxaTargetPrelude(args = {}, options = {}) {
+  const target = normalizeMacWindowTarget(args, options);
+  if (options.useWindowId && target.id && !target.idCached) throw new Error('macOS window id is stale or unknown; call list_windows again');
+  const app = JSON.stringify(target.app);
+  const title = JSON.stringify(target.title);
+  const expectedApp = JSON.stringify(target.expectedApp);
+  const expectedTitle = JSON.stringify(target.expectedTitle);
+  const expectedBounds = JSON.stringify(target.expectedBounds);
   return String.raw`
 const se=Application('System Events');
-const wantPid=${pid};
+const wantPid=${target.pid};
+const wantWindowIndex=${target.windowIndex == null ? 'null' : target.windowIndex};
 const wantApp=${app};
 const wantTitle=${title};
+const expectedApp=${expectedApp};
+const expectedTitle=${expectedTitle};
+const expectedBounds=${expectedBounds};
 function safeWindows(p){try{return p.windows()}catch(e){return []}}
 function safeName(spec){try{return String(spec.name()||'')}catch(e){return ''}}
+function safeProps(spec){try{return spec.properties()}catch(e){return {}}}
+function sameBounds(spec,bounds){
+  if(!bounds)return false;
+  const p=safeProps(spec),pos=Array.isArray(p.position)?p.position:[],size=Array.isArray(p.size)?p.size:[];
+  return Number(pos[0])===Number(bounds[0])&&Number(pos[1])===Number(bounds[1])&&Number(size[0])===Number(bounds[2])&&Number(size[1])===Number(bounds[3]);
+}
 function chooseProcess(){
   if(wantPid){
     const rows=se.applicationProcesses.whose({unixId:wantPid})();
-    if(rows.length)return rows[0];
+    if(rows.length){
+      if(wantApp && !safeName(rows[0]).toLowerCase().includes(wantApp.toLowerCase()))throw new Error('macOS window target app does not match the requested id/pid');
+      if(expectedApp && safeName(rows[0])!==expectedApp)throw new Error('macOS window id no longer belongs to the same application; call list_windows again');
+      return rows[0];
+    }
     throw new Error('No matching UI process found');
   }
   if(wantApp){
@@ -130,6 +241,30 @@ function chooseProcess(){
 function chooseWindow(p){
   const rows=safeWindows(p);
   if(!rows.length)throw new Error('The selected application has no accessible windows');
+  if(wantWindowIndex!==null){
+    const indexValid=Number.isInteger(wantWindowIndex)&&wantWindowIndex>=0&&wantWindowIndex<rows.length;
+    const selected=indexValid?rows[wantWindowIndex]:null;
+    if(expectedTitle){
+      if(selected&&safeName(selected)===expectedTitle)return selected;
+      const matches=[];
+      for(let i=0;i<rows.length;i++)if(safeName(rows[i])===expectedTitle)matches.push(rows[i]);
+      if(matches.length===1)return matches[0];
+      if(matches.length>1&&expectedBounds){
+        const bounded=matches.filter(row=>sameBounds(row,expectedBounds));
+        if(bounded.length===1)return bounded[0];
+      }
+      throw new Error('macOS window id no longer identifies one unambiguous window; call list_windows again');
+    }
+    if(expectedBounds){
+      if(selected&&sameBounds(selected,expectedBounds))return selected;
+      const bounded=rows.filter(row=>sameBounds(row,expectedBounds));
+      if(bounded.length===1)return bounded[0];
+      throw new Error('macOS window id no longer identifies one unambiguous window; call list_windows again');
+    }
+    if(!indexValid)throw new Error('macOS window id is stale; call list_windows again');
+    if(wantTitle && !safeName(selected).toLowerCase().includes(wantTitle.toLowerCase()))throw new Error('macOS window id no longer matches the requested title; call list_windows again');
+    return selected;
+  }
   if(wantTitle){
     for(let i=0;i<rows.length;i++){
       if(safeName(rows[i]).toLowerCase().includes(wantTitle.toLowerCase()))return rows[i];
