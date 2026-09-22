@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.103 — 2026-09-22
+
+- Native Wayland `window_action` targets exact PID/title Accessibility windows for `close` and verifies that the requested window disappeared.
+- Shortcut-backed Wayland window actions require verified focus on the exact requested window before minimize, maximize, move, resize, or close proceeds; ambiguous targeting fails closed.
+- Live smoke coverage isolates XDG open/reveal handlers and stabilizes browser input focus without changing the runtime tool surface.
+- Verified on GNOME Wayland with 80 passing computer-use checks and a two-window isolation proof: target A closed while sibling B stayed open.
+
 ## 0.2.102 — 2026-09-22
 
 - `runWithInput` installs a stdin error handler before writing input, so an early child pipe close is returned as a `ToolError` instead of an uncaught `EPIPE` that can terminate the runtime.

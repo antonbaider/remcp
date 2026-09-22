@@ -226,6 +226,37 @@ test('native Wayland window geometry actions verify the observed result before s
   );
 });
 
+test('native Wayland global window actions require verified target focus and close verifies the target disappeared', async () => {
+  const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
+  const body = linuxSource.match(/async function nativeWaylandWindowAction\(row, action, args\) \{[\s\S]*?(?=export async function windowAction)/)?.[0] || '';
+
+  assert.match(
+    body,
+    /nativeWaylandAccessibilityAction\(row, \['window\.close'\]\)[\s\S]*verifyNativeWaylandWindowClosed\(row\)/,
+    'native Wayland close should prefer a target-specific AT-SPI window.close action and verify disappearance',
+  );
+  assert.match(
+    linuxSource,
+    /want_window\.strip\(\)\.lower\(\)!=name\.strip\(\)\.lower\(\)/,
+    'native Wayland semantic window actions must match the exact target title instead of a fuzzy sibling',
+  );
+  assert.match(
+    body,
+    /focusNativeWaylandForAction\(row, portalBackend\);\s*await portalShortcut\('ALT\+F4'/,
+    'Alt+F4 fallback must only run after verified target focus',
+  );
+  assert.match(
+    linuxSource,
+    /async function focusNativeWaylandForAction[\s\S]*windowAction\(\{ action:'focus'[\s\S]*targetAccessibilityFocus\(row\)[\s\S]*if \(!focusState\.exact\) throw/,
+    'the native Wayland shortcut guard must fail closed when target focus cannot be proved',
+  );
+  assert.match(
+    body,
+    /else \{\s*await focusNativeWaylandForAction\(row, portalBackend\);\s*let currentX/,
+    'native Wayland move and resize must verify target focus before coordinate drag',
+  );
+});
+
 test('type_text prefers window-scoped semantic replacement before Wayland compositor focus', async () => {
   const desktopSource = await readFile(new URL('../src/extended/desktop.mjs', import.meta.url), 'utf8');
   const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
