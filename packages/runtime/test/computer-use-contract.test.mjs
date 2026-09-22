@@ -205,6 +205,27 @@ test('Linux Wayland keyboard and key typing focus an explicit window target befo
   );
 });
 
+test('native Wayland window geometry actions verify the observed result before success', async () => {
+  const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
+  const body = linuxSource.match(/async function nativeWaylandWindowAction\(row, action, args\) \{[\s\S]*?(?=export async function windowAction)/)?.[0] || '';
+
+  assert.match(
+    linuxSource,
+    /async function verifyNativeWaylandGeometry[\s\S]*windowMatch\(\{ id:row\.id \}\)[\s\S]*Could not verify native Wayland window/,
+    'native Wayland geometry verification must re-read the target window and fail closed when the compositor result is not observable',
+  );
+  assert.match(
+    body,
+    /await dragDrop\([\s\S]{0,500}verifyNativeWaylandGeometry\(row, \{ x, y \}, 'move'\)/,
+    'move must verify observed coordinates after the portal drag',
+  );
+  assert.match(
+    body,
+    /verifyNativeWaylandGeometry\(row, \{ x, y \}, 'move'\)[\s\S]{0,900}await dragDrop\([\s\S]{0,500}verifyNativeWaylandGeometry\(row, \{ width, height \}, 'resize'\)/,
+    'move_resize must verify move before attempting resize and then verify the final size',
+  );
+});
+
 test('type_text prefers window-scoped semantic replacement before Wayland compositor focus', async () => {
   const desktopSource = await readFile(new URL('../src/extended/desktop.mjs', import.meta.url), 'utf8');
   const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');

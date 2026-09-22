@@ -283,6 +283,34 @@ async function focusExplicitWaylandInputTarget(args = {}) {
   return row;
 }
 
+function nativeWaylandGeometryMatches(row, expected = {}, tolerance = 24) {
+  for (const key of ['x','y','width','height']) {
+    if (expected[key] == null) continue;
+    const actual = Number(row?.[key]);
+    const wanted = Number(expected[key]);
+    if (!Number.isFinite(actual) || !Number.isFinite(wanted) || Math.abs(actual - wanted) > tolerance) return false;
+  }
+  return true;
+}
+
+async function verifyNativeWaylandGeometry(row, expected, label) {
+  let latest = row;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (attempt > 0) await new Promise(resolve => setTimeout(resolve, 120));
+    try {
+      latest = await windowMatch({ id:row.id });
+      if (nativeWaylandGeometryMatches(latest, expected)) return latest;
+    } catch {}
+  }
+  const actual = ['x','y','width','height']
+    .map(key => `${key}=${Number.isFinite(Number(latest?.[key])) ? Number(latest[key]) : 'unknown'}`)
+    .join(' ');
+  const wanted = Object.entries(expected)
+    .map(([key,value]) => `${key}=${value}`)
+    .join(' ');
+  throw new Error(`Could not verify native Wayland window ${label} for ${row.title || row.app || row.id}: wanted ${wanted}; observed ${actual}`);
+}
+
 async function nativeWaylandWindowAction(row, action, args) {
   const backend = inputBackend(args);
   if (backend === 'x11') unavailable('Native Wayland window action', 'use backend=portal for compositor-managed windows');
@@ -336,8 +364,11 @@ async function nativeWaylandWindowAction(row, action, args) {
         hold_ms:80,
         duration_ms:120,
       });
-      currentX = x;
-      currentY = y;
+      const verified = await verifyNativeWaylandGeometry(row, { x, y }, 'move');
+      currentX = Number(verified.x);
+      currentY = Number(verified.y);
+      currentWidth = Number(verified.width);
+      currentHeight = Number(verified.height);
     }
 
     if (action === 'resize' || action === 'move_resize') {
@@ -352,7 +383,21 @@ async function nativeWaylandWindowAction(row, action, args) {
         hold_ms:80,
         duration_ms:120,
       });
+      const verified = await verifyNativeWaylandGeometry(row, { width, height }, 'resize');
+      currentX = Number(verified.x);
+      currentY = Number(verified.y);
+      currentWidth = Number(verified.width);
+      currentHeight = Number(verified.height);
     }
+    return jsonResult({
+      action,
+      backend:'xdg-desktop-portal',
+      id:row.id,
+      x:currentX,
+      y:currentY,
+      width:currentWidth,
+      height:currentHeight,
+    });
   }
   return jsonResult({ action, backend:'xdg-desktop-portal', id:row.id });
 }

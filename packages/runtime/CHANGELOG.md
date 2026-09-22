@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.97 — 2026-09-22
+
+- Native GNOME Wayland `move`, `resize`, and `move_resize` no longer trust a portal drag as proof of success.
+- Window geometry is re-read after each gesture and must match the requested coordinates/size within a bounded tolerance; otherwise the action fails closed.
+- `move_resize` confirms the move before computing the resize gesture. Tool names and schemas remain unchanged.
+
 ## 0.2.96 — 2026-09-22
 
 - Keeps readable search matches when an unreadable descendant is encountered while surfacing a warning.
