@@ -219,7 +219,7 @@ const OUTPUT_FIELDS = Object.freeze({
   read_document: { text:outputString(), path:outputString(), data:{}, sheets:outputArray(outputObject()), sheet:outputString(), rows:outputArray({}), cells:outputArray({}) },
   edit_spreadsheet: { path:outputString(), sheet:outputString(), edited_cells:outputNumber(), bytes:outputNumber(), created:outputBoolean() },
   edit_document: { path:outputString(), operations:outputNumber(), changes:outputNumber(), bytes:outputNumber(), created:outputBoolean() },
-  pdf_action: { action:outputString(), path:outputString(), source:outputString(), output:outputString(), output_dir:outputString(), files:outputArray(outputString()), pages:outputString(), bytes:outputNumber(), annotations:outputArray(outputObject()), inputs:outputNumber() },
+  pdf_action: { action:outputString(), path:outputString(), source:outputString(), output:outputString(), output_dir:outputString(), files:outputArray(outputString()), pages:outputString(), bytes:outputNumber(), annotations:outputArray(outputObject()), annotation_count:outputNumber('Number of PDF annotations found by the info action.'), inputs:outputNumber() },
 });
 
 function outputSchemaFor(name, title) {

@@ -3,7 +3,7 @@
   "name": "io.github.getremcp/remcp",
   "title": "ReMCP",
   "description": "Securely use files, terminals, screenshots and processes on computers you pair with ReMCP.",
-  "version": "0.2.97",
+  "version": "0.2.98",
   "repository": {
     "url": "https://github.com/getremcp/remcp",
     "source": "github"

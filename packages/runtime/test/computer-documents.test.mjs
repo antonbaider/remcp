@@ -165,6 +165,31 @@ test('PDF reading falls back to local pdftotext when the built-in parser cannot 
   }
 });
 
+
+test('PDF info fallback keeps annotation count distinct from the annotations array and matches outputSchema', async () => {
+  const pdf = join(root, 'info-contract.pdf');
+  writeFileSync(pdf, '%PDF-1.4\n1 0 obj << /Type /Annot /Subtype /Text /Rect [0 0 10 10] /Contents (note) >> endobj\n%%EOF\n');
+  const previousPath = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    const [{ pdfAction }, { allExtendedTools }, { fromJsonSchema }] = await Promise.all([
+      import('../src/extended/documents.mjs'),
+      import('../src/extended/catalog.mjs'),
+      import('@modelcontextprotocol/server'),
+    ]);
+    const result = await pdfAction({ action:'info', path:pdf });
+    assert.equal(result.structuredContent.annotation_count, 1);
+    assert.equal(result.structuredContent.annotations, undefined);
+    const definition = allExtendedTools().find(tool => tool.name === 'pdf_action');
+    assert.equal(definition.outputSchema.properties.annotation_count.type, 'number');
+    const validator = fromJsonSchema(definition.outputSchema);
+    const checked = await validator['~standard'].validate(result.structuredContent);
+    assert.deepEqual(checked.issues || [], []);
+  } finally {
+    process.env.PATH = previousPath;
+  }
+});
+
 test('PDF page selection expands ordered ranges and rejects invalid ranges', async () => {
   const { expandPdfPages } = await import('../src/extended/documents.mjs');
   assert.deepEqual(expandPdfPages('1-3, 5, 7-8'), [1,2,3,5,7,8]);

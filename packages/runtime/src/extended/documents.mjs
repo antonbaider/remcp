@@ -442,7 +442,7 @@ export async function pdfAction(args) {
   if (action === 'info') {
     const source = await resolveSafePath(args.path,'path');
     if (commandExists('pdfinfo')) return text((await runFile('pdfinfo',[source],{label:'pdfinfo'})).stdout);
-    const data = await readFile(source); return jsonResult({ path:source, bytes:data.length, annotations:pdfAnnotations(data).length });
+    const data = await readFile(source); return jsonResult({ path:source, bytes:data.length, annotation_count:pdfAnnotations(data).length });
   }
   if (action === 'merge') {
     const requested = Array.isArray(args.paths) ? args.paths : [];

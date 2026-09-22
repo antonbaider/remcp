@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.98 — 2026-09-22
+
+- `pdf_action info` fallback exposes numeric `annotation_count` instead of violating the declared `annotations` array output contract.
+- Added outputSchema validation coverage for the no-`pdfinfo` fallback path.
+- Live desktop smoke treats `record_screen` as capability-conditional and verifies every tool actually advertised by the runtime.
+- Tool names remain unchanged.
+
 ## 0.2.97 — 2026-09-22
 
 - Native GNOME Wayland `move`, `resize`, and `move_resize` no longer trust a portal drag as proof of success.
