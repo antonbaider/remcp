@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.99 — 2026-09-22
+
+- Lockstep runtime republish for the release-pipeline catalog synchronization fix.
+- Runtime handlers and schemas are unchanged from 0.2.98: `pdf_action info` fallback exposes numeric `annotation_count`, and the live desktop smoke treats `record_screen` as capability-conditional.
+- 0.2.98 was published publicly but not deployed by the private production pipeline because its stale hosted catalog was caught fail-closed before rollout.
+
 ## 0.2.98 — 2026-09-22
 
 - `pdf_action info` fallback exposes numeric `annotation_count` instead of violating the declared `annotations` array output contract.
