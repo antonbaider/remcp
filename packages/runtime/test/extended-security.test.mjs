@@ -48,3 +48,15 @@ test('runWithInput bounds child stdout and stderr before buffering them in memor
     /exceeded the 1024 byte output limit/,
   );
 });
+
+test('runWithInput converts an early stdin close into a ToolError instead of an uncaught EPIPE', async () => {
+  await assert.rejects(
+    () => runWithInput(
+      process.execPath,
+      ['-e', "process.stdin.destroy(); setTimeout(()=>process.exit(0),50)"],
+      'x'.repeat(8 * 1024 * 1024),
+      { label: 'closed stdin fixture', timeout: 2000 },
+    ),
+    /closed stdin fixture input failed: write EPIPE/,
+  );
+});

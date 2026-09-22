@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.102 — 2026-09-22
+
+- `runWithInput` installs a stdin error handler before writing input, so an early child pipe close is returned as a `ToolError` instead of an uncaught `EPIPE` that can terminate the runtime.
+- A failed input pipe now terminates the child before rejecting, preventing a rejected call from leaving an orphan process behind.
+- Empty input closes stdin without a zero-byte write, reducing races with short-lived subprocesses.
+- Added a deterministic closed-stdin regression and stress coverage; runtime tool names and schemas are unchanged.
+
 ## 0.2.101 — 2026-09-22
 
 - macOS `record_screen` resolves FFmpeg from standard Homebrew locations when launchd's minimal `PATH` cannot see it.

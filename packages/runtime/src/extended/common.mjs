@@ -98,7 +98,14 @@ export async function runWithInput(file, args = [], input = '', options = {}) {
       if (code === 0 || options.allowFailure) finish(resolve, { stdout, stderr, code });
       else finish(reject, new ToolError(`${options.label || file} failed: ${stderr.trim() || `exit ${code}`}`));
     });
-    child.stdin.end(String(input));
+    child.stdin.on('error', error => {
+      if (settled) return;
+      child.kill('SIGKILL');
+      finish(reject, new ToolError(`${options.label || file} input failed: ${error.message}`));
+    });
+    const inputText = String(input);
+    if (inputText.length) child.stdin.end(inputText);
+    else child.stdin.end();
   });
 }
 
