@@ -1,5 +1,6 @@
 import path from 'node:path';
 import process from 'node:process';
+import { open } from 'node:fs/promises';
 
 import { image, multi, text } from '../util.mjs';
 import { capturePortalScreenshot, isWaylandSession } from '../screenshot-portal.mjs';
@@ -1302,6 +1303,79 @@ export async function displayInventory() {
   return jsonResult(rows);
 }
 
+async function pngDimensions(file) {
+  const handle = await open(file, 'r');
+  try {
+    const buffer = Buffer.alloc(24);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead < buffer.length || buffer.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') return null;
+    const width = buffer.readUInt32BE(16);
+    const height = buffer.readUInt32BE(20);
+    if (!width || !height) return null;
+    return { width, height };
+  } finally {
+    await handle.close();
+  }
+}
+
+export function portalCropGeometry(rect, displays = [], bitmap = null) {
+  const requested = {
+    x: Math.trunc(Number(rect?.x)),
+    y: Math.trunc(Number(rect?.y)),
+    width: Math.trunc(Number(rect?.width)),
+    height: Math.trunc(Number(rect?.height)),
+  };
+  if (![requested.x,requested.y,requested.width,requested.height].every(Number.isFinite)
+      || requested.width <= 0 || requested.height <= 0) {
+    throw new Error('portal crop requires a finite positive rectangle');
+  }
+  const visibleDisplays = Array.isArray(displays) ? displays.filter(item => {
+    const x = Number(item?.x), y = Number(item?.y), width = Number(item?.width), height = Number(item?.height);
+    return [x,y,width,height].every(Number.isFinite) && width > 0 && height > 0;
+  }) : [];
+  const bitmapWidth = Math.trunc(Number(bitmap?.width));
+  const bitmapHeight = Math.trunc(Number(bitmap?.height));
+  const hasBitmap = Number.isFinite(bitmapWidth) && bitmapWidth > 0 && Number.isFinite(bitmapHeight) && bitmapHeight > 0;
+
+  let minX = 0, minY = 0;
+  let maxX = hasBitmap ? bitmapWidth : requested.x + requested.width;
+  let maxY = hasBitmap ? bitmapHeight : requested.y + requested.height;
+  if (visibleDisplays.length) {
+    minX = Math.min(...visibleDisplays.map(item => Number(item.x)));
+    minY = Math.min(...visibleDisplays.map(item => Number(item.y)));
+    maxX = Math.max(...visibleDisplays.map(item => Number(item.x) + Number(item.width)));
+    maxY = Math.max(...visibleDisplays.map(item => Number(item.y) + Number(item.height)));
+  }
+  const left = Math.max(requested.x, minX);
+  const top = Math.max(requested.y, minY);
+  const right = Math.min(requested.x + requested.width, maxX);
+  const bottom = Math.min(requested.y + requested.height, maxY);
+  if (right <= left || bottom <= top) throw new Error('screenshot region is outside visible desktop bounds');
+
+  const virtualWidth = maxX - minX;
+  const virtualHeight = maxY - minY;
+  const scaleX = hasBitmap && virtualWidth > 0 ? bitmapWidth / virtualWidth : 1;
+  const scaleY = hasBitmap && virtualHeight > 0 ? bitmapHeight / virtualHeight : 1;
+  const x = Math.max(0, Math.floor((left - minX) * scaleX));
+  const y = Math.max(0, Math.floor((top - minY) * scaleY));
+  const sourceRight = hasBitmap
+    ? Math.min(bitmapWidth, Math.ceil((right - minX) * scaleX))
+    : Math.ceil((right - minX) * scaleX);
+  const sourceBottom = hasBitmap
+    ? Math.min(bitmapHeight, Math.ceil((bottom - minY) * scaleY))
+    : Math.ceil((bottom - minY) * scaleY);
+  const width = sourceRight - x;
+  const height = sourceBottom - y;
+  if (width <= 0 || height <= 0) throw new Error('screenshot region has no visible portal pixels');
+
+  return {
+    x, y, width, height,
+    visible: { x:left, y:top, width:right-left, height:bottom-top },
+    clipped: left !== requested.x || top !== requested.y
+      || right !== requested.x + requested.width || bottom !== requested.y + requested.height,
+  };
+}
+
 export async function screenshotRegion(args = {}) {
   const x=Math.trunc(Number(args.x)), y=Math.trunc(Number(args.y)), width=Math.trunc(Number(args.width)), height=Math.trunc(Number(args.height));
   if (![x,y,width,height].every(Number.isFinite) || width<=0 || height<=0) throw new Error('x, y, width and height are required; width/height must be positive');
@@ -1309,19 +1383,30 @@ export async function screenshotRegion(args = {}) {
   const dir = await tempDir('remcp-region-');
   const target = path.join(dir, 'region.png');
   const full = path.join(dir, 'full.png');
+  let captured = { x, y, width, height };
+  let clipped = false;
   try {
     if (commandExists('grim')) {
       await runFile('grim', ['-g',`${x},${y} ${width}x${height}`,target], { label:'screenshot region' });
     } else if (isWaylandSession() && commandExists('ffmpeg')) {
       await capturePortalScreenshot(full);
-      await runFile('ffmpeg', ['-hide_banner','-loglevel','error','-y','-i',full,'-vf',`crop=${width}:${height}:${x}:${y}`,'-frames:v','1',target], { label:'crop portal screenshot', timeout:30_000, maxBuffer:4*1024*1024 });
+      const inventory = await displayInventory().catch(() => null);
+      const displays = Array.isArray(inventory?.structuredContent?.data) ? inventory.structuredContent.data : [];
+      const bitmap = await pngDimensions(full);
+      const crop = portalCropGeometry({ x, y, width, height }, displays, bitmap);
+      captured = crop.visible;
+      clipped = crop.clipped;
+      await runFile('ffmpeg', ['-hide_banner','-loglevel','error','-y','-i',full,'-vf',`crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`,'-frames:v','1',target], { label:'crop portal screenshot', timeout:30_000, maxBuffer:4*1024*1024 });
     } else if (commandExists('import')) {
       await runFile('import', ['-window','root','-crop',`${width}x${height}+${x}+${y}`,target], { label:'screenshot region' });
     } else {
       unavailable('Region screenshots', isWaylandSession() ? 'the XDG Desktop Portal plus ffmpeg, or grim, is required' : 'install ImageMagick import');
     }
     const {data} = await readPrivateTempFile(target, 4 * 1024 * 1024);
-    return multi([{type:'text',text:`Captured ${width}x${height} at ${x},${y}.`}, image(data.toString('base64'),'image/png')]);
+    const summary = clipped
+      ? `Captured visible ${captured.width}x${captured.height} at ${captured.x},${captured.y}; clipped from requested ${width}x${height} at ${x},${y}.`
+      : `Captured ${width}x${height} at ${x},${y}.`;
+    return multi([{type:'text',text:summary}, image(data.toString('base64'),'image/png')]);
   } finally { await removeTemp(dir); }
 }
 

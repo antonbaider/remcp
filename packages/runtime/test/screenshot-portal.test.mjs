@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { capturePortalScreenshot, isWaylandSession } from '../src/screenshot-portal.mjs';
+import { portalCropGeometry } from '../src/extended/desktop-linux.mjs';
 
 class FakeVariant {
   constructor(signature, value) {
@@ -72,6 +73,45 @@ test('Wayland detection accepts session type or WAYLAND_DISPLAY', () => {
   assert.equal(isWaylandSession({ XDG_SESSION_TYPE: 'wayland' }), true);
   assert.equal(isWaylandSession({ WAYLAND_DISPLAY: 'wayland-0' }), true);
   assert.equal(isWaylandSession({ XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' }), false);
+});
+
+test('portal crop clips oversized and off-screen window bounds to the visible desktop', () => {
+  const displays = [{ x:0, y:0, width:1440, height:900 }];
+  assert.deepEqual(
+    portalCropGeometry({ x:0, y:0, width:931, height:910 }, displays, { width:1440, height:900 }),
+    {
+      x:0, y:0, width:931, height:900,
+      visible:{ x:0, y:0, width:931, height:900 },
+      clipped:true,
+    },
+  );
+  assert.deepEqual(
+    portalCropGeometry({ x:-50, y:-20, width:200, height:100 }, displays, { width:1440, height:900 }),
+    {
+      x:0, y:0, width:150, height:80,
+      visible:{ x:0, y:0, width:150, height:80 },
+      clipped:true,
+    },
+  );
+});
+
+test('portal crop translates negative virtual-desktop origins and bitmap scaling', () => {
+  const displays = [
+    { x:-1280, y:0, width:1280, height:900 },
+    { x:0, y:0, width:1440, height:900 },
+  ];
+  assert.deepEqual(
+    portalCropGeometry({ x:-1280, y:0, width:640, height:450 }, displays, { width:5440, height:1800 }),
+    {
+      x:0, y:0, width:1280, height:900,
+      visible:{ x:-1280, y:0, width:640, height:450 },
+      clipped:false,
+    },
+  );
+  assert.throws(
+    () => portalCropGeometry({ x:3000, y:0, width:100, height:100 }, displays, { width:2720, height:900 }),
+    /outside visible desktop bounds/,
+  );
 });
 
 test('portal screenshot subscribes before the method call and cleans its intermediate file', async () => {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.100 — 2026-09-22
+
+- Wayland portal-backed region screenshots clip compositor window bounds to the visible virtual desktop before FFmpeg cropping.
+- Portal crop geometry translates negative virtual-desktop origins and scales logical coordinates to the captured PNG dimensions.
+- Partially visible windows return the visible pixels with an explicit clipping summary; fully invisible regions fail closed.
+- Added regressions for oversized/off-screen windows and multi-monitor scaling, plus a real GNOME Wayland 931×910 → 931×900 capture proof.
+
 ## 0.2.99 — 2026-09-22
 
 - Lockstep runtime republish for the release-pipeline catalog synchronization fix.
