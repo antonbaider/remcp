@@ -26,7 +26,8 @@
   <a href="https://github.com/cline/marketplace/pull/125"><img alt="Cline MCP Marketplace" src="https://img.shields.io/badge/Cline-MCP-1f2328?style=flat-square"></a>
   <a href="https://smithery.ai/servers/antonbaider/remcp"><img alt="Smithery directory" src="https://img.shields.io/badge/Smithery-directory-1f2328?style=flat-square"></a>
   <a href="https://glama.ai/mcp/connectors/site.remcp/re-mcp"><img alt="Glama quality score" src="https://glama.ai/mcp/connectors/site.remcp/re-mcp/badges/score.svg"></a>
-  <a href="docs/PLUGINS.md#smithery-glama-and-the-official-mcp-registry"><img alt="Official MCP Registry" src="https://img.shields.io/badge/MCP%20Registry-published-1f2328?style=flat-square"></a>
+  <a href="https://github.com/punkpeye/awesome-remote-mcp-servers"><img alt="Awesome Remote MCP Servers" src="https://img.shields.io/badge/Awesome%20Remote%20MCP-listed-1f2328?style=flat-square"></a>
+  <a href="docs/PLUGINS.md#smithery-glama-awesome-remote-mcp-servers-and-the-official-mcp-registry"><img alt="Official MCP Registry" src="https://img.shields.io/badge/MCP%20Registry-published-1f2328?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -141,6 +142,7 @@ ReMCP publishes host-native metadata for coding agents plus directory records fo
 | **Cline** | Use the Cline MCP Marketplace after review; the current submission is tracked in [`cline/marketplace` PR #125](https://github.com/cline/marketplace/pull/125). | submitted |
 | **Smithery** | Open <https://smithery.ai/servers/antonbaider/remcp>. | published |
 | **Glama** | Open the ownership-verified connector at <https://glama.ai/mcp/connectors/site.remcp/re-mcp>. | verified / healthy |
+| **Awesome Remote MCP Servers** | Open the [community directory](https://github.com/punkpeye/awesome-remote-mcp-servers); ReMCP is listed under Developer Tools after [PR #435](https://github.com/punkpeye/awesome-remote-mcp-servers/pull/435) was merged. | listed |
 | **Official MCP Registry** | Search for `io.github.getremcp/remcp`; this is the canonical active Registry identity for the public `getremcp/remcp` repository. | published |
 
 The same ReMCP OAuth account and paired computers sit behind every route. Marketplace and directory

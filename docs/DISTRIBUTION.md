@@ -16,6 +16,7 @@ ReMCP keeps one public source repository and publishes host-native discovery met
 | Cline | Cline MCP Marketplace ([PR #125](https://github.com/cline/marketplace/pull/125)) | submitted in current `cline/marketplace`; pending review |
 | Smithery | smithery.ai/servers/antonbaider/remcp | published |
 | Glama | glama.ai/mcp/connectors/site.remcp/re-mcp | verified / healthy |
+| Awesome Remote MCP Servers | [punkpeye/awesome-remote-mcp-servers](https://github.com/punkpeye/awesome-remote-mcp-servers) ([PR #435](https://github.com/punkpeye/awesome-remote-mcp-servers/pull/435)) | listed; PR #435 merged |
 | Official MCP Registry | registry.modelcontextprotocol.io | published remote Streamable HTTP server |
 
 For ordinary users, the product flow is always:
