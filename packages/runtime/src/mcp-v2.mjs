@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { toolDefinitions, TEXT_OUTPUT_SCHEMA } from './catalog.mjs';
+import { supportedCoreTools, toolDefinitions, TEXT_OUTPUT_SCHEMA } from './catalog.mjs';
 import { advertisedExtendedTools, extendedToolDefinitions } from './extended/catalog.mjs';
 import { invokeTool } from './invoke.mjs';
 
@@ -26,7 +26,10 @@ export async function startRuntimeMcpServer({ version, instructions, onError = (
     import('@modelcontextprotocol/server/stdio'),
   ]);
 
-  const initiallySupported = new Set((await advertisedExtendedTools()).map(tool => tool.name));
+  const initiallySupported = new Set([
+    ...supportedCoreTools().map(tool => tool.name),
+    ...(await advertisedExtendedTools()).map(tool => tool.name),
+  ]);
   let activeServer = null;
   let capabilityTimer = null;
   let closed = false;
@@ -56,7 +59,8 @@ export async function startRuntimeMcpServer({ version, instructions, onError = (
         async (args, context) => invokeTool(definition.name, args || {}, { signal: context?.mcpReq?.signal }),
       );
       registrations.set(definition.name, registered);
-      if (extendedToolDefinitions.includes(definition) && !initiallySupported.has(definition.name)) registered.disable();
+       if (!initiallySupported.has(definition.name)) registered.disable();
+
     }
 
     let lastSupported = initiallySupported;

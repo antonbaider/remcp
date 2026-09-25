@@ -173,6 +173,21 @@ test('Linux semantic typing rejects false AT-SPI writes and auto typing fails sa
   );
 });
 
+test('geometry-sensitive semantic actions refresh UI bounds instead of reusing the 5-second cache', async () => {
+  const desktopSource = await readFile(new URL('../src/extended/desktop.mjs', import.meta.url), 'utf8');
+  assert.ok(
+    desktopSource.includes("const matches = await uiMatches({ id, limit: 1, max_nodes: 5000, max_depth: 32, refresh:true });"),
+    'drag_drop element ids must resolve from a fresh UI snapshot',
+  );
+  const scrollStart = desktopSource.indexOf('export async function scroll(args = {}) {');
+  const scrollEnd = desktopSource.indexOf('function matches(', scrollStart);
+  const scrollBody = scrollStart >= 0 && scrollEnd > scrollStart ? desktopSource.slice(scrollStart, scrollEnd) : '';
+  assert.ok(
+    scrollBody.includes('const nodes = await uiMatches({ ...args, limit:1, refresh:true });'),
+    'semantic scroll targets must resolve from a fresh UI snapshot',
+  );
+});
+
 test('Linux Wayland portal clicks keep a real press interval before release', async () => {
   const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
   const pointerBody = linuxSource.match(/export async function pointer\(args = \{\}\) \{[\s\S]*?(?=export async function dragDrop)/)?.[0] || '';
@@ -344,7 +359,7 @@ test('Linux ui_action falls back to a bounded pointer click only for click/invok
   );
 });
 
-test('Linux accessibility retries false-empty deep AT-SPI walks while matchers use a conservative default', async () => {
+test('Linux accessibility retries false-empty AT-SPI walks before using the conservative fallback depth', async () => {
   const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
   const desktopSource = await readFile(new URL('../src/extended/desktop.mjs', import.meta.url), 'utf8');
 
@@ -353,21 +368,20 @@ test('Linux accessibility retries false-empty deep AT-SPI walks while matchers u
     /const maxDepth = clamp\(args\.max_depth, 8, 1, 32\)/,
     'Linux ui_snapshot should still honor deep requests up to the documented maximum',
   );
-  assert.match(desktopSource, /process\.platform === 'linux'.*requestedDepth > 15.*emptySnapshot/s);
   assert.match(
     desktopSource,
-    /effective = \{ \.\.\.effective, max_depth:15 \}[\s\S]{0,120}adapter\.uiSnapshot\(effective\)/,
-    'a false-empty deep Linux snapshot should retry at the proven-stable AT-SPI depth',
+    /process\.platform === 'linux' && isEmptySnapshot\(value\)[\s\S]{0,420}await sleep\(40\)[\s\S]{0,240}adapter\.uiSnapshot\(effective\)/,
+    'a false-empty Linux snapshot should retry once at the requested depth',
+  );
+  assert.match(
+    desktopSource,
+    /isEmptySnapshot\(value\) && Number\.isFinite\(requestedDepth\) && requestedDepth > 12[\s\S]{0,180}max_depth:12/,
+    'a repeatedly empty deep Linux snapshot should fall back to the conservative depth',
   );
   assert.match(
     desktopSource,
     /max_depth: resolved\.max_depth \|\| \(process\.platform === 'linux' \? 12 : 16\)/,
     'generic UI matching should default to the stable Linux traversal depth',
-  );
-  assert.match(
-    desktopSource,
-    /max_depth:args\.max_depth \|\| \(process\.platform === 'linux' \? 12 : 16\)/,
-    'wait text matching should use the same stable Linux traversal depth',
   );
 });
 

@@ -1,4 +1,4 @@
-import { TEXT_OUTPUT_SCHEMA, toolDefinitions } from './catalog.mjs';
+import { TEXT_OUTPUT_SCHEMA, supportedCoreTools, toolDefinitions } from './catalog.mjs';
 import { advertisedExtendedTools, extendedToolDefinitions } from './extended/catalog.mjs';
 
 export const compactRuntimeGroups = Object.freeze({
@@ -127,7 +127,7 @@ function groupedDefinition(name, members) {
 export async function supportedRuntimeOperationNames() {
   const supportedExtended = new Set((await advertisedExtendedTools()).map(tool => tool.name));
   return new Set([
-    ...toolDefinitions.map(tool => tool.name),
+    ...supportedCoreTools().map(tool => tool.name),
     ...extendedToolDefinitions.filter(tool => supportedExtended.has(tool.name)).map(tool => tool.name),
   ]);
 }

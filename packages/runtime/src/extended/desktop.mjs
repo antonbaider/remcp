@@ -334,16 +334,20 @@ export async function uiSnapshot(args = {}) {
   let raw = await adapter.uiSnapshot(effective);
   let value = resultValue(raw);
   const requestedDepth = Number(effective.max_depth);
-  const emptySnapshot = Array.isArray(value)
-    ? value.length === 0
-    : Array.isArray(value?.nodes) && value.nodes.length === 0;
-  if (process.platform === 'linux' && Number.isFinite(requestedDepth) && requestedDepth > 15 && emptySnapshot) {
-    // Some GNOME/AT-SPI providers collapse otherwise valid trees to an empty result
-    // when traversed too deeply. Preserve the caller's deep request first, but recover
-    // from that provider failure with the deepest stable fallback observed on Wayland.
-    effective = { ...effective, max_depth:15 };
+  const isEmptySnapshot = payload => Array.isArray(payload)
+    ? payload.length === 0
+    : Array.isArray(payload?.nodes) && payload.nodes.length === 0;
+  if (process.platform === 'linux' && isEmptySnapshot(value)) {
+    // GNOME/AT-SPI can transiently report an empty tree. Retry once at the requested
+    // depth before reducing traversal depth, so valid deep trees are not discarded.
+    await sleep(40);
     raw = await adapter.uiSnapshot(effective);
     value = resultValue(raw);
+    if (isEmptySnapshot(value) && Number.isFinite(requestedDepth) && requestedDepth > 12) {
+      effective = { ...effective, max_depth:12 };
+      raw = await adapter.uiSnapshot(effective);
+      value = resultValue(raw);
+    }
   }
   return jsonResult(enrichUiPayload(value, effective));
 }
@@ -429,7 +433,7 @@ export async function scroll(args = {}) {
   }
   const semanticTarget = args.label != null || args.id || args.name || args.role || args.automation_id || args.automationId;
   if (semanticTarget) {
-    const nodes = await uiMatches({ ...args, limit:1 });
+    const nodes = await uiMatches({ ...args, limit:1, refresh:true });
     const node = nodes[0];
     if (!node) throw new Error('Scroll target UI element was not found');
     const x = Number(node.center_x ?? (Number(node.x) + Number(node.width) / 2));
@@ -746,7 +750,7 @@ export async function typeText(args = {}) {
 }
 
 async function uiElementCenter(id, field) {
-  const matches = await uiMatches({ id, limit: 1, max_nodes: 5000, max_depth: 32 });
+  const matches = await uiMatches({ id, limit: 1, max_nodes: 5000, max_depth: 32, refresh:true });
   const node = matches[0];
   if (!node) throw new Error(`${field} UI element was not found: ${id}`);
   const x = Number(node.x), y = Number(node.y), width = Number(node.width), height = Number(node.height);

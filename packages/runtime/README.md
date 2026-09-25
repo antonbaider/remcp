@@ -143,6 +143,12 @@ in `~/.config/remcp/runtime.json`. `--describe` always reports the current state
   agent. Browser control accepts only loopback CDP endpoints. The explicit `network` diagnostic can
   open a bounded TCP connection to a host/port, and shell/browser actions can reach the network when
   the requested operation itself requires it.
+- **Remote browser safety.** A standalone production runtime keeps browser control disabled unless
+  `REMCP_BROWSER_REMOTE_ENABLED=1`; the authenticated ReMCP device agent explicitly enables it for the local
+  runtime it owns. Production navigation requires an explicit `REMCP_BROWSER_ALLOWED_HOSTS` allowlist of IP
+  literals. Hostname navigation is refused unless `REMCP_BROWSER_ALLOW_DNS_REBIND=1` is set behind an external
+  DNS/egress boundary. Local navigation requires a separate `REMCP_BROWSER_ALLOW_LOCAL_NAVIGATION=1` opt-in,
+  and CDP request guards reject private, file, and WebSocket destinations.
 - **Optional confinement.** `allowedRoots` is empty by default. When you set it, it is enforced
   against the resolved real path of the deepest existing ancestor rather than the lexical string, so
   `<allowed>/link -> /etc` cannot be used to read or write outside the allowed directories.
@@ -159,6 +165,10 @@ in `~/.config/remcp/runtime.json`. `--describe` always reports the current state
   transport limit), writes are capped (`maxWriteBytes`), buffered session output is capped by both
   line count and total characters - a stream with no newlines cannot grow without limit - and reads
   are paged or chunked.
+- **Filesystem structural safety.** Archive and document snapshot/publication operations use
+  descriptor-bound directory traversal on Linux. macOS and Windows preserve the same bounded snapshot,
+  link/special-file rejection, canonical root confinement and atomic staging semantics, while using their
+  portable path APIs where Node does not expose directory-fd-relative open/rename/unlink primitives.
 - **Crash-resistant sessions.** A bogus shell, a closed stdin, or a dead parent cannot take the
   runtime down; sessions run in their own process group so `force_terminate` stops a whole pipeline;
   the agent restarts the runtime if it ever exits, so a device recovers instead of going silently
@@ -195,8 +205,10 @@ Optional settings live in `~/.config/remcp/runtime.json` (override the directory
 Every value can also be set with an environment variable: `REMCP_RUNTIME_ALLOWED_ROOTS`,
 `REMCP_RUNTIME_BLOCKED_COMMANDS`, `REMCP_RUNTIME_DANGEROUS_COMMANDS`, `REMCP_RUNTIME_TELEMETRY`,
 `REMCP_RUNTIME_DISABLE_TELEMETRY`, `REMCP_RUNTIME_MAX_OUTPUT_BYTES`, `REMCP_RUNTIME_MAX_READ_LINES`,
-`REMCP_RUNTIME_MAX_BUFFERED_LINES`, `REMCP_RUNTIME_MAX_WRITE_BYTES`, `REMCP_RUNTIME_SHELL`,
-`REMCP_RUNTIME_NAME`.
+  `REMCP_RUNTIME_MAX_BUFFERED_LINES`, `REMCP_RUNTIME_MAX_WRITE_BYTES`, `REMCP_RUNTIME_SHELL`,
+  `REMCP_RUNTIME_NAME`, `REMCP_BROWSER_REMOTE_ENABLED`, `REMCP_BROWSER_ALLOWED_HOSTS`,
+  `REMCP_BROWSER_ALLOW_LOCAL_NAVIGATION`, `REMCP_BROWSER_ALLOW_DNS_REBIND`.
+
 
 `allowedRoots` is empty by default, which means the paired device can reach anything the operating
 system user running the agent can reach. Set it when you want the device to be scoped to specific

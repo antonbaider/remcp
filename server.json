@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.getremcp/remcp",
   "title": "ReMCP",
-  "description": "Securely control paired computers with ReMCP: semantic desktop UI/Accessibility, browser DOM/CDP, keyboard and pointer input, files, terminals, diagnostics, screenshots, and structured PDF/DOCX/XLSX tools.",
-  "version": "0.2.107",
+  "description": "Securely control paired computers with ReMCP.",
+  "version": "0.2.108",
   "repository": {
     "url": "https://github.com/getremcp/remcp",
     "source": "github"

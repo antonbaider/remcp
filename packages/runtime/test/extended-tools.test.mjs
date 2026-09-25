@@ -8,7 +8,7 @@ import {
   extendedToolDefinitions,
   extendedToolHandlers,
 } from '../src/extended/catalog.mjs';
-import { browserActionInputValue, browserAutoLaunchAvailable, browserEvaluate, browserNavigate, browserSnapshot, browserTabs, browserWait } from '../src/extended/browser.mjs';
+import { browserActionInputValue, browserAutoLaunchAvailable, browserEvaluate, browserNavigate, browserRemoteEnabled, browserSnapshot, browserTabs, browserWait } from '../src/extended/browser.mjs';
 import { parseAvfoundationScreenInput, recordScreen, recordScreenAvailable, resolveRecordScreenFfmpeg } from '../src/extended/diagnostics.mjs';
 import { hasTool, invokeTool } from '../src/invoke.mjs';
 
@@ -260,6 +260,24 @@ test('browser_action type honors the public text argument while set_value prefer
   assert.equal(browserActionInputValue({ text:'typed', value:'explicit' }, 'set_value'), 'explicit');
 });
 
+test('browser remote control defaults off unless a runtime mode or explicit opt-in is present', () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousFlag = process.env.REMCP_BROWSER_REMOTE_ENABLED;
+  try {
+    delete process.env.NODE_ENV;
+    delete process.env.REMCP_BROWSER_REMOTE_ENABLED;
+    assert.equal(browserRemoteEnabled(), false);
+    process.env.NODE_ENV = 'development';
+    assert.equal(browserRemoteEnabled(), true);
+    delete process.env.NODE_ENV;
+    process.env.REMCP_BROWSER_REMOTE_ENABLED = '1';
+    assert.equal(browserRemoteEnabled(), true);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+    if (previousFlag === undefined) delete process.env.REMCP_BROWSER_REMOTE_ENABLED; else process.env.REMCP_BROWSER_REMOTE_ENABLED = previousFlag;
+  }
+});
+
 test('browser_navigate new_tab bootstraps CDP when no page target exists', async () => {
   const originalFetch = globalThis.fetch;
   let seen = null;
@@ -338,6 +356,43 @@ test('local browser navigation requires an explicit environment opt-in and disco
   } finally {
     globalThis.fetch = originalFetch;
     for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test('production browser navigation requires an explicit public host allowlist', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousRemote = process.env.REMCP_BROWSER_REMOTE_ENABLED;
+  const previousAllowlist = process.env.REMCP_BROWSER_ALLOWED_HOSTS;
+  const localFlags = ['REMCP_BROWSER_ALLOW_LOCAL_NAVIGATION', 'REMCP_BROWSER_ALLOW_LOCAL', 'REMCP_ALLOW_LOCAL_BROWSER_NAVIGATION'];
+  const previousLocal = localFlags.map(name => [name, process.env[name]]);
+  try {
+    process.env.NODE_ENV = 'production';
+    process.env.REMCP_BROWSER_REMOTE_ENABLED = '1';
+    delete process.env.REMCP_BROWSER_ALLOWED_HOSTS;
+    for (const name of localFlags) delete process.env[name];
+    await assert.rejects(
+      () => browserNavigate({ action: 'url', url: 'https://example.com/' }),
+      /REMCP_BROWSER_ALLOWED_HOSTS/,
+    );
+    process.env.REMCP_BROWSER_ALLOW_LOCAL_NAVIGATION = '1';
+    await assert.rejects(
+      () => browserNavigate({ action: 'url', url: 'https://example.com/' }),
+      /REMCP_BROWSER_ALLOWED_HOSTS/,
+    );
+    delete process.env.REMCP_BROWSER_ALLOW_LOCAL_NAVIGATION;
+    process.env.REMCP_BROWSER_ALLOWED_HOSTS = 'example.com';
+    await assert.rejects(
+      () => browserNavigate({ action: 'url', url: 'https://example.com/' }),
+      /IP-literal allowlist/,
+    );
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+    if (previousRemote === undefined) delete process.env.REMCP_BROWSER_REMOTE_ENABLED; else process.env.REMCP_BROWSER_REMOTE_ENABLED = previousRemote;
+    if (previousAllowlist === undefined) delete process.env.REMCP_BROWSER_ALLOWED_HOSTS; else process.env.REMCP_BROWSER_ALLOWED_HOSTS = previousAllowlist;
+    for (const [name, value] of previousLocal) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }

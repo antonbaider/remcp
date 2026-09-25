@@ -2,7 +2,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, link, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { readDocxText, readPdfText } from '../documents.mjs';
 import { resolveSafePath, text } from '../util.mjs';
 import {
@@ -29,28 +29,183 @@ function xmlUnescape(value) {
 const MAX_OOXML_ENTRIES = 10_000;
 const MAX_OOXML_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
 const MAX_DOCUMENT_BYTES = 128 * 1024 * 1024;
+const DOCUMENT_READ_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0);
+const DOCUMENT_DIRECTORY_FLAGS = constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0);
+
+function descriptorAnchorsAvailable() {
+  return process.platform === 'linux' && Boolean(constants.O_NOFOLLOW) && Boolean(constants.O_DIRECTORY);
+}
+
+async function openDocumentSource(filePath) {
+  if (!descriptorAnchorsAvailable()) {
+    const handle = await open(filePath, DOCUMENT_READ_FLAGS);
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) throw new Error('Document path must be a regular file');
+      return { handle, close: () => handle.close() };
+    } catch (error) {
+      await handle.close().catch(() => {});
+      throw error;
+    }
+  }
+  const root = path.parse(filePath).root;
+  const parts = filePath.slice(root.length).split(path.sep).filter(Boolean);
+  if (!parts.length) throw new Error('Document path must be a regular file');
+  const directories = [];
+  let current = root;
+  const closeDirectories = async () => {
+    for (const handle of directories.reverse()) await handle.close().catch(() => {});
+  };
+  try {
+    for (const part of parts.slice(0, -1)) {
+      const handle = await open(path.join(current, part), DOCUMENT_DIRECTORY_FLAGS);
+      const info = await handle.stat();
+      if (!info.isDirectory()) {
+        await handle.close().catch(() => {});
+        throw new Error('Document path parent is not a directory');
+      }
+      directories.push(handle);
+      current = `/proc/self/fd/${handle.fd}`;
+    }
+    const handle = await open(path.join(current, parts.at(-1)), DOCUMENT_READ_FLAGS);
+    return {
+      handle,
+      close: async () => {
+        try { await handle.close(); }
+        finally { await closeDirectories(); }
+      },
+    };
+  } catch (error) {
+    await closeDirectories();
+    throw error;
+  }
+}
+
+async function openDocumentDirectoryPath(directory, { create = false } = {}) {
+  if (!descriptorAnchorsAvailable()) {
+    if (create) await mkdir(directory, { recursive:true, mode:0o700 });
+    const handle = await open(directory, DOCUMENT_DIRECTORY_FLAGS);
+    try {
+      const info = await handle.stat();
+      if (!info.isDirectory()) throw new Error('Document path parent is not a directory');
+      return { handle, anchor:directory, descriptorBound:false, close: () => handle.close() };
+    } catch (error) {
+      await handle.close().catch(() => {});
+      throw error;
+    }
+  }
+  const root = path.parse(directory).root;
+  const parts = directory.slice(root.length).split(path.sep).filter(Boolean);
+  if (!parts.length) {
+    const handle = await open(root, DOCUMENT_DIRECTORY_FLAGS);
+    return { anchor: `/proc/self/fd/${handle.fd}`, close: () => handle.close() };
+  }
+  const directories = [];
+  let current = root;
+  const closeDirectories = async () => {
+    for (const handle of directories.reverse()) await handle.close().catch(() => {});
+  };
+  try {
+    for (const part of parts) {
+      const candidate = path.join(current, part);
+      if (create) {
+        await mkdir(candidate, { mode:0o700 }).catch(error => {
+          if (error?.code !== 'EEXIST') throw error;
+        });
+      }
+      const handle = await open(candidate, DOCUMENT_DIRECTORY_FLAGS);
+      const info = await handle.stat();
+      if (!info.isDirectory()) {
+        await handle.close().catch(() => {});
+        throw new Error('Document path parent is not a directory');
+      }
+      directories.push(handle);
+      current = `/proc/self/fd/${handle.fd}`;
+    }
+    const handle = directories.pop();
+    if (!handle) throw new Error('Document directory path is empty');
+    return {
+      anchor: current,
+      close: async () => {
+        try { await handle.close(); }
+        finally { await closeDirectories(); }
+      },
+    };
+  } catch (error) {
+    await closeDirectories();
+    throw error;
+  }
+}
+
+async function createAnchoredTempDirectory(parent, prefix) {
+  const directory = await openDocumentDirectoryPath(parent, { create:true });
+  try {
+    const childAnchor = directory.descriptorBound === false
+      ? directory.anchor
+      : directory.anchor.replace('/proc/self/fd/', `/proc/${process.pid}/fd/`);
+    const directoryPath = await mkdtemp(path.join(childAnchor, prefix));
+    return { path:directoryPath, close:directory.close };
+  } catch (error) {
+    await directory.close().catch(() => {});
+    throw error;
+  }
+}
+
+async function readBounded(handle, maximum, label) {
+  const chunks = [];
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  let offset = 0;
+  for (;;) {
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+    if (!bytesRead) break;
+    if (!Number.isSafeInteger(offset + bytesRead) || offset + bytesRead > maximum) {
+      throw new Error(`${label} exceeds the ${maximum}-byte safety limit`);
+    }
+    chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+    offset += bytesRead;
+  }
+  return Buffer.concat(chunks, offset);
+}
 
 async function readDocumentFile(filePath) {
-  const info = await lstat(filePath);
-  if (!info.isFile()) throw new Error('Document path must be a regular file');
-  if (info.size > MAX_DOCUMENT_BYTES) throw new Error(`Document is too large (maximum ${MAX_DOCUMENT_BYTES} bytes)`);
-  return readFile(filePath);
+  const opened = await openDocumentSource(filePath);
+  try {
+    const info = await opened.handle.stat();
+    if (!info.isFile()) throw new Error('Document path must be a regular file');
+    if (info.size > MAX_DOCUMENT_BYTES) throw new Error(`Document is too large (maximum ${MAX_DOCUMENT_BYTES} bytes)`);
+    return await readBounded(opened.handle, MAX_DOCUMENT_BYTES, 'Document');
+  } finally {
+    await opened.close();
+  }
 }
 
 async function copyRegularNoFollow(source, destination) {
-  const sourceHandle = await open(source, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+  const opened = await openDocumentSource(source);
   try {
-    const info = await sourceHandle.stat();
+    const info = await opened.handle.stat();
     if (!info.isFile()) throw new Error('Document path must be a regular file');
     if (info.size > MAX_DOCUMENT_BYTES) throw new Error(`Document is too large (maximum ${MAX_DOCUMENT_BYTES} bytes)`);
     const destinationHandle = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0), 0o600);
     try {
-      await destinationHandle.writeFile(await sourceHandle.readFile());
+      const data = await readBounded(opened.handle, MAX_DOCUMENT_BYTES, 'Document');
+      await destinationHandle.writeFile(data);
     } finally {
       await destinationHandle.close();
     }
   } finally {
-    await sourceHandle.close();
+    await opened.close();
+  }
+}
+
+async function snapshotDocumentFile(filePath) {
+  const dir = await tempDir('remcp-pdf-input-');
+  const snapshot = path.join(dir, `input-${randomUUID()}.pdf`);
+  try {
+    await copyRegularNoFollow(filePath, snapshot);
+    return { dir, path: snapshot };
+  } catch (error) {
+    await removeTemp(dir);
+    throw error;
   }
 }
 
@@ -92,6 +247,8 @@ async function validateZipArchive(source) {
   if (entries.length > MAX_OOXML_ENTRIES) throw new Error(`OOXML archive has too many entries (${entries.length}; max ${MAX_OOXML_ENTRIES})`);
   const unsafe = entries.find(name => !safeArchiveEntry(name));
   if (unsafe) throw new Error(`OOXML archive contains an unsafe path: ${unsafe}`);
+  const details = await runFile('unzip', ['-Z','-v',source], { label:'inspect OOXML entry types', timeout:30_000, maxBuffer:16 * 1024 * 1024 });
+  if (/symbolic link|Unix file attributes \([^)]*\b12\d{4}/i.test(details.stdout)) throw new Error('OOXML archive contains a symbolic link');
   const totals = await runFile('unzip', ['-Z','-t',source], { label:'inspect OOXML archive size', timeout:30_000 });
   const uncompressed = Number(totals.stdout.match(/(?:^|,\s)([0-9]+) bytes uncompressed/)?.[1] || 0);
   if (uncompressed > MAX_OOXML_UNCOMPRESSED_BYTES) throw new Error(`OOXML archive expands to ${uncompressed} bytes; max ${MAX_OOXML_UNCOMPRESSED_BYTES}`);
@@ -126,23 +283,35 @@ async function createZip(sourceDir, destination) {
   await runFile('zip', ['-qr',destination,'.'], { cwd:sourceDir, label:'create OOXML archive', timeout:30_000 });
 }
 
-async function commitDocumentOutput(staged, destination) {
+async function commitDocumentOutput(staged, destination, { noReplace = false } = {}) {
+  const parentDirectory = await openDocumentDirectoryPath(path.dirname(destination));
+  const parentAnchor = parentDirectory.anchor;
+  const destinationPath = path.join(parentAnchor, path.basename(destination));
   try {
-    await rename(staged, destination);
-    return;
-  } catch (error) {
-    if (!['EEXIST', 'EPERM', 'ENOTEMPTY'].includes(error?.code)) throw error;
-  }
-  const backup = `${destination}.remcp-old-${randomUUID()}`;
-  let moved = false;
-  try {
-    await rename(destination, backup);
-    moved = true;
-    await rename(staged, destination);
-    await rm(backup, { force: true }).catch(() => {});
-  } catch (error) {
-    if (moved && !await lstat(destination).catch(() => null)) await rename(backup, destination).catch(() => {});
-    throw error;
+    if (noReplace) {
+      await link(staged, destinationPath);
+      await unlink(staged);
+      return;
+    }
+    try {
+      await rename(staged, destinationPath);
+      return;
+    } catch (error) {
+      if (!['EEXIST', 'EPERM', 'ENOTEMPTY'].includes(error?.code)) throw error;
+    }
+    const backup = path.join(parentAnchor, `.${path.basename(destination)}.remcp-old-${randomUUID()}`);
+    let moved = false;
+    try {
+      await rename(destinationPath, backup);
+      moved = true;
+      await rename(staged, destinationPath);
+      await rm(backup, { force: true }).catch(() => {});
+    } catch (error) {
+      if (moved && !await lstat(destinationPath).catch(() => null)) await rename(backup, destinationPath).catch(() => {});
+      throw error;
+    }
+  } finally {
+    await parentDirectory.close().catch(() => {});
   }
 }
 
@@ -229,9 +398,10 @@ function readWorksheetCells(xml, sharedStrings, maxCells) {
 }
 
 async function readXlsx(filePath, args) {
+  const source = await snapshotDocumentFile(filePath);
   const dir = await tempDir('remcp-xlsx-read-');
   try {
-    await extractZip(filePath, dir);
+    await extractZip(source.path, dir);
     const workbook = await readFile(path.join(dir,'xl','workbook.xml'),'utf8');
     const rels = await readFile(path.join(dir,'xl','_rels','workbook.xml.rels'),'utf8');
     const sheet = workbookSheetPath(workbook, rels, optionalString(args.sheet));
@@ -240,21 +410,31 @@ async function readXlsx(filePath, args) {
     try { shared = readSharedStrings(await readFile(path.join(dir,'xl','sharedStrings.xml'),'utf8')); } catch {}
     const cells = readWorksheetCells(worksheet, shared, clamp(args.max_cells,5000,1,50_000));
     return { kind:'xlsx', sheet:sheet.name, count:cells.length, cells };
-  } finally { await removeTemp(dir); }
+  } finally {
+    await removeTemp(source.dir);
+    await removeTemp(dir);
+  }
 }
 
-async function readPdfDocument(filePath, data) {
+async function readPdfDocument(data) {
   try {
     return readPdfText(data);
   } catch (builtinError) {
     if (commandExists('pdftotext')) {
-      const extracted = await runFile('pdftotext', ['-enc','UTF-8',filePath,'-'], {
-        label:'PDF text extraction',
-        timeout:60_000,
-        allowFailure:true,
-      });
-      const fallbackText = String(extracted.stdout || '').replace(/\f/g, '\n').trim();
-      if (extracted.code === 0 && fallbackText) return fallbackText;
+      const dir = await tempDir('remcp-pdf-read-');
+      try {
+        const snapshot = path.join(dir, 'input.pdf');
+        await writeFile(snapshot, data, { mode: 0o600 });
+        const extracted = await runFile('pdftotext', ['-enc','UTF-8',snapshot,'-'], {
+          label:'PDF text extraction',
+          timeout:60_000,
+          allowFailure:true,
+        });
+        const fallbackText = String(extracted.stdout || '').replace(/\f/g, '\n').trim();
+        if (extracted.code === 0 && fallbackText) return fallbackText;
+      } finally {
+        await removeTemp(dir);
+      }
     }
     throw builtinError;
   }
@@ -265,7 +445,7 @@ export async function readDocument(args) {
   const lower = filePath.toLowerCase();
   const data = await readDocumentFile(filePath);
   if (lower.endsWith('.docx')) return text(readDocxText(data));
-  if (lower.endsWith('.pdf')) return text(await readPdfDocument(filePath,data));
+  if (lower.endsWith('.pdf')) return text(await readPdfDocument(data));
   if (lower.endsWith('.xlsx')) return jsonResult(await readXlsx(filePath,args));
   if (/\.(txt|md|csv|json|xml|yaml|yml)$/i.test(lower)) return text(data.toString('utf8'));
   throw new Error('read_document supports PDF, DOCX, XLSX, TXT, Markdown, CSV, JSON, XML, YAML');
@@ -351,10 +531,11 @@ export async function editSpreadsheet(args) {
   const output = args.output ? await resolveSafePath(args.output,'output') : filePath;
   const dir = await tempDir(create ? 'remcp-xlsx-create-' : 'remcp-xlsx-edit-');
   let outputStage = '';
+  let outputStageDirectory = null;
   let tempOut = '';
   try {
-    await mkdir(path.dirname(output), { recursive:true });
-    outputStage = await mkdtemp(path.join(path.dirname(output), '.remcp-xlsx-output-'));
+    outputStageDirectory = await createAnchoredTempDirectory(path.dirname(output), '.remcp-xlsx-output-');
+    outputStage = outputStageDirectory.path;
     tempOut = path.join(outputStage, path.basename(output));
     if (create) {
       await ensureCreateTargetIsNew(filePath);
@@ -370,11 +551,13 @@ export async function editSpreadsheet(args) {
     for (const edit of edits) xml = setWorksheetCell(xml,String(edit.cell || '').toUpperCase(),edit.value,edit.formula);
     await writeFile(worksheetPath,xml,'utf8');
     await createZip(dir,tempOut);
-    await commitDocumentOutput(tempOut,output);
-    return jsonResult({ path:output, sheet:sheet.name, edited_cells:edits.length, bytes:(await stat(output)).size, created:create });
+     await commitDocumentOutput(tempOut,output,{ noReplace:create });
+     return jsonResult({ path:output, sheet:sheet.name, edited_cells:edits.length, bytes:(await stat(output)).size, created:create });
+
   } finally {
     if (tempOut) await rm(tempOut,{force:true}).catch(() => {});
     if (outputStage) await rm(outputStage,{recursive:true, force:true}).catch(() => {});
+    if (outputStageDirectory) await outputStageDirectory.close().catch(() => {});
     await removeTemp(dir);
   }
 }
@@ -436,11 +619,12 @@ export async function editDocument(args) {
   const output = args.output ? await resolveSafePath(args.output,'output') : filePath;
   const dir = await tempDir(create ? 'remcp-docx-create-' : 'remcp-docx-edit-');
   let outputStage = '';
+  let outputStageDirectory = null;
   let tempOut = '';
   let changes = 0;
   try {
-    await mkdir(path.dirname(output), { recursive:true });
-    outputStage = await mkdtemp(path.join(path.dirname(output), '.remcp-docx-output-'));
+    outputStageDirectory = await createAnchoredTempDirectory(path.dirname(output), '.remcp-docx-output-');
+    outputStage = outputStageDirectory.path;
     tempOut = path.join(outputStage, path.basename(output));
     if (create) {
       await ensureCreateTargetIsNew(filePath);
@@ -467,11 +651,13 @@ export async function editDocument(args) {
     }
     await writeFile(documentPath,xml,'utf8');
     await createZip(dir,tempOut);
-    await commitDocumentOutput(tempOut,output);
-    return jsonResult({ path:output, operations:operations.length, changes, bytes:(await stat(output)).size, created:create });
+     await commitDocumentOutput(tempOut,output,{ noReplace:create });
+     return jsonResult({ path:output, operations:operations.length, changes, bytes:(await stat(output)).size, created:create });
+
   } finally {
     if (tempOut) await rm(tempOut,{force:true}).catch(() => {});
     if (outputStage) await rm(outputStage,{recursive:true, force:true}).catch(() => {});
+    if (outputStageDirectory) await outputStageDirectory.close().catch(() => {});
     await removeTemp(dir);
   }
 }
@@ -524,62 +710,110 @@ export async function pdfAction(args) {
   }
   if (action === 'info') {
     const source = await resolveSafePath(args.path,'path');
-    if (commandExists('pdfinfo')) return text((await runFile('pdfinfo',[source],{label:'pdfinfo'})).stdout);
-    const data = await readDocumentFile(source); return jsonResult({ path:source, bytes:data.length, annotation_count:pdfAnnotations(data).length });
+    if (commandExists('pdfinfo')) {
+      const snapshot = await snapshotDocumentFile(source);
+      try { return text((await runFile('pdfinfo',[snapshot.path],{label:'pdfinfo'})).stdout); }
+      finally { await removeTemp(snapshot.dir); }
+    }
+    const data = await readDocumentFile(source);
+    return jsonResult({ path:source, bytes:data.length, annotation_count:pdfAnnotations(data).length });
   }
   if (action === 'merge') {
     const requested = Array.isArray(args.paths) ? args.paths : [];
     if (requested.length < 2 || requested.length > 100) throw new Error('merge requires 2..100 PDFs in paths');
-    const sources=[]; for(const value of requested) sources.push(await resolveSafePath(value,'paths'));
+    const sources=[];
+    for(const value of requested) sources.push(await resolveSafePath(value,'paths'));
     const output=await resolveSafePath(args.output,'output');
-    if(commandExists('pdfunite')) await runFile('pdfunite',[...sources,output],{label:'PDF merge',timeout:60_000});
-    else if(commandExists('qpdf')) await runFile('qpdf',['--empty','--pages',...sources,'--',output],{label:'PDF merge',timeout:60_000});
-    else unavailable('PDF merge','install poppler-utils (pdfunite) or qpdf');
-    return jsonResult({action,output,inputs:sources.length,bytes:(await stat(output)).size});
+    const inputDir=await tempDir('remcp-pdf-merge-input-');
+    const outputStageDirectory=await createAnchoredTempDirectory(path.dirname(output), '.remcp-pdf-output-');
+    const outputDir=outputStageDirectory.path;
+    const staged=path.join(outputDir,path.basename(output));
+    try {
+      const snapshots=[];
+      for(let index=0;index<sources.length;index+=1){
+        const snapshot=path.join(inputDir,`input-${index}.pdf`);
+        await copyRegularNoFollow(sources[index],snapshot);
+        snapshots.push(snapshot);
+      }
+      if(commandExists('pdfunite')) await runFile('pdfunite',[...snapshots,staged],{label:'PDF merge',timeout:60_000});
+      else if(commandExists('qpdf')) await runFile('qpdf',['--empty','--pages',...snapshots,'--',staged],{label:'PDF merge',timeout:60_000});
+      else unavailable('PDF merge','install poppler-utils (pdfunite) or qpdf');
+      await commitDocumentOutput(staged,output);
+      return jsonResult({action,output,inputs:sources.length,bytes:(await stat(output)).size});
+    } finally {
+      await removeTemp(inputDir);
+      await rm(outputDir,{recursive:true,force:true}).catch(()=>{});
+      await outputStageDirectory.close().catch(()=>{});
+    }
   }
   const source=await resolveSafePath(args.path,'path');
   if(action==='split'){
     const requestedOutputDir=await resolveSafePath(args.output_dir || path.dirname(source),'output_dir');
-    await mkdir(requestedOutputDir,{recursive:true});
     const outputDir=await resolveSafePath(requestedOutputDir,'output_dir');
     const patternName=safePdfPattern(optionalString(args.pattern),`${path.basename(source,path.extname(source))}-%d.pdf`);
-    const pattern=path.join(outputDir,patternName);
-    if(commandExists('pdfseparate')) await runFile('pdfseparate',[source,pattern],{label:'PDF split',timeout:60_000});
-    else unavailable('PDF split','install poppler-utils (pdfseparate)');
-    return jsonResult({action,output_dir:outputDir,files:(await readdir(outputDir)).filter(name=>name.toLowerCase().endsWith('.pdf')).sort()});
+    const snapshot=await snapshotDocumentFile(source);
+    const work=await tempDir('remcp-pdf-split-');
+    const stageDirectory=await createAnchoredTempDirectory(outputDir, '.remcp-pdf-output-');
+    const stageDir=stageDirectory.path;
+    try {
+      const pattern=path.join(work,patternName);
+      if(commandExists('pdfseparate')) await runFile('pdfseparate',[snapshot.path,pattern],{label:'PDF split',timeout:60_000});
+      else unavailable('PDF split','install poppler-utils (pdfseparate)');
+      for(const name of await readdir(work)){
+        if(!name.toLowerCase().endsWith('.pdf')) continue;
+        const staged=path.join(stageDir,name);
+        await copyFile(path.join(work,name),staged,constants.COPYFILE_EXCL);
+        await commitDocumentOutput(staged,path.join(outputDir,name));
+      }
+      return jsonResult({action,output_dir:outputDir,files:(await readdir(outputDir)).filter(name=>name.toLowerCase().endsWith('.pdf')).sort()});
+    } finally {
+      await removeTemp(snapshot.dir);
+      await removeTemp(work);
+      await rm(stageDir,{recursive:true,force:true}).catch(()=>{});
+      await stageDirectory.close().catch(()=>{});
+    }
   }
   const pages=optionalString(args.pages);
   const selectedPages=expandPdfPages(pages);
   const normalizedPages=selectedPages.join(',');
   const output=await resolveSafePath(args.output,'output');
-  if(commandExists('qpdf')) {
-    await runFile('qpdf',[source,'--pages','.',pages.replace(/\s+/g,''),'--',output],{label:'PDF extract pages',timeout:60_000});
-  } else if(commandExists('pdftk')) {
-    await runFile('pdftk',[source,'cat',...pages.replace(/\s+/g,'').split(','),'output',output],{label:'PDF extract pages',timeout:60_000});
-  } else if(commandExists('pdfseparate')) {
-    const dir=await tempDir('remcp-pdf-pages-');
-    try {
-      const extracted=[];
-      for(let index=0;index<selectedPages.length;index+=1){
-        const page=selectedPages[index];
-        const pattern=path.join(dir,`selection-${index+1}-%d.pdf`);
-        await runFile('pdfseparate',['-f',String(page),'-l',String(page),source,pattern],{label:`PDF extract page ${page}`,timeout:60_000});
-        extracted.push(path.join(dir,`selection-${index+1}-${page}.pdf`));
-      }
-      if(extracted.length===1) {
-        await copyFile(extracted[0],output);
-      } else if(commandExists('pdfunite')) {
-        await runFile('pdfunite',[...extracted,output],{label:'PDF assemble extracted pages',timeout:60_000});
-      } else {
-        unavailable('PDF page extraction','pdfunite is required with pdfseparate when extracting multiple pages');
-      }
-    } finally {
-      await removeTemp(dir);
+  const snapshot=await snapshotDocumentFile(source);
+  const stageDirectory=await createAnchoredTempDirectory(path.dirname(output), '.remcp-pdf-output-');
+  const stageDir=stageDirectory.path;
+  const staged=path.join(stageDir,path.basename(output));
+  try {
+    if(commandExists('qpdf')) {
+      await runFile('qpdf',[snapshot.path,'--pages','.',pages.replace(/\s+/g,''),'--',staged],{label:'PDF extract pages',timeout:60_000});
+    } else if(commandExists('pdftk')) {
+      await runFile('pdftk',[snapshot.path,'cat',...pages.replace(/\s+/g,'').split(','),'output',staged],{label:'PDF extract pages',timeout:60_000});
+    } else if(commandExists('pdfseparate')) {
+      const work=await tempDir('remcp-pdf-pages-');
+      try {
+        const extracted=[];
+        for(let index=0;index<selectedPages.length;index+=1){
+          const page=selectedPages[index];
+          const pattern=path.join(work,`selection-${index+1}-%d.pdf`);
+          await runFile('pdfseparate',['-f',String(page),'-l',String(page),snapshot.path,pattern],{label:`PDF extract page ${page}`,timeout:60_000});
+          extracted.push(path.join(work,`selection-${index+1}-${page}.pdf`));
+        }
+        if(extracted.length===1) {
+          await copyFile(extracted[0],staged,constants.COPYFILE_EXCL);
+        } else if(commandExists('pdfunite')) {
+          await runFile('pdfunite',[...extracted,staged],{label:'PDF assemble extracted pages',timeout:60_000});
+        } else {
+          unavailable('PDF page extraction','pdfunite is required with pdfseparate when extracting multiple pages');
+        }
+      } finally { await removeTemp(work); }
+    } else {
+      unavailable('PDF page extraction','install qpdf, pdftk, or poppler-utils (pdfseparate; pdfunite for multiple pages)');
     }
-  } else {
-    unavailable('PDF page extraction','install qpdf, pdftk, or poppler-utils (pdfseparate; pdfunite for multiple pages)');
+    await commitDocumentOutput(staged,output);
+    return jsonResult({action,source,pages:normalizedPages,output,bytes:(await stat(output)).size});
+  } finally {
+    await removeTemp(snapshot.dir);
+    await rm(stageDir,{recursive:true,force:true}).catch(()=>{});
+    await stageDirectory.close().catch(()=>{});
   }
-  return jsonResult({action,source,pages:normalizedPages,output,bytes:(await stat(output)).size});
 }
 
 export const documentHandlers = {
