@@ -1,5 +1,8 @@
 import process from 'node:process';
-import { copyFile, rm } from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
+import { lstat, open, rename, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const PORTAL_NAME = 'org.freedesktop.portal.Desktop';
@@ -133,6 +136,115 @@ function createResponseCollector(bus, dbus, initialPath, timeoutMs) {
   };
 }
 
+async function openDirectoryNoFollow(directory) {
+  if (process.platform !== 'linux' || !constants.O_NOFOLLOW || !constants.O_DIRECTORY) {
+    const info = await lstat(directory);
+    if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('screenshot path parent is not a safe directory');
+    return { anchor:directory, close:async() => {} };
+  }
+  const descriptor = directory.match(/^(\/proc\/(?:self|\d+)\/fd\/\d+)(?:\/(.*))?$/);
+  const directories = [];
+  let current;
+  try {
+    if (descriptor) {
+      const base = await open(`${descriptor[1]}/.`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      directories.push(base);
+      current = `/proc/self/fd/${base.fd}`;
+    } else {
+      const root = path.parse(directory).root;
+      current = root;
+      const parts = directory.slice(root.length).split(path.sep).filter(Boolean);
+      if (!parts.length) {
+        const handle = await open(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+        return { anchor:`/proc/self/fd/${handle.fd}`, close:() => handle.close() };
+      }
+      for (const part of parts) {
+        const handle = await open(path.join(current, part), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+        const info = await handle.stat();
+        if (!info.isDirectory()) {
+          await handle.close().catch(() => {});
+          throw new Error('screenshot path parent is not a safe directory');
+        }
+        directories.push(handle);
+        current = `/proc/self/fd/${handle.fd}`;
+      }
+      const handle = directories.pop();
+      return {
+        anchor:current,
+        close:async() => {
+          try { await handle.close(); }
+          finally { for (const entry of directories.reverse()) await entry.close().catch(() => {}); }
+        },
+      };
+    }
+    for (const part of (descriptor?.[2] || '').split(path.sep).filter(Boolean)) {
+      const handle = await open(path.join(current, part), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      const info = await handle.stat();
+      if (!info.isDirectory()) {
+        await handle.close().catch(() => {});
+        throw new Error('screenshot path parent is not a safe directory');
+      }
+      directories.push(handle);
+      current = `/proc/self/fd/${handle.fd}`;
+    }
+    const handle = directories.pop();
+    return {
+      anchor:current,
+      close:async() => {
+        try { await handle.close(); }
+        finally { for (const entry of directories.reverse()) await entry.close().catch(() => {}); }
+      },
+    };
+  } catch (error) {
+    for (const entry of directories.reverse()) await entry.close().catch(() => {});
+    throw error;
+  }
+}
+
+async function copyPortalFile(source, destination) {
+  let sourceParent;
+  let destinationParent;
+  let input;
+  let output;
+  let temporary;
+  try {
+    sourceParent = await openDirectoryNoFollow(path.dirname(source));
+    destinationParent = await openDirectoryNoFollow(path.dirname(destination));
+    input = await open(path.join(sourceParent.anchor, path.basename(source)), constants.O_RDONLY | constants.O_NOFOLLOW);
+    const info = await input.stat();
+    if (!info.isFile()) throw new Error('desktop portal returned a non-regular screenshot file');
+    const destinationPath = path.join(destinationParent.anchor, path.basename(destination));
+    const existing = await lstat(destinationPath).catch(() => null);
+    if (existing?.isSymbolicLink()) throw new Error('desktop portal screenshot destination cannot be a symbolic link');
+    temporary = path.join(destinationParent.anchor, `.${path.basename(destination)}.${randomUUID()}.tmp`);
+    output = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let offset = 0;
+    for (;;) {
+      const { bytesRead } = await input.read(buffer, 0, buffer.length, offset);
+      if (!bytesRead) break;
+      let written = 0;
+      while (written < bytesRead) {
+        const result = await output.write(buffer, written, bytesRead - written, offset + written);
+        if (!result.bytesWritten) throw new Error('Could not finish copying the desktop portal screenshot');
+        written += result.bytesWritten;
+      }
+      offset += bytesRead;
+    }
+    await output.sync();
+    await output.close();
+    output = null;
+    await rename(temporary, destinationPath);
+    temporary = null;
+  } finally {
+    if (output) await output.close().catch(() => {});
+    if (temporary) await unlink(temporary).catch(() => {});
+    if (input) await input.close().catch(() => {});
+    if (destinationParent) await destinationParent.close().catch(() => {});
+    if (sourceParent) await sourceParent.close().catch(() => {});
+  }
+}
+
 export async function capturePortalScreenshot(destination, {
   timeoutMs = DEFAULT_TIMEOUT_MS,
   loadDbus = () => import('@jellybrick/dbus-next'),
@@ -184,12 +296,9 @@ export async function capturePortalScreenshot(destination, {
     const uri = results?.uri?.value;
     if (typeof uri !== 'string') throw new Error('desktop portal returned no screenshot URI');
     const sourceUrl = new URL(uri);
-    if (sourceUrl.protocol !== 'file:') throw new Error(`desktop portal returned unsupported URI scheme ${sourceUrl.protocol}`);
+    if (sourceUrl.protocol !== 'file:' || (sourceUrl.hostname && sourceUrl.hostname !== 'localhost')) throw new Error('desktop portal returned an unsupported file URI');
     const source = fileURLToPath(sourceUrl);
-    await copyFile(source, destination);
-    // GNOME commonly writes the portal result to ~/Pictures. The runtime owns this capture, so remove
-    // that portal-created intermediate after copying it to the caller-selected temporary location.
-    if (source !== destination) await rm(source, { force: true }).catch(() => {});
+    await copyPortalFile(source, destination);
     return destination;
   } catch (error) {
     const wrapped = new Error(`xdg-desktop-portal: ${cleanError(error)}`);

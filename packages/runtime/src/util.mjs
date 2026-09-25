@@ -76,6 +76,10 @@ export async function canonicalizePath(target) {
 }
 
 let resolvedRootsPromise;
+export async function resolvedAllowedRoots() {
+  return resolvedRoots();
+}
+
 function resolvedRoots() {
   if (!resolvedRootsPromise) {
     resolvedRootsPromise = Promise.all(runtimeConfig.allowedRoots.map(async root => {

@@ -495,15 +495,16 @@ class CdpSession {
   }
 }
 
-async function installBrowserRequestGuard(session) {
+async function installBrowserRequestGuard(session, { closeRootTarget = async () => {} } = {}) {
   const guardedSessions = new Set();
   const childSetup = new Map();
-  const enableSession = async sessionId => {
+  const enableSession = async (sessionId, { autoAttach = false } = {}) => {
     if (guardedSessions.has(sessionId)) return;
     try {
       await session.send('Network.enable', {}, sessionId, 2000);
       await session.send('Network.setBlockedURLs', { urls:['ws://*', 'wss://*'] }, sessionId, 2000);
       await session.send('Fetch.enable', { patterns:[{ urlPattern:'*' }] }, sessionId, 2000);
+      if (autoAttach) await session.send('Target.setAutoAttach', { autoAttach:true, waitForDebuggerOnStart:true, flatten:true }, sessionId, 2000);
       guardedSessions.add(sessionId);
     } catch (error) {
       await session.send('Fetch.disable', {}, sessionId, 1000).catch(() => {});
@@ -516,11 +517,18 @@ async function installBrowserRequestGuard(session) {
     if (childSetup.has(childSessionId)) return childSetup.get(childSessionId);
     const setup = (async () => {
       try {
-        await enableSession(childSessionId);
+        await enableSession(childSessionId, { autoAttach:process.env.NODE_ENV === 'production' });
         await session.send('Runtime.runIfWaitingForDebugger', {}, childSessionId, 2000);
-      } catch {
+      } catch (error) {
         const targetId = params?.targetInfo?.targetId;
-        if (targetId) await session.send('Target.closeTarget', { targetId }, '', 2000).catch(() => {});
+        let closed = false;
+        if (targetId) {
+          try {
+            await session.send('Target.closeTarget', { targetId }, '', 2000);
+            closed = true;
+          } catch {}
+        }
+        if (!closed) throw new Error(`Browser child guard failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     })();
     childSetup.set(childSessionId, setup);
@@ -543,16 +551,31 @@ async function installBrowserRequestGuard(session) {
     })();
   });
   const removeAttached = session.observe('Target.attachedToTarget', params => {
-    void guardChild(params);
+    void guardChild(params).catch(async () => {
+      await closeRootTarget().catch(() => {});
+      session.close();
+    });
   });
   await enableSession('');
   if (process.env.NODE_ENV === 'production') {
     await session.send('Target.setAutoAttach', { autoAttach:true, waitForDebuggerOnStart:true, flatten:true }, '', 2000);
-    const existing = await session.send('Target.getTargets').catch(() => ({ targetInfos:[] }));
+    let existing;
+    try {
+      existing = await session.send('Target.getTargets', {}, '', 2000);
+    } catch (error) {
+      throw new Error(`Could not enumerate browser child targets safely: ${error instanceof Error ? error.message : String(error)}`);
+    }
     for (const targetInfo of existing.targetInfos || []) {
       if (!['worker', 'service_worker', 'shared_worker', 'iframe', 'webview'].includes(targetInfo.type)) continue;
-      const attached = await session.send('Target.attachToTarget', { targetId:targetInfo.targetId, flatten:true }, '', 2000).catch(() => null);
+      const attached = await session.send('Target.attachToTarget', { targetId:targetInfo.targetId, flatten:true }, '', 2000).catch(async error => {
+        await session.send('Target.closeTarget', { targetId:targetInfo.targetId }, '', 2000).catch(() => {});
+        throw new Error(`Could not attach browser child target safely: ${error instanceof Error ? error.message : String(error)}`);
+      });
       if (attached?.sessionId) await guardChild({ sessionId:attached.sessionId, targetInfo });
+      else {
+        await session.send('Target.closeTarget', { targetId:targetInfo.targetId }, '', 2000).catch(() => {});
+        throw new Error('Browser child target did not expose a guard session');
+      }
     }
   }
   return () => {
@@ -560,6 +583,17 @@ async function installBrowserRequestGuard(session) {
     removePaused();
     removeAttached();
   };
+}
+
+async function closeBrowserTarget(endpoint, targetId) {
+  if (!targetId) return false;
+  try {
+    const base = endpoint instanceof URL ? endpoint.href : endpoint;
+    await requestJson(`/json/close/${encodeURIComponent(String(targetId))}`, base, { timeout_ms:2000 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function productionSessionKey(endpoint, target) {
@@ -570,15 +604,19 @@ function closeProductionSession(key, record) {
   if (!record) return;
   if (record.timer) clearTimeout(record.timer);
   record.removeGuard();
+  if (record.ownedTarget && record.targetId) {
+    record.session.send('Target.closeTarget', { targetId:record.targetId }, '', 2000).catch(() => {});
+    if (record.endpoint) void closeBrowserTarget(record.endpoint, record.targetId);
+  }
   record.session.send('Fetch.disable').catch(() => {});
   record.session.close();
   if (productionBrowserSessions.get(key) === record) productionBrowserSessions.delete(key);
 }
 
-function retainProductionSession(key, session, removeGuard) {
+function retainProductionSession(key, session, removeGuard, targetId, endpoint, ownedTarget = false) {
   const existing = productionBrowserSessions.get(key);
   if (existing) closeProductionSession(key, existing);
-  const record = { session, removeGuard, timer:null };
+  const record = { session, removeGuard, targetId, endpoint, ownedTarget, timer:null };
   productionBrowserSessions.set(key, record);
   const schedule = () => {
     if (record.timer) clearTimeout(record.timer);
@@ -595,26 +633,46 @@ async function createGuardedNewTab(url, args) {
   const created = await requestJson('/json/new', args.endpoint, { method:'PUT', timeout_ms:args.timeout_ms });
   if (!created?.id) throw new Error('Browser did not return a new page target');
   const endpoint = endpointUrl(args.endpoint);
-  const target = { ...created, webSocketDebuggerUrl: validatedTargetWebSocketUrl(created, endpoint) };
-  const session = await new CdpSession(target.webSocketDebuggerUrl, clamp(args.timeout_ms, 10_000, 100, 120_000)).open();
+  let target;
+  try {
+    target = { ...created, webSocketDebuggerUrl: validatedTargetWebSocketUrl(created, endpoint) };
+  } catch (error) {
+    await closeBrowserTarget(endpoint, created.id);
+    throw error;
+  }
+  let session;
+  try {
+    session = await new CdpSession(target.webSocketDebuggerUrl, clamp(args.timeout_ms, 10_000, 100, 120_000)).open();
+  } catch (error) {
+    await closeBrowserTarget(endpoint, target.id);
+    throw error;
+  }
   let removeGuard = () => {};
   let productionRecord = null;
   let productionKey = '';
+  let operationFailed = false;
   try {
-    removeGuard = await installBrowserRequestGuard(session);
+    removeGuard = await installBrowserRequestGuard(session, { closeRootTarget:() => closeBrowserTarget(endpoint, target.id) });
     if (process.env.NODE_ENV === 'production') {
       productionKey = productionSessionKey(endpoint, target);
-      productionRecord = retainProductionSession(productionKey, session, removeGuard);
+      productionRecord = retainProductionSession(productionKey, session, removeGuard, target.id, endpoint, true);
     }
     await session.send('Page.enable');
     const loaded = session.waitFor('Page.loadEventFired', clamp(args.timeout_ms, 15_000, 500, 120_000)).catch(() => null);
     const navigation = await session.send('Page.navigate', { url });
     if (loaded) await loaded;
-    const finalUrl = await evaluate(session, 'location.href').catch(() => url);
+    const finalUrl = await evaluate(session, 'location.href');
     await assertResolvedPageUrl(finalUrl);
     return { target, navigation, finalUrl };
+  } catch (error) {
+    operationFailed = true;
+    if (!productionRecord) await closeBrowserTarget(endpoint, target.id);
+    throw error;
   } finally {
-    if (productionRecord) productionRecord.schedule();
+    if (productionRecord) {
+      if (operationFailed) closeProductionSession(productionKey, productionRecord);
+      else productionRecord.schedule();
+    }
     else {
       removeGuard();
       await session.send('Fetch.disable').catch(() => {});
@@ -637,26 +695,35 @@ async function withTarget(args, callback) {
   let session = record?.session;
   let removeGuard = record?.removeGuard || (() => {});
   if (!session) {
-    session = await new CdpSession(target.webSocketDebuggerUrl, clamp(args.timeout_ms, 10_000, 100, 120_000)).open();
     try {
+      session = await new CdpSession(target.webSocketDebuggerUrl, clamp(args.timeout_ms, 10_000, 100, 120_000)).open();
       removeGuard = await installBrowserRequestGuard(session);
-      if (production) record = retainProductionSession(key, session, removeGuard);
+      if (production) record = retainProductionSession(key, session, removeGuard, target.id, endpoint);
     } catch (error) {
       removeGuard();
-      await session.send('Fetch.disable').catch(() => {});
-      session.close();
+      if (session) {
+        await session.send('Fetch.disable').catch(() => {});
+        session.close();
+      }
       throw error;
     }
   }
+  let operationFailed = false;
   try {
-    const currentUrl = await evaluate(session, 'location.href').catch(() => target.url);
+    const currentUrl = await evaluate(session, 'location.href');
     await assertResolvedPageUrl(currentUrl);
     const result = await callback(session, target);
     const finalUrl = await evaluate(session, 'location.href').catch(() => { throw new Error('Browser page URL could not be verified after the operation'); });
     await assertResolvedPageUrl(finalUrl);
     return result;
+  } catch (error) {
+    operationFailed = true;
+    throw error;
   } finally {
-    if (production && record) record.schedule();
+    if (production && record) {
+      if (operationFailed) closeProductionSession(key, record);
+      else record.schedule();
+    }
     else {
       removeGuard();
       await session.send('Fetch.disable').catch(() => {});

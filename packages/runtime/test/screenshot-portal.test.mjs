@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -129,7 +129,7 @@ test('portal crop translates negative virtual-desktop origins and bitmap scaling
   );
 });
 
-test('portal screenshot subscribes before the method call and cleans its intermediate file', async () => {
+test('portal screenshot subscribes before the method call and does not delete an untrusted URI', async () => {
   const root = mkdtempSync(join(tmpdir(), 'remcp-portal-test-'));
   const source = join(root, 'source.png');
   const destination = join(root, 'destination.png');
@@ -139,7 +139,7 @@ test('portal screenshot subscribes before the method call and cleans its interme
   const returned = await capturePortalScreenshot(destination, { loadDbus: async () => fake.module, timeoutMs: 1000 });
   assert.equal(returned, destination);
   assert.equal(readFileSync(destination, 'utf8'), 'fake-png');
-  assert.equal(existsSync(source), false, 'portal-created intermediate should be removed after copying');
+  assert.equal(existsSync(source), true, 'an untrusted portal URI is copied but never deleted');
   assert.equal(fake.disconnected(), true);
 });
 
@@ -171,7 +171,36 @@ test('portal screenshot preserves cancellation and rejects non-file responses', 
   const remote = fakeDbus({ uri: 'https://example.test/screenshot.png' });
   await assert.rejects(
     capturePortalScreenshot(destination, { loadDbus: async () => remote.module, timeoutMs: 1000 }),
-    /unsupported URI scheme https:/,
+    /unsupported file URI/,
   );
   assert.equal(remote.disconnected(), true);
+});
+
+test('portal screenshot refuses symlink sources and symlink destinations', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'remcp-portal-links-'));
+  const realSource = join(root, 'source.png');
+  const sourceLink = join(root, 'source-link.png');
+  const destination = join(root, 'destination.png');
+  const victim = join(root, 'victim.png');
+  const destinationLink = join(root, 'destination-link.png');
+  writeFileSync(realSource, Buffer.from('source-png'));
+  writeFileSync(victim, Buffer.from('victim-original'));
+  symlinkSync(realSource, sourceLink);
+  symlinkSync(victim, destinationLink);
+
+  const linkedSource = fakeDbus({ uri: pathToFileURL(sourceLink).href });
+  await assert.rejects(
+    capturePortalScreenshot(destination, { loadDbus: async () => linkedSource.module, timeoutMs:1000 }),
+    /symbolic|ELOOP|too many levels/i,
+  );
+  assert.equal(linkedSource.disconnected(), true);
+  assert.equal(existsSync(destination), false);
+
+  const linkedDestination = fakeDbus({ uri: pathToFileURL(realSource).href });
+  await assert.rejects(
+    capturePortalScreenshot(destinationLink, { loadDbus: async () => linkedDestination.module, timeoutMs:1000 }),
+    /symbolic|ELOOP|too many levels/i,
+  );
+  assert.equal(linkedDestination.disconnected(), true);
+  assert.equal(readFileSync(victim, 'utf8'), 'victim-original');
 });
