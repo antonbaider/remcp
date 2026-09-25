@@ -84,8 +84,6 @@ async function openDocumentSource(filePath) {
 async function openDocumentDirectoryPath(directory, { create = false } = {}) {
   if (!descriptorAnchorsAvailable()) {
     if (create) await mkdir(directory, { recursive:true, mode:0o700 });
-    const leaf = await lstat(directory);
-    if (leaf.isSymbolicLink() || !leaf.isDirectory()) throw new Error('Document path parent is not a safe directory');
     const handle = await open(directory, DOCUMENT_DIRECTORY_FLAGS);
     try {
       const info = await handle.stat();
@@ -110,16 +108,12 @@ async function openDocumentDirectoryPath(directory, { create = false } = {}) {
   try {
     for (const part of parts) {
       const candidate = path.join(current, part);
-      let handle;
-      try {
-        handle = await open(candidate, DOCUMENT_DIRECTORY_FLAGS);
-      } catch (error) {
-        if (!create || error?.code !== 'ENOENT') throw error;
-        await mkdir(candidate, { mode:0o700 }).catch(mkdirError => {
-          if (mkdirError?.code !== 'EEXIST') throw mkdirError;
+      if (create) {
+        await mkdir(candidate, { mode:0o700 }).catch(error => {
+          if (error?.code !== 'EEXIST') throw error;
         });
-        handle = await open(candidate, DOCUMENT_DIRECTORY_FLAGS);
       }
+      const handle = await open(candidate, DOCUMENT_DIRECTORY_FLAGS);
       const info = await handle.stat();
       if (!info.isDirectory()) {
         await handle.close().catch(() => {});

@@ -80,16 +80,12 @@ async function openDirectoryPath(absolute, { create = false } = {}) {
   try {
     for (const part of parts) {
       const candidate = path.join(current, part);
-      let handle;
-      try {
-        handle = await open(candidate, DIRECTORY_READ_NOFOLLOW);
-      } catch (error) {
-        if (!create || error?.code !== 'ENOENT') throw error;
-        await mkdir(candidate, { mode:0o700 }).catch(mkdirError => {
-          if (mkdirError?.code !== 'EEXIST') throw mkdirError;
+      if (create) {
+        await mkdir(candidate, { mode:0o700 }).catch(error => {
+          if (error?.code !== 'EEXIST') throw error;
         });
-        handle = await open(candidate, DIRECTORY_READ_NOFOLLOW);
       }
+      const handle = await open(candidate, DIRECTORY_READ_NOFOLLOW);
       const info = await handle.stat();
       if (!info.isDirectory()) {
         await handle.close().catch(() => {});
