@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { body, freshWorkspace, isError } from './helpers.mjs';
@@ -56,6 +56,16 @@ test('read_binary and write_binary transfer a file byte for byte in chunks', asy
   assert.equal(hashSource.split(' ')[1], hashCopy.split(' ')[1]);
 });
 
+test('PDF split refuses an output filename that escapes output_dir', async () => {
+  const source = join(root, 'split-fixture.pdf');
+  const outputDir = join(root, 'split-output');
+  writeFileSync(source, '%PDF-1.4\n%%EOF\n');
+  const result = await invokeTool('pdf_action', { action: 'split', path: source, output_dir: outputDir, pattern: '../escaped-%d.pdf' });
+  assert.equal(isError(result), true);
+  assert.match(body(result), /filename without path separators/i);
+  assert.equal(existsSync(join(root, 'escaped-1.pdf')), false);
+});
+
 test('archives can be created and extracted', async () => {
   const project = join(root, 'archive-project');
   mkdirSync(join(project, 'nested'), { recursive: true });
@@ -70,6 +80,119 @@ test('archives can be created and extracted', async () => {
   assert.equal(isError(extracted), false, body(extracted));
   const nested = join(out, 'archive-project', 'nested', 'b.txt');
   assert.equal(readFileSync(nested, 'utf8'), 'beta\n');
+});
+
+test('archive creation passes option-like member names after the option terminator', async () => {
+  const project = join(root, 'archive-option-project');
+  mkdirSync(project, { recursive: true });
+  const member = '--checkpoint-action=exec=printf';
+  writeFileSync(join(project, member), 'safe\n');
+  const archive = join(root, 'option-members.tar.gz');
+  const created = await invokeTool('create_archive', { paths: [project], destination: archive, format: 'tar.gz' });
+  assert.equal(isError(created), false, body(created));
+  const listing = spawnSync('tar', ['-tzf', archive], { encoding: 'utf8' });
+  assert.equal(listing.status, 0, listing.stderr);
+  assert.match(listing.stdout, /archive-option-project/);
+});
+
+test('archive extraction rejects an expanded-size bomb before writing files', {
+  skip: spawnSync('tar', ['--version'], { stdio: 'ignore' }).status !== 0,
+}, async () => {
+  const project = join(root, 'archive-bomb-project');
+  mkdirSync(project, { recursive: true });
+  const large = join(project, 'large.bin');
+  writeFileSync(large, '');
+  truncateSync(large, 513 * 1024 * 1024);
+  const archive = join(root, 'large.tar');
+  const created = spawnSync('tar', ['--sparse', '-cf', archive, '-C', project, 'large.bin'], { encoding: 'utf8' });
+  assert.equal(created.status, 0, created.stderr);
+  const destination = join(root, 'archive-bomb-output');
+  const extracted = await invokeTool('extract_archive', { archive, destination });
+  assert.equal(isError(extracted), true);
+  assert.match(body(extracted), /extraction limit|safety limit/i);
+  assert.equal(existsSync(join(destination, 'large.bin')), false);
+});
+
+test('archive extraction refuses to follow a pre-existing destination symlink', {
+  skip: spawnSync('tar', ['--version'], { stdio: 'ignore' }).status !== 0,
+}, async () => {
+  const source = join(root, 'archive-symlink-source', 'out');
+  mkdirSync(source, { recursive: true });
+  writeFileSync(join(source, 'pwned.txt'), 'nope\n');
+  const archive = join(root, 'symlink-destination.tar');
+  const packed = spawnSync('tar', ['-cf', archive, '-C', join(root, 'archive-symlink-source'), 'out'], { encoding: 'utf8' });
+  assert.equal(packed.status, 0, packed.stderr);
+  const outside = join(root, 'outside-target');
+  mkdirSync(outside, { recursive: true });
+  const destination = join(root, 'symlink-destination');
+  mkdirSync(destination, { recursive: true });
+  symlinkSync(outside, join(destination, 'out'), 'dir');
+  const extracted = await invokeTool('extract_archive', { archive, destination });
+  assert.equal(isError(extracted), true);
+  assert.match(body(extracted), /unsafe path|symlink|destination/i);
+  assert.equal(existsSync(join(outside, 'out', 'pwned.txt')), false);
+});
+
+test('archive extraction snapshots the source and enforces its size limit before inspection', {
+  skip: spawnSync('tar', ['--version'], { stdio: 'ignore' }).status !== 0,
+}, async () => {
+  const archive = join(root, 'oversized-source.tar');
+  writeFileSync(archive, '');
+  truncateSync(archive, 513 * 1024 * 1024);
+  const destination = join(root, 'oversized-source-output');
+  const extracted = await invokeTool('extract_archive', { archive, destination });
+  assert.equal(isError(extracted), true);
+  assert.match(body(extracted), /snapshot limit/i);
+  assert.equal(existsSync(destination), false);
+});
+
+test('archive extraction does not copy a destination after a symlink swap', {
+  skip: process.platform === 'win32' || spawnSync('tar', ['--version'], { stdio: 'ignore' }).status !== 0,
+}, async () => {
+  const source = join(root, 'archive-swap-source');
+  mkdirSync(source, { recursive: true });
+  writeFileSync(join(source, 'payload.txt'), 'archive payload\n');
+  const archive = join(root, 'archive-swap.tar');
+  const packed = spawnSync('tar', ['-cf', archive, '-C', source, 'payload.txt'], { encoding: 'utf8' });
+  assert.equal(packed.status, 0, packed.stderr);
+
+  const destination = join(root, 'archive-swap-destination');
+  const movedDestination = `${destination}.before-swap`;
+  const outside = join(root, 'archive-swap-outside');
+  mkdirSync(destination, { recursive: true });
+  writeFileSync(join(destination, 'existing.txt'), 'existing\n');
+  mkdirSync(outside, { recursive: true });
+  writeFileSync(join(outside, 'secret.txt'), 'outside secret\n');
+
+  const realTar = spawnSync('sh', ['-c', 'command -v tar'], { encoding: 'utf8' }).stdout.trim() || '/usr/bin/tar';
+  const bin = join(root, 'archive-swap-bin');
+  const marker = join(root, 'archive-swap.marker');
+  mkdirSync(bin, { recursive: true });
+  const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
+  const tarPath = join(bin, 'tar');
+  writeFileSync(tarPath, `#!/bin/sh
+if [ "$1" = "--version" ]; then exec ${quote(realTar)} "$@"; fi
+${quote(realTar)} "$@"
+status=$?
+if [ ! -e ${quote(marker)} ]; then
+  : > ${quote(marker)}
+  mv ${quote(destination)} ${quote(movedDestination)}
+  ln -s ${quote(outside)} ${quote(destination)}
+fi
+exit $status
+`);
+  chmodSync(tarPath, 0o700);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}${process.platform === 'win32' ? ';' : ':'}${oldPath || ''}`;
+  try {
+    const extracted = await invokeTool('extract_archive', { archive, destination });
+    assert.equal(isError(extracted), true);
+    assert.equal(existsSync(join(destination, 'secret.txt')), false);
+    assert.equal(readFileSync(join(outside, 'secret.txt'), 'utf8'), 'outside secret\n');
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
 });
 
 test('zip archives use the Info-ZIP compatible unzip probe', {

@@ -23,13 +23,13 @@ const { invokeTool } = await import('../src/invoke.mjs');
 test('a symlinked directory cannot be used to escape the allowed roots', async () => {
   const result = await invokeTool('read_file', { path: join(allowed, 'escape-dir', 'secret.txt') });
   assert.equal(isError(result), true);
-  assert.match(body(result), /resolves outside the directories this device allows/);
+  assert.match(body(result), /resolves outside the directories this device allows|symbolic link/);
 });
 
 test('a symlinked file cannot be used to escape the allowed roots', async () => {
   const result = await invokeTool('read_file', { path: join(allowed, 'escape-file.txt') });
   assert.equal(isError(result), true);
-  assert.match(body(result), /resolves outside the directories this device allows/);
+  assert.match(body(result), /resolves outside the directories this device allows|symbolic link/);
 });
 
 test('symlink escapes are refused for search, write and listing too', async () => {

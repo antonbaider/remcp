@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { expandHome } from './util.mjs';
 
 const configDir = process.env.REMCP_RUNTIME_CONFIG_DIR || path.join(os.homedir(), '.config', 'remcp');
@@ -161,7 +161,17 @@ export function persistConfigValue(key, value) {
   const file = readConfigFile();
   const next = { ...file, [key]: value };
   mkdirSync(runtimeConfigDir, { recursive: true, mode: 0o700 });
-  writeFileSync(runtimeConfigPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  const existing = lstatSync(runtimeConfigPath, { throwIfNoEntry: false });
+  if (existing && (existing.isSymbolicLink() || !existing.isFile())) throw new Error('runtime configuration path must be a regular file');
+  const temporary = `${runtimeConfigPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+    renameSync(temporary, runtimeConfigPath);
+    chmodSync(runtimeConfigPath, 0o600);
+  } catch (error) {
+    try { unlinkSync(temporary); } catch {}
+    throw error;
+  }
   return runtimeConfigPath;
 }
 

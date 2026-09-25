@@ -14,6 +14,8 @@ import { inflateRawSync, inflateSync } from 'node:zlib';
 // Nothing here writes, and nothing leaves the computer.
 
 const MAX_INFLATE_BYTES = 32 * 1024 * 1024;
+const MAX_PDF_DECODED_BYTES = 128 * 1024 * 1024;
+const MAX_PDF_STREAMS = 10_000;
 
 function inflate(buffer, raw = false) {
   try {
@@ -260,6 +262,8 @@ function pdfTextPieces(content) {
 export function readPdfText(buffer) {
   const raw = buffer.toString('latin1');
   const chunks = [];
+  let decodedBytes = 0;
+  let streamCount = 0;
   let index = 0;
   while (index < raw.length) {
     const streamStart = raw.indexOf('stream', index);
@@ -271,6 +275,9 @@ export function readPdfText(buffer) {
     if (end < 0) break;
     const body = Buffer.from(raw.slice(start, end), 'latin1');
     const decoded = body.subarray(0, 5).toString('latin1') === '<?xml' ? body : (inflate(body) ?? inflate(body, true) ?? body);
+    decodedBytes += decoded.length;
+    streamCount += 1;
+    if (decodedBytes > MAX_PDF_DECODED_BYTES || streamCount > MAX_PDF_STREAMS) throw new Error('PDF decoded content exceeds the safety limit');
     chunks.push(decoded.toString('latin1'));
     index = end + 'endstream'.length;
   }

@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { realpath } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { liveConfig, runtimeConfig } from './config.mjs';
 
 export class ToolError extends Error {}
@@ -92,6 +92,12 @@ export async function resolveSafePath(value, field = 'path') {
   if (raw.includes('\0')) fail(`${field} contains an invalid character`);
   const absolute = path.resolve(raw);
   if (!runtimeConfig.allowedRoots.length) return absolute;
+
+  const leaf = await lstat(absolute).catch(error => {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null;
+    throw error;
+  });
+  if (leaf?.isSymbolicLink()) fail(`Path is a symbolic link: ${absolute}`);
 
   // Canonicalize both sides before enforcing confinement. This matters on macOS where
   // /var is a symlink to /private/var: a safe path returned by an earlier canonicalization

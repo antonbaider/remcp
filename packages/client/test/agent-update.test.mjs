@@ -4,6 +4,16 @@ import { supervisorRestart, updateDecision } from '../src/agent.mjs';
 import { globalCliEntry, globalInstalledVersion, updateInvocationArgs } from '../src/agent-update.mjs';
 import { VERSION } from '../src/version.mjs';
 
+test('agent refuses a non-loopback plaintext relay unless explicitly overridden', async () => {
+  const { runAgent } = await import('../src/agent.mjs');
+  await assert.rejects(() => runAgent({
+    serverUrl: 'http://relay.example.test',
+    deviceToken: 'fixture-token',
+    deviceId: 'fixture-device',
+    autoUpdate: false,
+  }), /must use https/i);
+});
+
 const advertised = (cli, runtime) => ({ cli, runtime, minimum: '0.1.0' });
 const decide = input => updateDecision({ runtimePackageName: '@remcp/runtime', ...input });
 
@@ -64,7 +74,7 @@ test('the agent updates the client, the runtime, or both', () => {
 });
 
 test('only a plain version of the configured runtime package is ever installed', async () => {
-  const { isRuntimeSpecFor } = await import('../src/runtime.mjs');
+  const { isRuntimeSpecFor, normalizeRuntime } = await import('../src/runtime.mjs');
   for (const spec of ['@remcp/runtime@0.2.9', '@remcp/runtime@1.0.0-beta.1', '@remcp/runtime@0.2.9+build.4']) {
     assert.equal(isRuntimeSpecFor('@remcp/runtime', spec), true, spec);
   }
@@ -89,6 +99,8 @@ test('only a plain version of the configured runtime package is ever installed',
   });
   assert.equal(decision.needed, true);
   assert.equal(decision.runtime, '', 'the untrusted runtime spec is dropped');
+  assert.throws(() => normalizeRuntime({ kind: 'npm', packageName: '..', packageSpec: '..@1.0.0', entry: 'index.mjs' }), /invalid runtime package name/);
+  assert.throws(() => normalizeRuntime({ kind: 'npm', packageName: '@remcp/runtime', packageSpec: '@remcp/runtime@1.0.0', entry: '../index.mjs' }), /invalid runtime entry/);
 
   const hostileClient = decide({
     advertised: { cli: '@attacker/client@9.9.9', runtime: '@remcp/runtime@0.2.8', minimum: '0.1.0' },

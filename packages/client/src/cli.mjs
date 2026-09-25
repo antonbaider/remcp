@@ -8,7 +8,7 @@ import { PACKAGE_NAME, VERSION } from './version.mjs';
 import { probeFilesystemAccess } from './fs-access.mjs';
 
 import { ensureMachineId, loadConfig, readJsonFile, saveConfig, setTelemetry, telemetryState, writeJsonFile } from './cli/config.mjs';
-import { assertRuntimeTrust, pairWithDeviceCode } from './cli/connect.mjs';
+import { assertRuntimeTrust, assertSecureServerUrl, pairWithDeviceCode } from './cli/connect.mjs';
 import { diagnoseLocalRuntime, installedVersion, runtimeAllowedRoots } from './cli/doctor.mjs';
 import { configFile, npm, officialOrigin, runtimeConfigFile } from './cli/env.mjs';
 import { currentInstallationInfo, ensureMacCliCommand, installPersistentAgent, persistentServiceState, rememberCurrentInstallation, restartPersistentServiceIfInstalled, serviceInstallationInfo, uninstallPersistentService } from './cli/service.mjs';
@@ -49,16 +49,19 @@ export async function main(argv = process.argv.slice(2)) {
     // Like the desktop-app flow this mirrors: with no flags the command talks to the official
     // server, prints a code, opens the browser to approve it, and pairs. `--code` keeps working for
     // the workspace-generated command and for CI, and `--server` for self-hosted deployments.
-    const server = String(flags.server || officialOrigin).replace(/\/$/, '');
+    const server = assertSecureServerUrl(flags.server || officialOrigin, { allowInsecure: flags['allow-insecure-transport'] === true });
     const code = String(flags.code || '').replace(/\s+/g, '').toUpperCase();
     assertRuntimeTrust(server, flags);
+
     let paired;
     let deviceInitiated = false;
     if (code) {
       const response = await fetch(`${server}/api/pair/claim`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code, machineId: ensureMachineId(), name: String(flags.name || os.hostname()), hostname: os.hostname(), platform: process.platform, arch: process.arch }),
+        redirect: 'error',
+         headers: { 'content-type': 'application/json' },
+         body: JSON.stringify({ code, machineId: ensureMachineId(), name: String(flags.name || os.hostname()), hostname: os.hostname(), platform: process.platform, arch: process.arch }),
+
       });
       if (!response.ok) throw new Error(`Pairing failed (${response.status}): ${await response.text()}`);
       paired = await response.json();
@@ -81,6 +84,8 @@ export async function main(argv = process.argv.slice(2)) {
       // Remember whether this machine's owner trusted the server to name a runtime version. The
       // auto-updater must not widen that decision on its own later.
       trustRuntime: Boolean(flags['trust-runtime']) || new URL(server).origin === officialOrigin,
+      allowInsecureTransport: flags['allow-insecure-transport'] === true,
+
     };
     saveConfig(config);
     const accountEmail = String(paired.account?.email || '');
@@ -194,11 +199,12 @@ export async function main(argv = process.argv.slice(2)) {
 
   if (command === 'status' || command === 'doctor') {
     const cfg = rememberCurrentInstallation(loadConfig());
+    const server = assertSecureServerUrl(cfg.serverUrl, { allowInsecure: cfg.allowInsecureTransport === true || process.env.REMCP_ALLOW_INSECURE_TRANSPORT === 'true' });
     const [health, advertised] = await Promise.all([
-      fetchConfiguredServer(`${cfg.serverUrl}/health?fresh=${Date.now()}`, { cache:'no-store' })
+      fetchConfiguredServer(`${server}/health?fresh=${Date.now()}`, { cache:'no-store', redirect:'error' })
         .then(async response => ({ reachable:response.ok && (await response.json().catch(() => null))?.ok === true }))
         .catch(error => ({ reachable:false, error:error.message })),
-      fetchConfiguredServer(`${cfg.serverUrl}/api/agent/version?fresh=${Date.now()}`, { cache:'no-store' })
+      fetchConfiguredServer(`${server}/api/agent/version?fresh=${Date.now()}`, { cache:'no-store', redirect:'error' })
         .then(response => response.ok ? response.json() : null)
         .catch(() => null),
     ]);

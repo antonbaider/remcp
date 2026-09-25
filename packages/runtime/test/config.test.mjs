@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -49,4 +49,22 @@ test('a change applies immediately and is written back to runtime.json', async (
   assert.deepEqual(merged, { maxReadLines: 1234, telemetryEnabled: false });
 
   await assert.rejects(async () => setConfigValueTool({ key: 'allowedRoots', value: ['/'] }), /Unsupported setting/);
+});
+
+test('configuration persistence refuses a symlinked runtime.json', () => {
+  const configPath = join(dir, 'runtime.json');
+  const backupPath = join(dir, 'runtime.json.backup');
+  const targetPath = join(dir, 'outside.json');
+  renameSync(configPath, backupPath);
+  writeFileSync(targetPath, '{"maxReadLines":7}\n');
+  symlinkSync(targetPath, configPath);
+  try {
+    assert.throws(() => persistConfigValue('maxReadLines', 8), /regular file/);
+    assert.equal(readFileSync(targetPath, 'utf8'), '{"maxReadLines":7}\n');
+  } finally {
+    rmSync(configPath, { force: true });
+    renameSync(backupPath, configPath);
+    rmSync(targetPath, { force: true });
+  }
+  void existsSync;
 });

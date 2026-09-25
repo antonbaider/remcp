@@ -1,6 +1,8 @@
 import path from 'node:path';
 import process from 'node:process';
-import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
+import { copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { readDocxText, readPdfText } from '../documents.mjs';
 import { resolveSafePath, text } from '../util.mjs';
 import {
@@ -26,6 +28,51 @@ function xmlUnescape(value) {
 
 const MAX_OOXML_ENTRIES = 10_000;
 const MAX_OOXML_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
+const MAX_DOCUMENT_BYTES = 128 * 1024 * 1024;
+
+async function readDocumentFile(filePath) {
+  const info = await lstat(filePath);
+  if (!info.isFile()) throw new Error('Document path must be a regular file');
+  if (info.size > MAX_DOCUMENT_BYTES) throw new Error(`Document is too large (maximum ${MAX_DOCUMENT_BYTES} bytes)`);
+  return readFile(filePath);
+}
+
+async function copyRegularNoFollow(source, destination) {
+  const sourceHandle = await open(source, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+  try {
+    const info = await sourceHandle.stat();
+    if (!info.isFile()) throw new Error('Document path must be a regular file');
+    if (info.size > MAX_DOCUMENT_BYTES) throw new Error(`Document is too large (maximum ${MAX_DOCUMENT_BYTES} bytes)`);
+    const destinationHandle = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0), 0o600);
+    try {
+      await destinationHandle.writeFile(await sourceHandle.readFile());
+    } finally {
+      await destinationHandle.close();
+    }
+  } finally {
+    await sourceHandle.close();
+  }
+}
+
+async function assertSafeExtractedTree(root, state = { entries: 0 }) {
+  const info = await lstat(root);
+  if (info.isSymbolicLink()) throw new Error('OOXML archive contains a symbolic link');
+  if (!info.isDirectory() && !info.isFile()) throw new Error('OOXML archive contains a special file');
+  state.entries += 1;
+  if (state.entries > MAX_OOXML_ENTRIES) throw new Error('OOXML archive has too many extracted entries');
+  if (!info.isDirectory()) return;
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    await assertSafeExtractedTree(path.join(root, entry.name), state);
+  }
+}
+
+function safePdfPattern(value, fallback) {
+  const pattern = String(value || fallback);
+  if (!pattern || pattern.length > 240 || pattern.includes('\0') || path.isAbsolute(pattern) || /[\\/]/.test(pattern) || pattern.split(/[\\/]/).includes('..')) {
+    throw new Error('PDF split pattern must be a filename without path separators');
+  }
+  return pattern;
+}
 
 function safeArchiveEntry(name) {
   const normalized = String(name || '').replace(/\\/g, '/');
@@ -51,14 +98,22 @@ async function validateZipArchive(source) {
 }
 
 async function extractZip(source, destination) {
-  await validateZipArchive(source);
-  await mkdir(destination, { recursive:true });
-  if (process.platform === 'win32') {
-    await runPowerShell(`Add-Type -AssemblyName System.IO.Compression.FileSystem;[IO.Compression.ZipFile]::ExtractToDirectory('${escapePowerShellSingle(source)}','${escapePowerShellSingle(destination)}')`, { label:'extract OOXML archive', timeout:30_000 });
-    return;
+  const sourceDirectory = await tempDir('remcp-ooxml-source-');
+  const sourceCopy = path.join(sourceDirectory, 'source.zip');
+  try {
+    await copyRegularNoFollow(source, sourceCopy);
+    await validateZipArchive(sourceCopy);
+    await mkdir(destination, { recursive:true });
+    if (process.platform === 'win32') {
+      await runPowerShell(`Add-Type -AssemblyName System.IO.Compression.FileSystem;[IO.Compression.ZipFile]::ExtractToDirectory('${escapePowerShellSingle(sourceCopy)}','${escapePowerShellSingle(destination)}')`, { label:'extract OOXML archive', timeout:30_000 });
+    } else {
+      if (!commandExists('unzip')) unavailable('OOXML document editing', 'unzip is required');
+      await runFile('unzip', ['-qq',sourceCopy,'-d',destination], { label:'extract OOXML archive', timeout:30_000 });
+    }
+    await assertSafeExtractedTree(destination);
+  } finally {
+    await removeTemp(sourceDirectory);
   }
-  if (!commandExists('unzip')) unavailable('OOXML document editing', 'unzip is required');
-  await runFile('unzip', ['-qq',source,'-d',destination], { label:'extract OOXML archive', timeout:30_000 });
 }
 
 async function createZip(sourceDir, destination) {
@@ -69,6 +124,26 @@ async function createZip(sourceDir, destination) {
   }
   if (!commandExists('zip')) unavailable('OOXML document editing', 'zip is required');
   await runFile('zip', ['-qr',destination,'.'], { cwd:sourceDir, label:'create OOXML archive', timeout:30_000 });
+}
+
+async function commitDocumentOutput(staged, destination) {
+  try {
+    await rename(staged, destination);
+    return;
+  } catch (error) {
+    if (!['EEXIST', 'EPERM', 'ENOTEMPTY'].includes(error?.code)) throw error;
+  }
+  const backup = `${destination}.remcp-old-${randomUUID()}`;
+  let moved = false;
+  try {
+    await rename(destination, backup);
+    moved = true;
+    await rename(staged, destination);
+    await rm(backup, { force: true }).catch(() => {});
+  } catch (error) {
+    if (moved && !await lstat(destination).catch(() => null)) await rename(backup, destination).catch(() => {});
+    throw error;
+  }
 }
 
 async function ensureCreateTargetIsNew(filePath) {
@@ -188,7 +263,7 @@ async function readPdfDocument(filePath, data) {
 export async function readDocument(args) {
   const filePath = await resolveSafePath(args.path,'path');
   const lower = filePath.toLowerCase();
-  const data = await readFile(filePath);
+  const data = await readDocumentFile(filePath);
   if (lower.endsWith('.docx')) return text(readDocxText(data));
   if (lower.endsWith('.pdf')) return text(await readPdfDocument(filePath,data));
   if (lower.endsWith('.xlsx')) return jsonResult(await readXlsx(filePath,args));
@@ -275,8 +350,12 @@ export async function editSpreadsheet(args) {
   const edits = expandSpreadsheetEdits(requestedEdits);
   const output = args.output ? await resolveSafePath(args.output,'output') : filePath;
   const dir = await tempDir(create ? 'remcp-xlsx-create-' : 'remcp-xlsx-edit-');
-  const tempOut = path.join(path.dirname(output), `.remcp-${Date.now()}-${path.basename(output)}`);
+  let outputStage = '';
+  let tempOut = '';
   try {
+    await mkdir(path.dirname(output), { recursive:true });
+    outputStage = await mkdtemp(path.join(path.dirname(output), '.remcp-xlsx-output-'));
+    tempOut = path.join(outputStage, path.basename(output));
     if (create) {
       await ensureCreateTargetIsNew(filePath);
       await createBlankXlsxTree(dir, optionalString(args.sheet));
@@ -290,12 +369,12 @@ export async function editSpreadsheet(args) {
     let xml = await readFile(worksheetPath,'utf8');
     for (const edit of edits) xml = setWorksheetCell(xml,String(edit.cell || '').toUpperCase(),edit.value,edit.formula);
     await writeFile(worksheetPath,xml,'utf8');
-    await mkdir(path.dirname(output), { recursive:true });
     await createZip(dir,tempOut);
-    await copyFile(tempOut,output);
+    await commitDocumentOutput(tempOut,output);
     return jsonResult({ path:output, sheet:sheet.name, edited_cells:edits.length, bytes:(await stat(output)).size, created:create });
   } finally {
-    await rm(tempOut,{force:true}).catch(() => {});
+    if (tempOut) await rm(tempOut,{force:true}).catch(() => {});
+    if (outputStage) await rm(outputStage,{recursive:true, force:true}).catch(() => {});
     await removeTemp(dir);
   }
 }
@@ -356,9 +435,13 @@ export async function editDocument(args) {
   if (!operations.length || operations.length > 100) throw new Error('operations must contain 1..100 edits');
   const output = args.output ? await resolveSafePath(args.output,'output') : filePath;
   const dir = await tempDir(create ? 'remcp-docx-create-' : 'remcp-docx-edit-');
-  const tempOut = path.join(path.dirname(output), `.remcp-${Date.now()}-${path.basename(output)}`);
+  let outputStage = '';
+  let tempOut = '';
   let changes = 0;
   try {
+    await mkdir(path.dirname(output), { recursive:true });
+    outputStage = await mkdtemp(path.join(path.dirname(output), '.remcp-docx-output-'));
+    tempOut = path.join(outputStage, path.basename(output));
     if (create) {
       await ensureCreateTargetIsNew(filePath);
       await createBlankDocxTree(dir);
@@ -383,12 +466,12 @@ export async function editDocument(args) {
       }
     }
     await writeFile(documentPath,xml,'utf8');
-    await mkdir(path.dirname(output), { recursive:true });
     await createZip(dir,tempOut);
-    await copyFile(tempOut,output);
+    await commitDocumentOutput(tempOut,output);
     return jsonResult({ path:output, operations:operations.length, changes, bytes:(await stat(output)).size, created:create });
   } finally {
-    await rm(tempOut,{force:true}).catch(() => {});
+    if (tempOut) await rm(tempOut,{force:true}).catch(() => {});
+    if (outputStage) await rm(outputStage,{recursive:true, force:true}).catch(() => {});
     await removeTemp(dir);
   }
 }
@@ -437,12 +520,12 @@ export async function pdfAction(args) {
   const action = requireEnum(args.action,'action',['merge','split','extract_pages','annotations','info']);
   if (action === 'annotations') {
     const source = await resolveSafePath(args.path,'path');
-    return jsonResult({ path:source, annotations:pdfAnnotations(await readFile(source)) });
+    return jsonResult({ path:source, annotations:pdfAnnotations(await readDocumentFile(source)) });
   }
   if (action === 'info') {
     const source = await resolveSafePath(args.path,'path');
     if (commandExists('pdfinfo')) return text((await runFile('pdfinfo',[source],{label:'pdfinfo'})).stdout);
-    const data = await readFile(source); return jsonResult({ path:source, bytes:data.length, annotation_count:pdfAnnotations(data).length });
+    const data = await readDocumentFile(source); return jsonResult({ path:source, bytes:data.length, annotation_count:pdfAnnotations(data).length });
   }
   if (action === 'merge') {
     const requested = Array.isArray(args.paths) ? args.paths : [];
@@ -456,8 +539,11 @@ export async function pdfAction(args) {
   }
   const source=await resolveSafePath(args.path,'path');
   if(action==='split'){
-    const outputDir=await resolveSafePath(args.output_dir || path.dirname(source),'output_dir'); await mkdir(outputDir,{recursive:true});
-    const pattern=path.join(outputDir,optionalString(args.pattern)||`${path.basename(source,path.extname(source))}-%d.pdf`);
+    const requestedOutputDir=await resolveSafePath(args.output_dir || path.dirname(source),'output_dir');
+    await mkdir(requestedOutputDir,{recursive:true});
+    const outputDir=await resolveSafePath(requestedOutputDir,'output_dir');
+    const patternName=safePdfPattern(optionalString(args.pattern),`${path.basename(source,path.extname(source))}-%d.pdf`);
+    const pattern=path.join(outputDir,patternName);
     if(commandExists('pdfseparate')) await runFile('pdfseparate',[source,pattern],{label:'PDF split',timeout:60_000});
     else unavailable('PDF split','install poppler-utils (pdfseparate)');
     return jsonResult({action,output_dir:outputDir,files:(await readdir(outputDir)).filter(name=>name.toLowerCase().endsWith('.pdf')).sort()});

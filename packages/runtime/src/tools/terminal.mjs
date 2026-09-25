@@ -221,8 +221,10 @@ export async function interactWithProcessTool(args, extra = {}) {
   const session = getProcessSession(pid);
   if (!session) fail(`No ReMCP session with pid ${pid}`);
   if (session.exited) fail(`Process ${pid} already exited`);
-  const input = typeof args.input === 'string' ? args.input : fail('input must be a string');
-  const timeoutMs = clampInteger(args.timeout_ms, 1000, 0, 120000);
+   const input = typeof args.input === 'string' ? args.input : fail('input must be a string');
+   assertAllowedCommand(input);
+   const timeoutMs = clampInteger(args.timeout_ms, 1000, 0, 120000);
+
   session.cursor = session.droppedLines + session.lines.length;
   session.waitCursor = session.cursor;
   session.lastPartialRead = null;

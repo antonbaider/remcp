@@ -57,13 +57,13 @@ test('manual update is a no-op when the running and managed service release pair
 });
 
 test('manual update follows the trusted server release pair instead of keeping a stale runtime pin', async () => {
-  const requestedUrls = [];
+  const requests = [];
   const result = await resolveUpdateTargets({
     cfg: officialConfig,
     flags: {},
     env: {},
-    fetchImpl: async url => {
-      requestedUrls.push(String(url));
+    fetchImpl: async (url, options) => {
+      requests.push({ url: String(url), options });
       return {
         ok: true,
         async json() { return { cli: currentClient, runtime: currentRuntime }; },
@@ -71,7 +71,8 @@ test('manual update follows the trusted server release pair instead of keeping a
     },
   });
 
-  assert.deepEqual(requestedUrls, ['https://remcp.site/api/agent/version']);
+  assert.deepEqual(requests.map(request => request.url), ['https://remcp.site/api/agent/version']);
+  assert.equal(requests[0].options.redirect, 'error');
   assert.equal(result.clientSpec, currentClient);
   assert.equal(result.runtimeSpec, currentRuntime);
   assert.equal(result.persistRuntime, true);
@@ -94,6 +95,18 @@ test('an untrusted custom server cannot silently choose code for a manual update
   assert.equal(result.persistRuntime, false);
   assert.equal(result.installable, true);
   assert.equal(result.source, 'configured');
+});
+
+test('manual update refuses an insecure configured server before fetching release metadata', async () => {
+  await assert.rejects(
+    () => resolveUpdateTargets({
+      cfg: { ...officialConfig, serverUrl: 'http://custom.example', trustRuntime: true },
+      flags: {},
+      env: {},
+      fetchImpl: async () => { throw new Error('must not fetch over insecure transport'); },
+    }),
+    /Remote server must use https/,
+  );
 });
 
 test('trusted-server discovery failure refuses a partial update', async () => {

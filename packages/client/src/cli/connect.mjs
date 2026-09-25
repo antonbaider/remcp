@@ -29,6 +29,18 @@ export function openInBrowser(url) {
   } catch {}
 }
 
+export function assertSecureServerUrl(value, { allowInsecure = false } = {}) {
+  let url;
+  try { url = new URL(String(value || '')); } catch { throw new Error('server must be a valid URL'); }
+  if (!['https:', 'http:'].includes(url.protocol)) throw new Error('server must use http or https');
+  if (url.username || url.password) throw new Error('server must not embed credentials');
+  const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname.toLowerCase());
+  if (url.protocol === 'http:' && !loopback && !allowInsecure) throw new Error('Remote server must use https');
+  url.hash = '';
+  url.search = '';
+  return url.href.replace(/\/$/, '');
+}
+
 const TRANSIENT_FETCH_RETRY_DELAY_MS = 150;
 
 async function fetchWithTransientRetry(url, options) {
@@ -48,7 +60,9 @@ async function fetchWithTransientRetry(url, options) {
 // browser while signed in, and this process collects the credential by polling. The device never
 // sees a browser session or an account password.
 export async function pairWithDeviceCode(server, flags) {
+  server = assertSecureServerUrl(server, { allowInsecure: flags?.['allow-insecure-transport'] === true });
   const authorization = await fetchWithTransientRetry(`${server}/oauth/device_authorization`, {
+    redirect: 'error',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -73,6 +87,7 @@ export async function pairWithDeviceCode(server, flags) {
     await sleep(intervalMs);
     const response = await fetchWithTransientRetry(`${server}/oauth/token`, {
       method: 'POST',
+      redirect: 'error',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',

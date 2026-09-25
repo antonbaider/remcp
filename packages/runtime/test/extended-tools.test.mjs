@@ -8,7 +8,7 @@ import {
   extendedToolDefinitions,
   extendedToolHandlers,
 } from '../src/extended/catalog.mjs';
-import { browserActionInputValue, browserAutoLaunchAvailable, browserNavigate, browserSnapshot, browserTabs } from '../src/extended/browser.mjs';
+import { browserActionInputValue, browserAutoLaunchAvailable, browserEvaluate, browserNavigate, browserSnapshot, browserTabs, browserWait } from '../src/extended/browser.mjs';
 import { parseAvfoundationScreenInput, recordScreen, recordScreenAvailable, resolveRecordScreenFfmpeg } from '../src/extended/diagnostics.mjs';
 import { hasTool, invokeTool } from '../src/invoke.mjs';
 
@@ -287,6 +287,81 @@ test('browser_navigate new_tab bootstraps CDP when no page target exists', async
 test('browser CDP rejects non-loopback endpoints before network access', async () => {
   await assert.rejects(() => browserTabs({ endpoint: 'https://example.com:9222' }), /loopback-only/i);
   await assert.rejects(() => browserTabs({ endpoint: 'file:///tmp/socket' }), /http or https/i);
+});
+
+test('browser navigation blocks local network destinations by default', async () => {
+  const flags = ['REMCP_BROWSER_ALLOW_LOCAL_NAVIGATION', 'REMCP_BROWSER_ALLOW_LOCAL', 'REMCP_ALLOW_LOCAL_BROWSER_NAVIGATION'];
+  const previous = flags.map(name => [name, process.env[name]]);
+  for (const name of flags) delete process.env[name];
+  try {
+    for (const url of [
+      'http://127.0.0.2:3000/',
+      'http://10.0.0.1/',
+      'http://172.16.0.1/',
+      'http://192.168.1.1/',
+      'http://169.254.169.254/latest/meta-data/',
+      'http://[::1]/',
+      'http://[fd00::1]/',
+      'http://[fe80::1]/',
+      'http://localhost/',
+    ]) {
+      await assert.rejects(() => browserNavigate({ action: 'url', url }), /loopback, private, or link-local/i, url);
+    }
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test('local browser navigation requires an explicit environment opt-in and discovery redirects fail closed', async () => {
+  const flags = ['REMCP_BROWSER_ALLOW_LOCAL_NAVIGATION', 'REMCP_BROWSER_ALLOW_LOCAL', 'REMCP_ALLOW_LOCAL_BROWSER_NAVIGATION'];
+  const previous = flags.map(name => [name, process.env[name]]);
+  const originalFetch = globalThis.fetch;
+  let seen;
+  process.env.REMCP_BROWSER_ALLOW_LOCAL_NAVIGATION = 'true';
+  globalThis.fetch = async (url, options = {}) => {
+    seen = { url: String(url), options };
+    return new Response(JSON.stringify({
+      id: 'local-page',
+      type: 'page',
+      title: '',
+      url: 'http://127.0.0.1:3000/',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/local-page',
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const result = await browserNavigate({ endpoint: 'http://127.0.0.1:9222', action: 'new_tab', url: 'http://127.0.0.1:3000/' });
+    assert.equal(result.structuredContent.target_id, 'local-page');
+    assert.equal(seen.options.redirect, 'error');
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test('browser navigation and evaluation refuse local-file schemes', async () => {
+  await assert.rejects(() => browserNavigate({ action: 'url', url: 'file:///etc/passwd' }), /must use http or https/i);
+  await assert.rejects(() => browserEvaluate({ expression: 'location.href = "file:///etc/passwd"' }), /blocked local browser scheme/i);
+  await assert.rejects(() => browserEvaluate({ expression: 'location.href = "http://127.0.0.1:3000/"' }), /blocked private browser destination/i);
+});
+
+test('browser CDP rejects file pages and expression waits that target local schemes', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify([{
+    id: 'file-page', type: 'page', title: 'Local', url: 'file:///etc/passwd',
+    webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/file-page',
+  }]), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    await assert.rejects(() => browserSnapshot({ endpoint: 'http://127.0.0.1:9222' }), /no debuggable|unsafe|must use/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  await assert.rejects(() => browserWait({ condition: 'expression', expression: 'location.href = "file:///etc/passwd"' }), /blocked local browser scheme/i);
 });
 
 test('browser CDP rejects a non-loopback WebSocket target returned by a local endpoint', async () => {

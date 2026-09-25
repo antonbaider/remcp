@@ -61,3 +61,21 @@ test('the guardrail still catches dangerous commands behind wrappers and separat
     assert.match(body(result), /blocked by ReMCP device policy/);
   }
 });
+
+test('the guardrail catches nested interpreters, long rm flags, busybox and service power actions', async () => {
+  for (const command of [
+    "sh -c 'rm -rf /'",
+    'rm --recursive --force /',
+    'busybox rm -rf /',
+    'systemctl poweroff',
+    'rm -rf "/"',
+    "rm -rf '/'",
+    'dd if=/dev/zero of="/dev/sda"',
+    'rm -rf "$HOME"',
+    "python3 -c 'import os; os.system(\\\"rm -rf /\\\")'",
+  ]) {
+    const result = await invokeTool('start_process', { command, timeout_ms: 50 });
+    assert.equal(isError(result), true, `expected ${command} to be blocked`);
+    assert.match(body(result), /blocked by ReMCP device policy/);
+  }
+});

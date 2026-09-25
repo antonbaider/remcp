@@ -1,12 +1,17 @@
 import process from 'node:process';
 import os from 'node:os';
 import path from 'node:path';
+import { isIP } from 'node:net';
 import { existsSync, mkdirSync } from 'node:fs';
 import { resolveSafePath } from '../util.mjs';
 import { clamp, commandExists, jsonResult, optionalString, requireEnum, spawnDetached, unavailable } from './common.mjs';
 
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:9222';
 const MAX_DISCOVERY_BYTES = 8 * 1024 * 1024;
+const MAX_CDP_MESSAGE_BYTES = 16 * 1024 * 1024;
+const MAX_EVALUATION_BYTES = 256 * 1024;
+const BROWSER_PROTOCOLS = new Set(['http:', 'https:']);
+const BLOCKED_BROWSER_SCHEME = /(?:^|[\s"'`(=])(?:file|chrome|devtools|view-source|filesystem|blob):/i;
 
 let browserLaunchPromise = null;
 
@@ -86,9 +91,65 @@ function boundedText(value, max = 1000) {
   return text.length <= max ? text : `${text.slice(0, max)}…`;
 }
 
+function normalizedHost(hostname) {
+  return String(hostname || '').replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+}
+
 function isLoopbackHost(hostname) {
-  const host = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
+  const host = normalizedHost(hostname);
   return ['localhost', '127.0.0.1', '::1'].includes(host);
+}
+
+function localBrowserNavigationAllowed() {
+  return ['REMCP_BROWSER_ALLOW_LOCAL_NAVIGATION', 'REMCP_BROWSER_ALLOW_LOCAL', 'REMCP_ALLOW_LOCAL_BROWSER_NAVIGATION']
+    .some(name => ['1', 'true', 'yes', 'on'].includes(String(process.env[name] || '').trim().toLowerCase()));
+}
+
+function isPrivateIpv4(host) {
+  if (isIP(host) !== 4) return false;
+  const parts = host.split('.').map(Number);
+  const [a, b, c] = parts;
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 100 && b >= 64 && b <= 127)
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 0 && c === 0)
+    || (a === 192 && b === 0 && c === 2)
+    || (a === 192 && b === 168)
+    || (a === 198 && (b === 18 || b === 19))
+    || (a === 198 && b === 51 && c === 100)
+    || (a === 203 && b === 0 && c === 113)
+    || a >= 224;
+}
+
+function isPrivateIpv6(host) {
+  if (isIP(host) !== 6) return false;
+  if (host === '::' || host === '::1') return true;
+  if (/^f[cd]/.test(host) || /^fe[89ab]/.test(host) || host.startsWith('ff')) return true;
+  const mapped = host.match(/^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mapped) {
+    const high = Number.parseInt(mapped[1], 16);
+    const low = Number.parseInt(mapped[2], 16);
+    return isPrivateIpv4([high >> 8, high & 255, low >> 8, low & 255].join('.'));
+  }
+  return false;
+}
+
+function isPrivateBrowserHost(hostname) {
+  const host = normalizedHost(hostname);
+  if (!host) return true;
+  if (isPrivateIpv4(host) || isPrivateIpv6(host)) return true;
+  return host === 'localhost'
+    || host.endsWith('.localhost')
+    || host.endsWith('.local')
+    || host.endsWith('.internal')
+    || host.endsWith('.home.arpa')
+    || host.endsWith('.lan')
+    || host === 'localhost.localdomain'
+    || host === 'ip6-localhost'
+    || host === 'ip6-loopback';
 }
 
 function endpointUrl(value) {
@@ -100,13 +161,51 @@ function endpointUrl(value) {
   return url;
 }
 
+function safeBrowserUrl(value, field = 'url') {
+  let url;
+  try { url = new URL(String(value || '')); }
+  catch { throw new Error(`${field} must be a valid absolute URL`); }
+  if (!BROWSER_PROTOCOLS.has(url.protocol)) throw new Error(`${field} must use http or https`);
+  if (url.username || url.password) throw new Error(`${field} must not embed credentials`);
+  if (!localBrowserNavigationAllowed() && isPrivateBrowserHost(url.hostname)) {
+    throw new Error(`${field} must not target loopback, private, or link-local addresses`);
+  }
+  return url.href;
+}
+
+function safePageUrl(value, field = 'browser page URL') {
+  if (String(value || '') === 'about:blank') return value;
+  return safeBrowserUrl(value, field);
+}
+
+function expressionHasPrivateDestination(expression) {
+  const urls = expression.match(/https?:\/\/[^\s"'`<>]+/gi) || [];
+  return urls.some(value => {
+    try { return isPrivateBrowserHost(new URL(value).hostname); }
+    catch { return false; }
+  });
+}
+
+function safeEvaluationExpression(value) {
+  const expression = String(value || '');
+  if (!expression.trim()) throw new Error('expression is required');
+  if (expression.includes('\0') || Buffer.byteLength(expression, 'utf8') > MAX_EVALUATION_BYTES) {
+    throw new Error(`expression must be at most ${MAX_EVALUATION_BYTES} bytes`);
+  }
+  if (BLOCKED_BROWSER_SCHEME.test(expression)) throw new Error('expression contains a blocked local browser scheme');
+  if (!localBrowserNavigationAllowed() && expressionHasPrivateDestination(expression)) {
+    throw new Error('expression contains a blocked private browser destination');
+  }
+  return expression;
+}
+
 async function requestJson(pathname, endpoint, options = {}) {
   const base = endpointUrl(endpoint);
   const url = new URL(pathname, base);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), clamp(options.timeout_ms, 5000, 100, 30_000));
   try {
-    const response = await fetch(url, { method: options.method || 'GET', signal: controller.signal });
+    const response = await fetch(url, { method: options.method || 'GET', signal: controller.signal, redirect: 'error' });
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
     const declared = Number(response.headers.get('content-length') || 0);
     if (declared > MAX_DISCOVERY_BYTES) throw new Error(`CDP discovery response is too large (${declared} bytes)`);
@@ -144,7 +243,11 @@ export async function browserCapabilityAvailable(endpoint, timeoutMs = 500) {
 export async function listBrowserTargets(endpoint) {
   await ensureBrowserEndpoint(endpoint);
   const list = await requestJson('/json/list', endpoint);
-  return Array.isArray(list) ? list : [];
+  if (!Array.isArray(list)) return [];
+  return list.filter(item => {
+    if (!item || item.type !== 'page' || !item.webSocketDebuggerUrl) return false;
+    try { safePageUrl(item.url); return true; } catch { return false; }
+  });
 }
 
 async function chooseTarget(args = {}) {
@@ -152,12 +255,17 @@ async function chooseTarget(args = {}) {
   const id = optionalString(args.target_id || args.targetId);
   const title = optionalString(args.title);
   const urlContains = optionalString(args.url_contains || args.urlContains);
-  const target = targets.find(item =>
+  const matched = targets.find(item =>
     (!id || item.id === id) &&
     (!title || String(item.title || '').toLowerCase().includes(title.toLowerCase())) &&
     (!urlContains || String(item.url || '').toLowerCase().includes(urlContains.toLowerCase()))
-  ) || targets[0];
-  if (!target) unavailable('Browser control', 'no debuggable page target is available');
+  );
+  const hasSelector = Boolean(id || title || urlContains);
+  const target = matched || (hasSelector ? null : targets[0]);
+  if (!target) {
+    if (hasSelector) throw new Error('No browser page target matched the requested selector');
+    unavailable('Browser control', 'no debuggable page target is available');
+  }
   let socketUrl;
   try { socketUrl = new URL(String(target.webSocketDebuggerUrl)); }
   catch { throw new Error('Browser returned an invalid CDP WebSocket URL'); }
@@ -192,8 +300,13 @@ class CdpSession {
   }
 
   onMessage(event) {
+    const raw = String(event.data);
+    if (Buffer.byteLength(raw, 'utf8') > MAX_CDP_MESSAGE_BYTES) {
+      this.close();
+      return;
+    }
     let message;
-    try { message = JSON.parse(String(event.data)); } catch { return; }
+    try { message = JSON.parse(raw); } catch { return; }
     if (message.id && this.pending.has(message.id)) {
       const pending = this.pending.get(message.id);
       this.pending.delete(message.id);
@@ -277,8 +390,13 @@ class CdpSession {
 
 async function withTarget(args, callback) {
   const target = await chooseTarget(args);
+  safePageUrl(target.url);
   const session = await new CdpSession(target.webSocketDebuggerUrl, clamp(args.timeout_ms, 10_000, 100, 120_000)).open();
-  try { return await callback(session, target); } finally { session.close(); }
+  try {
+    const currentUrl = await evaluate(session, 'location.href').catch(() => target.url);
+    safePageUrl(currentUrl);
+    return await callback(session, target);
+  } finally { session.close(); }
 }
 
 async function evaluate(session, expression, awaitPromise = true) {
@@ -338,8 +456,9 @@ async function waitForHistoryReady(session, expectedUrl, timeoutMs) {
 }
 
 export async function browserNavigate(args = {}) {
-  const url = optionalString(args.url);
-  const action = requireEnum(args.action || (url ? 'url' : 'reload'), 'action', ['url','new_tab','back','forward','reload']);
+  const requestedUrl = optionalString(args.url);
+  const action = requireEnum(args.action || (requestedUrl ? 'url' : 'reload'), 'action', ['url','new_tab','back','forward','reload']);
+  const url = ['url','new_tab'].includes(action) ? safeBrowserUrl(requestedUrl) : null;
   if (['url','new_tab'].includes(action) && !url) throw new Error('url is required when action=url or new_tab');
   if (action === 'new_tab') {
     await ensureBrowserEndpoint(args.endpoint);
@@ -347,7 +466,7 @@ export async function browserNavigate(args = {}) {
     return jsonResult({
       target_id:created?.id || null,
       action,
-      url:created?.url || url,
+      url:created?.url ? safePageUrl(created.url) : url,
       title:created?.title || '',
     });
   }
@@ -372,7 +491,7 @@ export async function browserNavigate(args = {}) {
       const nextIndex = action === 'back' ? current - 1 : current + 1;
       const entry = Array.isArray(history.entries) ? history.entries[nextIndex] : null;
       if (!entry) throw new Error(`Cannot navigate ${action}: no history entry is available`);
-      historyUrl = entry.url || null;
+      historyUrl = entry.url ? safePageUrl(entry.url, 'history URL') : null;
       await session.send('Page.navigateToHistoryEntry', { entryId: entry.id });
     }
     if (loaded) await loaded;
@@ -380,6 +499,7 @@ export async function browserNavigate(args = {}) {
       await waitForHistoryReady(session, historyUrl, timeoutMs);
     }
     const currentUrl = await evaluate(session, 'location.href').catch(() => url || target.url || null);
+    if (currentUrl) safePageUrl(currentUrl);
     return jsonResult({ target_id: target.id, action, url: currentUrl, frame_id: frameId, error_text: errorText });
   });
 }
@@ -701,6 +821,7 @@ export async function browserWait(args = {}) {
   const idleMs = clamp(args.idle_ms, 500, 100, 10_000);
   const wanted = optionalString(args.selector || args.text || args.value || args.expression);
   if (['selector','text','url_contains','expression'].includes(condition) && !wanted) throw new Error('selector/text/value/expression is required for this condition');
+  if (condition === 'expression') safeEvaluationExpression(wanted);
   return withTarget(args, async (session, target) => {
     const started = Date.now();
     const initialUrl = await evaluate(session, 'location.href').catch(() => target.url || '');
@@ -770,8 +891,7 @@ export async function browserWait(args = {}) {
 }
 
 export async function browserEvaluate(args) {
-  const expression = optionalString(args.expression);
-  if (!expression) throw new Error('expression is required');
+  const expression = safeEvaluationExpression(args.expression);
   return withTarget(args, async (session, target) => jsonResult({ target_id: target.id, value: await evaluate(session, expression, args.await_promise !== false) }));
 }
 

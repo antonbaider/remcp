@@ -98,7 +98,7 @@ jobs:
       # answers an unauthenticated PUT with 404.
       - name: Use an npm that supports trusted publishing
         run: |
-          npm install --global npm@latest
+          npm install --global npm@11.5.1
           npm --version
       # Trusted publishing: npm exchanges the workflow's GitHub OIDC token for a
       # short-lived credential, so no NPM_TOKEN secret and no one-time password are

@@ -9,6 +9,7 @@ import { isRuntimeSpecFor, normalizeRuntime } from '../runtime.mjs';
 import { PACKAGE_NAME, VERSION } from '../version.mjs';
 
 import { loadConfig, saveConfig } from './config.mjs';
+import { assertSecureServerUrl } from './connect.mjs';
 import { installedVersion } from './doctor.mjs';
 import { linuxServiceFile, macServiceFile, officialOrigin } from './env.mjs';
 import { currentInstallationInfo, ensureMacCliCommand, ensureServiceIfRecorded, installationVersionsAtCliPath, npmGlobalUpdate, persistentServiceExpected, rememberCurrentInstallation, restartPersistentServiceIfInstalled, serviceInstallationInfo, syncKnownInstallations } from './service.mjs';
@@ -48,11 +49,15 @@ export async function resolveUpdateTargets({
   env = process.env,
   fetchImpl = globalThis.fetch,
 }) {
+  const validatedServerUrl = assertSecureServerUrl(cfg.serverUrl, {
+    allowInsecure: cfg.allowInsecureTransport === true || flags['allow-insecure-transport'] === true || env.REMCP_ALLOW_INSECURE_TRANSPORT === 'true',
+  });
+  const validatedCfg = { ...cfg, serverUrl: validatedServerUrl };
   const requestedRuntime = typeof flags.runtime === 'string' ? flags.runtime.trim() : '';
   const requestedClient = typeof flags.client === 'string' ? flags.client.trim() : '';
   const latestClient = `${PACKAGE_NAME}@latest`;
   const currentClient = `${PACKAGE_NAME}@${VERSION}`;
-  const trusted = runtimeTrustAllowed(cfg, flags, env);
+  const trusted = runtimeTrustAllowed(validatedCfg, flags, env);
 
   let clientSpec = latestClient;
   if (requestedClient) {
@@ -63,28 +68,28 @@ export async function resolveUpdateTargets({
   if (requestedRuntime) {
     // Only `<configured package>@<semver>` is installable: an alias, a git/URL/file spec, a tag or
     // a range would run code the user never agreed to.
-    if (!isRuntimeSpecFor(cfg.runtime.packageName, requestedRuntime)) {
-      throw new Error(`--runtime must be ${cfg.runtime.packageName}@<version>`);
+    if (!isRuntimeSpecFor(validatedCfg.runtime.packageName, requestedRuntime)) {
+      throw new Error(`--runtime must be ${validatedCfg.runtime.packageName}@<version>`);
     }
     if (!trusted) {
-      throw new Error(`This machine was paired without trusting ${cfg.serverUrl} to choose a runtime version. Re-run with --trust-runtime if you trust that server.`);
+      throw new Error(`This machine was paired without trusting ${validatedCfg.serverUrl} to choose a runtime version. Re-run with --trust-runtime if you trust that server.`);
     }
     const runtimeSpec = normalizeRuntime({
       kind: 'npm',
-      packageName: cfg.runtime.packageName,
+      packageName: validatedCfg.runtime.packageName,
       packageSpec: requestedRuntime,
-      entry: cfg.runtime.entry,
+      entry: validatedCfg.runtime.entry,
     }).packageSpec;
-    if (requestedClient && !releasePairMatches(clientSpec, cfg.runtime.packageName, runtimeSpec)) {
+    if (requestedClient && !releasePairMatches(clientSpec, validatedCfg.runtime.packageName, runtimeSpec)) {
       throw new Error('The client and first-party runtime must use the same exact release version.');
     }
-    if (!requestedClient && cfg.runtime.packageName === '@remcp/runtime' && specVersion(cfg.runtime.packageName, runtimeSpec) !== VERSION) {
+    if (!requestedClient && validatedCfg.runtime.packageName === '@remcp/runtime' && specVersion(validatedCfg.runtime.packageName, runtimeSpec) !== VERSION) {
       throw new Error(`--runtime without --client must match the running client version ${VERSION}`);
     }
     return {
       clientSpec: requestedClient ? clientSpec : currentClient,
       runtimeSpec,
-      persistRuntime: runtimeSpec !== cfg.runtime.packageSpec,
+      persistRuntime: runtimeSpec !== validatedCfg.runtime.packageSpec,
       installable: true,
       source: requestedClient ? 'explicit-pair' : 'explicit-runtime',
       warning: '',
@@ -100,7 +105,7 @@ export async function resolveUpdateTargets({
   if (!trusted) {
     return {
       clientSpec,
-      runtimeSpec: cfg.runtime.packageSpec,
+      runtimeSpec: validatedCfg.runtime.packageSpec,
       persistRuntime: false,
       installable: true,
       source: 'configured',
@@ -109,15 +114,16 @@ export async function resolveUpdateTargets({
   }
 
   try {
-    const versionUrl = new URL('/api/agent/version', cfg.serverUrl).toString();
+    const versionUrl = new URL('/api/agent/version', validatedCfg.serverUrl).toString();
     const response = await fetchImpl(versionUrl, {
       headers: { accept: 'application/json' },
+      redirect: 'error',
       signal: AbortSignal.timeout(UPDATE_DISCOVERY_TIMEOUT_MS),
     });
     if (!response?.ok) {
       return {
         clientSpec: currentClient,
-        runtimeSpec: cfg.runtime.packageSpec,
+        runtimeSpec: validatedCfg.runtime.packageSpec,
         persistRuntime: false,
         installable: false,
         source: 'configured',
@@ -130,11 +136,11 @@ export async function resolveUpdateTargets({
     const advertisedClient = exactClientSpec(advertised?.cli);
     const clientCandidate = requestedClient || advertisedClient;
     if (!advertisedClient
-      || !releasePairMatches(advertisedClient, cfg.runtime.packageName, runtimeCandidate)
+      || !releasePairMatches(advertisedClient, validatedCfg.runtime.packageName, runtimeCandidate)
       || (requestedClient && requestedClient !== advertisedClient)) {
       return {
         clientSpec: currentClient,
-        runtimeSpec: cfg.runtime.packageSpec,
+        runtimeSpec: validatedCfg.runtime.packageSpec,
         persistRuntime: false,
         installable: false,
         source: 'configured',
@@ -144,14 +150,14 @@ export async function resolveUpdateTargets({
 
     const runtimeSpec = normalizeRuntime({
       kind: 'npm',
-      packageName: cfg.runtime.packageName,
+      packageName: validatedCfg.runtime.packageName,
       packageSpec: runtimeCandidate,
-      entry: cfg.runtime.entry,
+      entry: validatedCfg.runtime.entry,
     }).packageSpec;
     return {
       clientSpec: clientCandidate,
       runtimeSpec,
-      persistRuntime: runtimeSpec !== cfg.runtime.packageSpec,
+      persistRuntime: runtimeSpec !== validatedCfg.runtime.packageSpec,
       installable: true,
       source: 'server',
       warning: '',
@@ -159,7 +165,7 @@ export async function resolveUpdateTargets({
   } catch (error) {
     return {
       clientSpec: currentClient,
-      runtimeSpec: cfg.runtime.packageSpec,
+      runtimeSpec: validatedCfg.runtime.packageSpec,
       persistRuntime: false,
       installable: false,
       source: 'configured',

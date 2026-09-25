@@ -81,7 +81,12 @@ test('describeFilesystemFailure keeps the kernel message and appends the fix', (
   assert.equal(describeFilesystemFailure(new Error('plain'), {}), 'plain');
 });
 
-test('a real permission failure reaches the caller with a fix attached', async () => {
+test('a real permission failure reaches the caller with a fix attached', {
+  // UID 0 bypasses ordinary Unix directory write permissions, so chmod(0500) cannot produce
+  // the EACCES path this integration probe is meant to exercise. The pure errno/description
+  // tests above still cover the user-facing remediation text on root-runner environments.
+  skip: typeof process.getuid === 'function' && process.getuid() === 0,
+}, async () => {
   const root = freshWorkspace('permissions');
   const locked = join(root, 'locked');
   mkdirSync(locked, { recursive: true });

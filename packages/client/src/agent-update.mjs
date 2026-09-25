@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
@@ -29,15 +29,28 @@ function globalNodeModules() {
   return String(result.stdout || '').trim();
 }
 
+function resolveRuntimeEntry(base, runtime) {
+  const packageRoot = path.resolve(base, ...runtime.packageName.split('/'));
+  const candidate = path.resolve(packageRoot, ...runtime.entry.split(/[\\/]+/));
+  const relative = path.relative(packageRoot, candidate);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Runtime entry resolves outside its package');
+  if (!existsSync(candidate)) return null;
+  const realPackageRoot = realpathSync(packageRoot);
+  const realCandidate = realpathSync(candidate);
+  const realRelative = path.relative(realPackageRoot, realCandidate);
+  if (realRelative.startsWith('..') || path.isAbsolute(realRelative) || !lstatSync(realCandidate).isFile()) throw new Error('Runtime entry is not a regular package file');
+  return realCandidate;
+}
+
 export function localRuntimeEntry(runtimeValue) {
   const runtime = normalizeRuntime(runtimeValue);
   const localModules = packageLocalNodeModules();
   if (localModules) {
-    const sibling = path.join(localModules, ...runtime.packageName.split('/'), ...runtime.entry.split(/[\\/]+/));
-    if (existsSync(sibling)) return sibling;
+    const sibling = resolveRuntimeEntry(localModules, runtime);
+    if (sibling) return sibling;
   }
-  const candidate = path.join(globalNodeModules(), ...runtime.packageName.split('/'), ...runtime.entry.split(/[\\/]+/));
-  if (!existsSync(candidate)) throw new Error('ReMCP local runtime is not installed. Run `remcp install`.');
+  const candidate = resolveRuntimeEntry(globalNodeModules(), runtime);
+  if (!candidate) throw new Error('ReMCP local runtime is not installed. Run `remcp install`.');
   return candidate;
 }
 

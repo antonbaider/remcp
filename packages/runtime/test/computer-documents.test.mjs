@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { freshWorkspace } from './helpers.mjs';
 
@@ -223,6 +223,21 @@ test('PDF extract_pages falls back to pdfseparate and pdfunite when qpdf/pdftk a
   } finally {
     process.env.PATH = previousPath;
   }
+});
+
+test('OOXML extraction rejects symlink entries before document code follows them', { skip: !zipReady }, async () => {
+  const sourceDir = join(root, 'symlink-src');
+  const outside = join(root, 'symlink-outside.xml');
+  mkdirSync(join(sourceDir, 'xl', '_rels'), { recursive: true });
+  mkdirSync(join(sourceDir, 'xl', 'worksheets'), { recursive: true });
+  writeFileSync(outside, '<workbook><sheets/></workbook>');
+  symlinkSync(outside, join(sourceDir, 'xl', 'workbook.xml'));
+  writeFileSync(join(sourceDir, 'xl', '_rels', 'workbook.xml.rels'), '<Relationships/>');
+  writeFileSync(join(sourceDir, 'xl', 'worksheets', 'sheet1.xml'), '<worksheet><sheetData/></worksheet>');
+  const archive = join(root, 'symlink.xlsx');
+  execFileSync('zip', ['-qry', archive, '.'], { cwd: sourceDir });
+  const { readDocument } = await import('../src/extended/documents.mjs');
+  await assert.rejects(() => readDocument({ path: archive }), /symbolic link|special file/i);
 });
 
 test('OOXML extraction rejects archive traversal before unzip writes anything', { skip: !zipReady }, async () => {

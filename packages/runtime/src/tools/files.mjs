@@ -40,8 +40,14 @@ function assertRegularFile(info, absolute) {
   return info;
 }
 
-const READ_NOFOLLOW = constants.O_RDONLY | (constants.O_NOFOLLOW || 0);
-const READWRITE_NOFOLLOW = constants.O_RDWR | (constants.O_NOFOLLOW || 0);
+const NOFOLLOW = constants.O_NOFOLLOW || 0;
+const NONBLOCK = constants.O_NONBLOCK || 0;
+const READ_NOFOLLOW = constants.O_RDONLY | NOFOLLOW;
+const READ_NOFOLLOW_NONBLOCK = READ_NOFOLLOW | NONBLOCK;
+const READWRITE_NOFOLLOW = constants.O_RDWR | NOFOLLOW;
+const WRITE_CREATE_NOFOLLOW = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW | NONBLOCK;
+const WRITE_TRUNCATE_NOFOLLOW = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | NOFOLLOW | NONBLOCK;
+const DIRECTORY_READ_NOFOLLOW = constants.O_RDONLY | (constants.O_DIRECTORY || 0) | NOFOLLOW | NONBLOCK;
 
 async function openRegularFile(absolute, flags = READ_NOFOLLOW) {
   const handle = await open(absolute, flags);
@@ -568,11 +574,17 @@ export async function moveToTrashTool(args) {
     } catch { destination = null; }
   }
   if (!destination) destination = path.join(path.dirname(source), '.remcp-trash');
-  await mkdir(destination, { recursive: true });
+  const existingDestination = await lstat(destination).catch(() => null);
+  if (existingDestination?.isSymbolicLink()) fail('Refusing to use a symlink as the trash directory');
+  if (existingDestination && !existingDestination.isDirectory()) fail('Trash destination is not a directory');
+  await mkdir(destination, { recursive: true, mode: 0o700 });
+  destination = await resolveSafePath(destination, 'trash');
+  const destinationInfo = await lstat(destination);
+  if (!destinationInfo.isDirectory() || destinationInfo.isSymbolicLink()) fail('Refusing to use a symlink as the trash directory');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   let target = path.join(destination, `${stamp}-${path.basename(source)}`);
   let counter = 1;
-  while (await access(target, constants.F_OK).then(() => true, () => false)) {
+  while (await lstat(target).then(value => Boolean(value), () => false)) {
     target = path.join(destination, `${stamp}-${counter}-${path.basename(source)}`);
     counter += 1;
   }
@@ -908,6 +920,384 @@ export async function copyFileTool(args) {
 }
 
 // --- archives -------------------------------------------------------------------------
+async function assertNoSymlinkTree(root, state = { entries: 0 }) {
+  const info = await lstat(root);
+  if (info.isSymbolicLink()) fail(`Archive sources cannot contain symbolic links: ${displayPath(root)}`);
+  if (!info.isDirectory() && !info.isFile()) fail(`Archive sources cannot contain special files: ${displayPath(root)}`);
+  state.entries += 1;
+  if (state.entries > 100_000) fail('Archive source contains too many entries');
+  if (state.maxBytes !== undefined && info.isFile()) {
+    state.bytes = (state.bytes || 0) + info.size;
+    if (state.bytes > state.maxBytes) fail('Archive source exceeds the safety limit');
+  }
+  if (!info.isDirectory()) return;
+  const entries = await readdir(root, { withFileTypes: true });
+  for (const entry of entries) await assertNoSymlinkTree(path.join(root, entry.name), state);
+}
+
+const MAX_ARCHIVE_EXPANDED_BYTES = Math.min(
+  4 * 1024 * 1024 * 1024,
+  Math.max(64 * 1024 * 1024, Number(process.env.REMCP_MAX_ARCHIVE_EXPANDED_BYTES) || 512 * 1024 * 1024),
+);
+
+function safeArchiveEntry(name) {
+  const normalized = String(name || '').replace(/\\/g, '/');
+  return Boolean(normalized) && !normalized.startsWith('/') && !/^[A-Za-z]:\//.test(normalized) && !normalized.split('/').includes('..');
+}
+
+function archiveExpandedSize(lines, pattern, label, expectedEntries = null) {
+  let total = 0;
+  let matched = 0;
+  for (const line of lines) {
+    const match = line.match(pattern);
+    if (!match) continue;
+    total += Number(match[1]);
+    matched += 1;
+    if (!Number.isSafeInteger(total) || total > MAX_ARCHIVE_EXPANDED_BYTES) fail(`${label} exceeds the ${MAX_ARCHIVE_EXPANDED_BYTES}-byte extraction limit`);
+  }
+  if ((!matched && expectedEntries !== 0) || (expectedEntries !== null && matched < expectedEntries)) fail(`Could not determine ${label} size safely`);
+  return total;
+}
+
+function tarEntrySize(line) {
+  const tokens = String(line || '').trim().split(/\s+/);
+  for (const index of [2, 3, 4]) {
+    const size = Number(tokens[index]);
+    if (!Number.isSafeInteger(size) || size < 0) continue;
+    const tail = tokens.slice(index + 1);
+    const gnuDate = /^\d{4}-\d{2}-\d{2}$/.test(tail[0] || '');
+    const bsdDate = /^[A-Z][a-z]{2}$/.test(tail[0] || '')
+      && /^\d{1,2}$/.test(tail[1] || '')
+      && ((/^\d{2}:\d{2}(?::\d{2})?$/.test(tail[2] || '') && /^\d{4}$/.test(tail[3] || ''))
+        || /^\d{4}$/.test(tail[2] || ''));
+    if (gnuDate || bsdDate) return size;
+  }
+  return null;
+}
+
+function archiveTarExpandedSize(lines, label, expectedEntries) {
+  let total = 0;
+  let matched = 0;
+  for (const line of lines) {
+    const size = tarEntrySize(line);
+    if (size === null) continue;
+    total += size;
+    matched += 1;
+    if (!Number.isSafeInteger(total) || total > MAX_ARCHIVE_EXPANDED_BYTES) fail(`${label} exceeds the ${MAX_ARCHIVE_EXPANDED_BYTES}-byte extraction limit`);
+  }
+  if (matched < expectedEntries) fail(`Could not determine ${label} size safely`);
+  return total;
+}
+
+function assertArchiveExpandedSize(bytes, label) {
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > MAX_ARCHIVE_EXPANDED_BYTES) {
+    fail(`${label} exceeds the ${MAX_ARCHIVE_EXPANDED_BYTES}-byte extraction limit`);
+  }
+}
+
+async function assertExtractedTree(root, state = { entries: 0, bytes: 0 }) {
+  const info = await lstat(root);
+  if (info.isSymbolicLink()) fail('Archive extraction produced a symbolic link');
+  if (!info.isDirectory() && !info.isFile()) fail('Archive extraction produced a special file');
+  state.entries += 1;
+  state.bytes += info.isFile() ? info.size : 0;
+  if (state.entries > 100_000 || state.bytes > MAX_ARCHIVE_EXPANDED_BYTES) fail('Archive extraction exceeded the safety limit');
+  if (!info.isDirectory()) return;
+  for (const entry of await readdir(root, { withFileTypes: true })) await assertExtractedTree(path.join(root, entry.name), state);
+}
+
+async function openArchiveSource(absolute) {
+  if (process.platform !== 'linux') {
+    const opened = await openRegularFile(absolute, READ_NOFOLLOW_NONBLOCK);
+    return { ...opened, close: () => opened.handle.close() };
+  }
+  const root = path.parse(absolute).root;
+  const parts = absolute.slice(root.length).split(path.sep).filter(Boolean);
+  if (!parts.length) return openRegularFile(absolute, READ_NOFOLLOW_NONBLOCK);
+  const directories = [];
+  let current = root;
+  const closeDirectories = async () => {
+    for (const handle of directories.reverse()) await handle.close().catch(() => {});
+  };
+  try {
+    for (const part of parts.slice(0, -1)) {
+      const handle = await open(path.join(current, part), DIRECTORY_READ_NOFOLLOW);
+      try {
+        const info = await handle.stat();
+        if (!info.isDirectory()) fail('Archive source is not a safe regular file');
+      } catch (error) {
+        await handle.close().catch(() => {});
+        throw error;
+      }
+      directories.push(handle);
+      current = `/proc/self/fd/${handle.fd}`;
+    }
+    const opened = await openRegularFile(path.join(current, parts.at(-1)), READ_NOFOLLOW_NONBLOCK);
+    return {
+      ...opened,
+      close: async () => {
+        try { await opened.handle.close(); }
+        finally { await closeDirectories(); }
+      },
+    };
+  } catch (error) {
+    await closeDirectories();
+    throw error;
+  }
+}
+
+async function snapshotRegularFile(source, destination, maxBytes) {
+  const sourceInfo = await lstat(source);
+  if (sourceInfo.isSymbolicLink()) fail(`Archive source is a symbolic link: ${displayPath(source)}`);
+  if (!sourceInfo.isFile()) fail(`Archive source is not a regular file: ${displayPath(source)}`);
+  const opened = await openArchiveSource(source);
+  const { handle, info } = opened;
+  let output;
+  try {
+    if (info.size > maxBytes) fail(`Archive is ${info.size} bytes, above the ${maxBytes}-byte snapshot limit`);
+    output = await open(destination, WRITE_CREATE_NOFOLLOW, 0o400);
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let offset = 0;
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+      if (!bytesRead) break;
+      if (!Number.isSafeInteger(offset + bytesRead) || offset + bytesRead > maxBytes) {
+        fail(`Archive grew beyond the ${maxBytes}-byte snapshot limit`);
+      }
+      let written = 0;
+      while (written < bytesRead) {
+        const result = await output.write(buffer, written, bytesRead - written, offset + written);
+        if (!result.bytesWritten) throw new Error('Could not finish writing the archive snapshot');
+        written += result.bytesWritten;
+      }
+      offset += bytesRead;
+    }
+    await output.truncate(offset);
+    await output.sync();
+    await output.chmod(0o400);
+    return offset;
+  } finally {
+    if (output) await output.close().catch(() => {});
+    await opened.close().catch(() => {});
+  }
+}
+
+async function copyOpenRegularFile(sourceHandle, sourceInfo, destinationPath, state) {
+  const mode = sourceInfo.mode & 0o777;
+  const currentBytes = state.bytes || 0;
+  if (state.maxBytes !== undefined && sourceInfo.size > state.maxBytes - currentBytes) {
+    fail(`Archive contents exceed the ${state.maxBytes}-byte extraction limit`);
+  }
+  const existing = await lstat(destinationPath).catch(() => null);
+  if (existing && (!existing.isFile() || existing.isSymbolicLink())) fail('Archive contains a link or special file; archive destination is unsafe');
+  let output;
+  try {
+    try {
+      output = await open(destinationPath, WRITE_TRUNCATE_NOFOLLOW, mode);
+    } catch (error) {
+      if (['ELOOP', 'ENOTDIR', 'EISDIR'].includes(error?.code)) fail('Archive contains a link or special file; archive destination is unsafe');
+      throw error;
+    }
+    const outputInfo = await output.stat();
+    if (!outputInfo.isFile()) fail('Archive contains a link or special file; archive destination is unsafe');
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let offset = 0;
+    for (;;) {
+      const { bytesRead } = await sourceHandle.read(buffer, 0, buffer.length, offset);
+      if (!bytesRead) break;
+      if (!Number.isSafeInteger(offset + bytesRead) || (state.maxBytes !== undefined && currentBytes + offset + bytesRead > state.maxBytes)) {
+        fail(`Archive contents exceed the ${state.maxBytes}-byte extraction limit`);
+      }
+      let written = 0;
+      while (written < bytesRead) {
+        const result = await output.write(buffer, written, bytesRead - written, offset + written);
+        if (!result.bytesWritten) throw new Error('Could not finish copying archive contents');
+        written += result.bytesWritten;
+      }
+      offset += bytesRead;
+    }
+    await output.truncate(offset);
+    await output.sync();
+    await output.chmod(mode);
+    state.bytes = currentBytes + offset;
+  } finally {
+    if (output) await output.close().catch(() => {});
+  }
+}
+
+async function copyTreeContents(source, destination, state = { entries: 0, bytes: 0, maxBytes: MAX_ARCHIVE_EXPANDED_BYTES }) {
+  const initial = await lstat(source);
+  if (initial.isSymbolicLink() || (!initial.isDirectory() && !initial.isFile())) fail('Archive contains a link or special file; archive destination is unsafe');
+  state.entries += 1;
+  if (state.entries > 100_000) fail('Archive contains too many entries');
+  if (initial.isFile()) {
+    const opened = await openRegularFile(source, READ_NOFOLLOW_NONBLOCK);
+    try { await copyOpenRegularFile(opened.handle, opened.info, destination, state); }
+    finally { await opened.handle.close(); }
+    return;
+  }
+  let directoryHandle = null;
+  let sourcePath = source;
+  let info = initial;
+  try {
+    if (process.platform === 'linux') {
+      try {
+        directoryHandle = await open(source, DIRECTORY_READ_NOFOLLOW);
+        info = await directoryHandle.stat();
+        if (!info.isDirectory()) fail('Archive contains a link or special file; archive destination is unsafe');
+        sourcePath = `/proc/self/fd/${directoryHandle.fd}`;
+      } catch (error) {
+        if (['ELOOP', 'ENOTDIR'].includes(error?.code)) fail('Archive contains a link or special file; archive destination is unsafe');
+        throw error;
+      }
+    }
+    const mode = info.mode & 0o777;
+    const existing = await lstat(destination).catch(() => null);
+    if (existing && (!existing.isDirectory() || existing.isSymbolicLink())) fail('Archive contains a link or special file; archive destination is unsafe');
+    try { await mkdir(destination, { mode: mode | 0o700 }); }
+    catch (error) { if (error?.code !== 'EEXIST') throw error; }
+    const destinationInfo = await lstat(destination);
+    if (!destinationInfo.isDirectory() || destinationInfo.isSymbolicLink()) fail('Archive contains a link or special file; archive destination is unsafe');
+    let destinationHandle;
+    try {
+      destinationHandle = await open(destination, DIRECTORY_READ_NOFOLLOW);
+      const openedDestination = await destinationHandle.stat();
+      if (!openedDestination.isDirectory()) fail('Archive contains a link or special file; archive destination is unsafe');
+      await destinationHandle.chmod(mode | 0o700);
+      for (const name of await readdir(sourcePath)) {
+        await copyTreeContents(path.join(sourcePath, name), path.join(destination, name), state);
+      }
+      await destinationHandle.chmod(mode);
+    } finally {
+      if (destinationHandle) await destinationHandle.close().catch(() => {});
+    }
+  } finally {
+    if (directoryHandle) await directoryHandle.close().catch(() => {});
+  }
+}
+
+async function removeExtractionArtifact(target) {
+  const info = await lstat(target).catch(() => null);
+  if (!info) return;
+  if (info.isDirectory() && !info.isSymbolicLink()) await rm(target, { recursive: true, force: true });
+  else await unlink(target).catch(error => { if (error?.code !== 'ENOENT') throw error; });
+}
+
+async function recoverExtractionArtifacts(parent, destination, prefix) {
+  const entries = await readdir(parent, { withFileTypes: true });
+  const staleBefore = Date.now() - 60 * 60 * 1000;
+  for (const entry of entries) {
+    if (!entry.name.startsWith('.remcp-extract-txn-')) continue;
+    const candidate = path.join(parent, entry.name);
+    const info = await lstat(candidate).catch(() => null);
+    if (info && info.mtimeMs < staleBefore) await removeExtractionArtifact(candidate);
+  }
+  const backups = entries.filter(entry => entry.name.startsWith(prefix)).map(entry => path.join(parent, entry.name));
+  for (const backup of backups) {
+    const destinationInfo = await lstat(destination).catch(() => null);
+    if (destinationInfo) {
+      await removeExtractionArtifact(backup);
+      continue;
+    }
+    const backupInfo = await lstat(backup).catch(() => null);
+    if (!backupInfo) continue;
+    if (backupInfo.isSymbolicLink() || !backupInfo.isDirectory()) {
+      await removeExtractionArtifact(backup);
+      continue;
+    }
+    try {
+      await rename(backup, destination);
+    } catch {
+      continue;
+    }
+  }
+}
+
+async function restoreExtractionBackup(backup, destination) {
+  if (await lstat(destination).catch(() => null)) return false;
+  const info = await lstat(backup).catch(() => null);
+  if (!info) return false;
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    await removeExtractionArtifact(backup);
+    return false;
+  }
+  try {
+    await rename(backup, destination);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function installExtractedTree(source, destination) {
+  const parent = path.dirname(destination);
+  if (destination === path.parse(destination).root) fail('Archive destination cannot be a filesystem root');
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  const backupPrefix = `.remcp-extract-backup-${createHash('sha256').update(destination).digest('hex').slice(0, 16)}-`;
+  await recoverExtractionArtifacts(parent, destination, backupPrefix);
+  const existing = await lstat(destination).catch(() => null);
+  const destinationMode = existing?.isDirectory() ? existing.mode & 0o777 : 0o700;
+  const transaction = await mkdtemp(path.join(parent, '.remcp-extract-txn-'));
+  let backup = '';
+  let backupOwned = false;
+  let preserveBackup = false;
+  try {
+    if (existing) {
+      backup = path.join(parent, `${backupPrefix}${randomUUID()}`);
+      try {
+        await rename(destination, backup);
+        backupOwned = true;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        backup = '';
+      }
+    }
+    if (backupOwned) {
+      const backupInfo = await lstat(backup);
+      if (backupInfo.isSymbolicLink() || !backupInfo.isDirectory()) fail('Archive destination is not a safe directory');
+      await copyTreeContents(backup, transaction);
+    }
+    await copyTreeContents(source, transaction);
+    await chmod(transaction, destinationMode);
+    await rename(transaction, destination);
+    if (backupOwned) {
+      await removeExtractionArtifact(backup);
+      backupOwned = false;
+    }
+  } catch (error) {
+    if (backupOwned) {
+      try {
+        await restoreExtractionBackup(backup, destination);
+        if (!await lstat(backup).catch(() => null)) backupOwned = false;
+        else preserveBackup = true;
+      } catch (restoreError) {
+        preserveBackup = true;
+        throw new AggregateError([error, restoreError], 'Could not restore archive destination after extraction failure');
+      }
+    }
+    throw error;
+  } finally {
+    await rm(transaction, { recursive: true, force: true });
+    if (backupOwned && !preserveBackup) await removeExtractionArtifact(backup);
+  }
+}
+
+async function moveArchiveFile(source, destination) {
+  try {
+    await rename(source, destination);
+  } catch (error) {
+    if (!['EXDEV', 'EPERM'].includes(error?.code)) throw error;
+    const temporary = path.join(path.dirname(destination), `.${path.basename(destination)}.remcp-${randomUUID()}.tmp`);
+    try {
+      await copyFile(source, temporary, constants.COPYFILE_EXCL);
+      await rename(temporary, destination);
+    } finally {
+      await unlink(temporary).catch(() => {});
+    }
+    await unlink(source);
+  }
+}
+
 function archiveTool() {
   const probe = (name, versionArgs = ['--version']) => {
     const result = spawnSync(name, versionArgs, { encoding: 'utf8' });
@@ -924,57 +1314,132 @@ export async function createArchiveTool(args) {
   if (!sources.length) fail('paths must list at least one file or directory');
   const resolved = [];
   for (const entry of sources) resolved.push(await resolveSafePath(entry, 'paths[]'));
+  const sourceState = { entries: 0, bytes: 0, maxBytes: MAX_ARCHIVE_EXPANDED_BYTES };
+  for (const entry of resolved) await assertNoSymlinkTree(entry, sourceState);
   const destination = await resolveSafePath(args.destination, 'destination');
+  const existingDestination = await lstat(destination).catch(() => null);
+  if (existingDestination?.isSymbolicLink()) fail('Archive destination cannot be a symbolic link');
   const format = String(args.format || (destination.endsWith('.zip') ? 'zip' : 'tar.gz')).toLowerCase();
   await mkdir(path.dirname(destination), { recursive: true });
   const baseDir = path.dirname(resolved[0]);
   const names = resolved.map(entry => path.relative(baseDir, entry));
-  // An archive written inside the tree it packs makes tar abort with "file changed as we
-  // read it" (the directory mtime moves while it is being read), so build it outside the
-  // tree first and move it into place afterwards.
-  const destinationRelative = path.relative(baseDir, destination);
-  const selfInside = !destinationRelative.startsWith('..') && !path.isAbsolute(destinationRelative);
+  if (names.some(name => !name || name.startsWith('..') || path.isAbsolute(name))) fail('Archive sources must share one parent directory');
+  const archiveNames = names.map(name => name.startsWith('-') ? `./${name}` : name);
   const suffix = format === 'zip' ? '.zip' : format === 'tar' ? '.tar' : '.tar.gz';
-  const staging = selfInside ? path.join(os.tmpdir(), `remcp-archive-${Date.now()}-${process.pid}${suffix}`) : destination;
-  const output = staging;
-  if (format === 'zip') {
-    if (!tools.zip) fail('zip is not installed on this device; use format "tar.gz"');
-    const result = spawnSync(tools.zip, ['-r', '-q', output, ...names], { cwd: baseDir, encoding: 'utf8' });
-    if (result.status !== 0) fail(`zip failed: ${(result.stderr || result.stdout || '').trim() || `exit ${result.status}`}`);
-  } else if (format === 'tar' || format === 'tar.gz' || format === 'tgz') {
-    if (!tools.tar) fail('tar is not installed on this device');
-    const flags = format === 'tar' ? '-cf' : '-czf';
-    const result = spawnSync(tools.tar, [flags, output, ...names], { cwd: baseDir, encoding: 'utf8' });
-    if (result.status !== 0) fail(`tar failed: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
-  } else {
-    fail('format must be tar, tar.gz, or zip');
+  const stagingDirectory = await mkdtemp(path.join(os.tmpdir(), 'remcp-archive-'));
+  if (resolved.some(entry => !path.relative(entry, stagingDirectory).startsWith('..') && !path.isAbsolute(path.relative(entry, stagingDirectory)))) {
+    await rm(stagingDirectory, { recursive: true, force: true });
+    fail('Archive source must not contain the system temporary directory');
   }
-  if (selfInside) {
-    await mkdir(path.dirname(destination), { recursive: true });
-    await rename(staging, destination);
+   const staging = path.join(stagingDirectory, `payload${suffix}`);
+   const snapshotRoot = path.join(stagingDirectory, 'source');
+   try {
+     await mkdir(snapshotRoot, { mode: 0o700 });
+     const snapshotState = { entries: 0, bytes: 0, maxBytes: MAX_ARCHIVE_EXPANDED_BYTES };
+     for (let index = 0; index < resolved.length; index += 1) {
+       const snapshotPath = path.join(snapshotRoot, names[index]);
+       await mkdir(path.dirname(snapshotPath), { recursive: true, mode: 0o700 });
+       await copyTreeContents(resolved[index], snapshotPath, snapshotState);
+     }
+     if (format === 'zip') {
+       if (!tools.zip) fail('zip is not installed on this device; use format "tar.gz"');
+       const result = spawnSync(tools.zip, ['-r', '-q', '-y', staging, '--', ...archiveNames], { cwd: snapshotRoot, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
+      if (result.status !== 0) fail(`zip failed: ${(result.stderr || result.stdout || '').trim() || `exit ${result.status}`}`);
+    } else if (format === 'tar' || format === 'tar.gz' || format === 'tgz') {
+      if (!tools.tar) fail('tar is not installed on this device');
+      const flags = format === 'tar' ? '-cf' : '-czf';
+       const result = spawnSync(tools.tar, [flags, staging, '--', ...archiveNames], { cwd: snapshotRoot, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
+      if (result.status !== 0) fail(`tar failed: ${(result.stderr || result.stdout || '').trim() || `exit ${result.status}`}`);
+     } else {
+       fail('format must be tar, tar.gz, or zip');
+     }
+     const stagedInfo = await stat(staging);
+     assertArchiveExpandedSize(stagedInfo.size, 'archive output');
+     await mkdir(path.dirname(destination), { recursive: true });
+
+     await moveArchiveFile(staging, destination);
+     const info = await stat(destination).catch(() => null);
+     const note = ' (built outside the tree in temporary staging and committed atomically)';
+
+    return text(`Created ${displayPath(destination)} (${format}, ${info?.size ?? 0} bytes) from ${resolved.length} path(s)${note}.`);
+  } finally {
+    if (stagingDirectory) await rm(stagingDirectory, { recursive: true, force: true });
   }
-  const info = await stat(destination).catch(() => null);
-  const note = selfInside ? ' (built outside the tree so it does not include itself)' : '';
-  return text(`Created ${displayPath(destination)} (${format}, ${info?.size ?? 0} bytes) from ${resolved.length} path(s)${note}.`);
+}
+
+function archiveFormatForPath(value) {
+  if (/\.zip$/i.test(value)) return 'zip';
+  if (/\.(tar\.gz|tgz)$/i.test(value)) return 'tar.gz';
+  if (/\.(tar\.bz2|tbz2?)$/i.test(value)) return 'tar.bz2';
+  if (/\.tar\.xz$/i.test(value)) return 'tar.xz';
+  return 'tar';
+}
+
+function archiveSnapshotSuffix(format) {
+  if (format === 'zip') return '.zip';
+  if (format === 'tar.bz2') return '.tar.bz2';
+  if (format === 'tar.xz') return '.tar.xz';
+  if (format === 'tar.gz') return '.tar.gz';
+  return '.tar';
 }
 
 export async function extractArchiveTool(args) {
   const tools = archiveTool();
   const archive = await resolveSafePath(args.archive, 'archive');
   const destination = await resolveSafePath(args.destination || path.dirname(archive), 'destination');
-  await mkdir(destination, { recursive: true });
-  if (/\.zip$/i.test(archive)) {
-    if (!tools.unzip) fail('unzip is not installed on this device');
-    const result = spawnSync(tools.unzip, ['-o', '-q', archive, '-d', destination], { encoding: 'utf8' });
-    if (result.status !== 0) fail(`unzip failed: ${(result.stderr || result.stdout || '').trim() || `exit ${result.status}`}`);
-  } else {
-    if (!tools.tar) fail('tar is not installed on this device');
-    const flags = /\.(tar\.gz|tgz)$/i.test(archive) ? '-xzf' : /\.(tar\.bz2|tbz2?)$/i.test(archive) ? '-xjf' : /\.tar\.xz$/i.test(archive) ? '-xJf' : '-xf';
-    const result = spawnSync(tools.tar, [flags, archive, '-C', destination], { encoding: 'utf8' });
-    if (result.status !== 0) fail(`tar failed: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+  if (destination === path.parse(destination).root) fail('Archive destination cannot be a filesystem root');
+  const parent = path.dirname(destination);
+  const backupPrefix = `.remcp-extract-backup-${createHash('sha256').update(destination).digest('hex').slice(0, 16)}-`;
+  const format = archiveFormatForPath(archive);
+  const stagingDirectory = await mkdtemp(path.join(os.tmpdir(), 'remcp-extract-'));
+  const archiveSnapshot = path.join(stagingDirectory, `source${archiveSnapshotSuffix(format)}`);
+  const staging = path.join(stagingDirectory, 'tree');
+  try {
+    await mkdir(staging, { mode: 0o700 });
+    await snapshotRegularFile(archive, archiveSnapshot, MAX_ARCHIVE_EXPANDED_BYTES);
+    await mkdir(parent, { recursive: true, mode: 0o700 });
+    await recoverExtractionArtifacts(parent, destination, backupPrefix);
+    const existingDestination = await lstat(destination).catch(() => null);
+    if (existingDestination?.isSymbolicLink() || (existingDestination && !existingDestination.isDirectory())) fail('Archive destination is not a safe directory');
+    if (format === 'zip') {
+      if (!tools.unzip) fail('unzip is not installed on this device');
+      const listing = spawnSync(tools.unzip, ['-Z', '-1', archiveSnapshot], { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+      if (listing.error || listing.status !== 0) fail(`Could not inspect ZIP archive: ${(listing.stderr || listing.error?.message || `exit ${listing.status}`).trim()}`);
+      const names = String(listing.stdout || '').split(/\r?\n/).filter(Boolean);
+      if (names.length > 100_000 || names.some(name => !safeArchiveEntry(name))) fail('ZIP archive contains an unsafe path or too many entries');
+      const details = spawnSync(tools.unzip, ['-Z', '-v', archiveSnapshot], { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+      if (details.error || details.status !== 0) fail(`Could not inspect ZIP sizes: ${(details.stderr || details.error?.message || `exit ${details.status}`).trim()}`);
+      const detailText = String(details.stdout || '');
+      if (/symbolic link|Unix file attributes \([^)]*\b12\d{4}/i.test(detailText)) fail('ZIP archive contains a symbolic link');
+      const expandedBytes = archiveExpandedSize(detailText.split(/\r?\n/), /uncompressed size:\s*(\d+)\s*bytes/i, 'ZIP archive', names.length);
+      assertArchiveExpandedSize(expandedBytes, 'ZIP archive');
+      const result = spawnSync(tools.unzip, ['-o', '-q', archiveSnapshot, '-d', staging], { encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
+      if (result.status !== 0) fail(`unzip failed: ${(result.stderr || result.stdout || '').trim() || `exit ${result.status}`}`);
+    } else {
+      if (!tools.tar) fail('tar is not installed on this device');
+      const listFlags = format === 'tar.gz' ? '-tzf' : format === 'tar.bz2' ? '-tjf' : format === 'tar.xz' ? '-tJf' : '-tf';
+      const listing = spawnSync(tools.tar, [listFlags, archiveSnapshot], { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+      if (listing.error || listing.status !== 0) fail(`Could not inspect archive: ${(listing.stderr || listing.error?.message || `exit ${listing.status}`).trim()}`);
+      const names = String(listing.stdout || '').split(/\r?\n/).filter(Boolean);
+      if (names.length > 100_000 || names.some(name => !safeArchiveEntry(name))) fail('Archive contains an unsafe path or too many entries');
+      const verboseFlags = format === 'tar.gz' ? '-tvzf' : format === 'tar.bz2' ? '-tvjf' : format === 'tar.xz' ? '-tvJf' : '-tvf';
+      const details = spawnSync(tools.tar, [verboseFlags, archiveSnapshot], { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+      if (details.error || details.status !== 0) fail(`Could not inspect archive sizes: ${(details.stderr || details.error?.message || `exit ${details.status}`).trim()}`);
+      const detailLines = String(details.stdout || '').split(/\r?\n/);
+      if (detailLines.some(line => /^[bclph]/.test(line))) fail('Archive contains a link or special file; archive destination is unsafe');
+      const expandedBytes = archiveTarExpandedSize(detailLines, 'archive', names.length);
+      assertArchiveExpandedSize(expandedBytes, 'archive');
+      const flags = format === 'tar.gz' ? '-xzf' : format === 'tar.bz2' ? '-xjf' : format === 'tar.xz' ? '-xJf' : '-xf';
+      const result = spawnSync(tools.tar, [flags, archiveSnapshot, '-C', staging], { encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
+      if (result.status !== 0) fail(`tar failed: ${(result.stderr || result.stdout || '').trim() || `exit ${result.status}`}`);
+    }
+    await assertExtractedTree(staging);
+    await installExtractedTree(staging, destination);
+    const entries = await readdir(destination).catch(() => []);
+    return text(`Extracted ${displayPath(archive)} into ${displayPath(destination)} (${entries.length} top-level entries).`);
+  } finally {
+    await rm(stagingDirectory, { recursive: true, force: true });
   }
-  const entries = await readdir(destination).catch(() => []);
-  return text(`Extracted ${displayPath(archive)} into ${displayPath(destination)} (${entries.length} top-level entries).`);
 }
 
 // --- screenshots ----------------------------------------------------------------------

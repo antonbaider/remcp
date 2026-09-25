@@ -34,10 +34,40 @@ test('replace_in_files cannot rewrite a file outside the allowed root', async ()
   assert.equal(readFileSync(join(inside, 'kept.txt'), 'utf8'), 'PWNED inside\n', 'the file inside the root is still rewritten');
 });
 
+test('write_file refuses a dangling final symlink', async () => {
+  const link = join(inside, 'dangling');
+  const outsideFile = join(outside, 'created-through-link.txt');
+  symlinkSync(outsideFile, link);
+  const result = await invokeTool('write_file', { path: link, content: 'PWNED' });
+  assert.equal(isError(result), true);
+  assert.equal(existsSync(outsideFile), false);
+});
+
 test('a direct call on a symlink outside the root is refused', async () => {
   const read = await invokeTool('read_file', { path: join(inside, 'escape', 'secret.txt') });
   assert.equal(isError(read), true, 'resolving the link lands outside the allowed roots');
   const chmod = await invokeTool('set_permissions', { path: join(inside, 'escape'), mode: '777', recursive: true });
   assert.equal(isError(chmod), true);
   assert.equal(existsSync(join(outside, 'secret.txt')), true);
+});
+
+test('move_to_trash refuses a symlinked fallback trash directory', async () => {
+  const trashLink = join(inside, '.remcp-trash');
+  symlinkSync(outside, trashLink);
+  const source = join(inside, 'trash-source.txt');
+  writeFileSync(source, 'keep me\n');
+  const result = await invokeTool('move_to_trash', { source });
+  assert.equal(isError(result), true);
+  assert.equal(existsSync(source), true);
+  assert.equal(existsSync(join(outside, 'keep me.txt')), false);
+});
+
+test('archive creation refuses descendant symlinks instead of dereferencing them', async () => {
+  const archiveRoot = join(inside, 'archive-source');
+  mkdirSync(archiveRoot, { recursive: true });
+  writeFileSync(join(outside, 'archive-secret.txt'), 'outside archive secret\n');
+  symlinkSync(join(outside, 'archive-secret.txt'), join(archiveRoot, 'secret-link'));
+  const result = await invokeTool('create_archive', { paths: [archiveRoot], destination: join(inside, 'bundle.zip'), format: 'zip' });
+  assert.equal(isError(result), true);
+  assert.match(body(result), /symbolic links/i);
 });

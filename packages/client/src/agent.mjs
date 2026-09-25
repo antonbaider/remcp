@@ -47,10 +47,12 @@ const RUNTIME_TOOLS_RETRY_MAX_MS = 30_000;
 // timeout while the device keeps working invisibly.
 const CALL_TIMEOUT_MARGIN_MS = 10_000;
 
-function normalizedServerUrl(value) {
+function normalizedServerUrl(value, { allowInsecure = false } = {}) {
   const url = new URL(String(value || ''));
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('serverUrl must use http or https');
   if (url.username || url.password) throw new Error('serverUrl must not embed credentials');
+  const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname.toLowerCase());
+  if (url.protocol === 'http:' && !loopback && !allowInsecure) throw new Error('Remote serverUrl must use https');
   url.hash = '';
   url.search = '';
   return url.href.replace(/\/$/, '');
@@ -88,7 +90,7 @@ function deviceMetrics(extra = {}) {
 }
 
 export async function runAgent(options) {
-  const serverUrl = normalizedServerUrl(options.serverUrl);
+  const serverUrl = normalizedServerUrl(options.serverUrl, { allowInsecure: options.allowInsecureTransport === true || process.env.REMCP_ALLOW_INSECURE_TRANSPORT === 'true' });
   const deviceToken = String(options.deviceToken || '');
   const deviceId = String(options.deviceId || '');
   const deviceName = String(options.deviceName || os.hostname());
@@ -524,7 +526,7 @@ export async function runAgent(options) {
     try {
       // This request contains no local file payload; the config-derived URL is the explicitly paired relay.
       // codeql[js/file-access-to-http]
-      const response = await fetch(`${serverUrl}/api/agent/version`, { signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS) });
+      const response = await fetch(`${serverUrl}/api/agent/version`, { redirect: 'error', signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS) });
       if (!response.ok) return;
       const advertised = await response.json();
       const minimum = advertised.minimum;

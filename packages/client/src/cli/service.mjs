@@ -33,6 +33,7 @@ function npmGlobalInstallArgs(specs, { preferOnline = false } = {}) {
     ...(preferOnline ? ['--prefer-online'] : []),
     '--no-audit',
     '--no-fund',
+    '--ignore-scripts',
     '--loglevel=error',
   ];
 }
