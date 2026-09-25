@@ -9,6 +9,14 @@ export function fail(message) {
   throw new ToolError(String(message));
 }
 
+// Cooperative cancellation for handlers that loop over many items. The MCP layer already rejects
+// the call to the client on abort, so the job here is to stop the device-side side effects: a bulk
+// read/write/archive that ignored the signal kept mutating files long after the client gave up.
+// Long handlers call this between items, so a cancel lands at the next item boundary.
+export function throwIfCancelled(signal) {
+  if (signal?.aborted) fail('Cancelled by the client; stopped before the next item.');
+}
+
 export function expandHome(value) {
   const text = String(value ?? '');
   if (text === '~') return os.homedir();

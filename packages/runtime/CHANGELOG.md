@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.110 — 2026-09-25
+
+- Bulk handlers (`read_multiple_files`, `read_files`, `replace_in_files`, `write_files`, `copy_paths`, `move_paths`, `delete_paths`, `create_archive`) and the directory walk now honour client cancellation between items, so an aborted call stops at the next item boundary instead of finishing on the device; single-file and external-tool (`tar`/`unzip`) operations remain atomic and are not interrupted mid-step.
+- A file with more than one hard link now produces one warning per path: path-based confinement cannot see a shared inode, and refusing would break backup and dotfile layouts.
+- Runtime tool names, input schemas and output schemas are unchanged.
+
 ## 0.2.109 — 2026-09-25
 
 - Linux file reads and recursive permission changes retain descriptor-bound parent traversal for the full operation; proc-fd anchored captures remain readable without reopening the path lexically.

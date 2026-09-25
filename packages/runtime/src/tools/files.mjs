@@ -12,7 +12,7 @@ import { describeFilesystemFailure } from '../permissions.mjs';
 import { capturePortalScreenshot, isWaylandSession } from '../screenshot-portal.mjs';
 import { applyHunks, parseUnifiedDiff } from '../patch.mjs';
 import { countEvent, recordEvent } from '../telemetry.mjs';
-import { clampInteger, decodeText, displayPath, fail, globToRegExp, image, isInsideRoot, looksBinary, multi, pageLines, resolveSafePath, splitLines, text } from '../util.mjs';
+import { clampInteger, decodeText, displayPath, fail, globToRegExp, image, isInsideRoot, looksBinary, multi, pageLines, resolveSafePath, splitLines, text, throwIfCancelled } from '../util.mjs';
 
 const MAX_INLINE_FILE_BYTES = 20 * 1024 * 1024;
 // An image travels base64-encoded, which costs a third more bytes. The agent's stdio transport holds
@@ -283,10 +283,26 @@ async function openEntryAtPath(absolute, flags) {
   return { handle, close: () => handle.close() };
 }
 
+// A hard link inside an allowed root is the one escape path-based confinement cannot see: the very
+// same inode is reachable from outside the root, so a read or write here is visible there (round 2
+// audit R2-14). The allowlist is a guardrail, not an inode boundary, so this warns instead of
+// refusing — refusing would break legitimate layouts (backups, dotfile managers, deduplicated
+// stores). One warning per path keeps a hot loop from flooding the log.
+const hardlinkWarned = new Set();
+
+function warnOnHardlink(label, info) {
+  if (!Number.isFinite(info?.nlink) || info.nlink <= 1 || hardlinkWarned.has(label)) return;
+  if (hardlinkWarned.size > 1000) hardlinkWarned.clear();
+  hardlinkWarned.add(label);
+  countEvent('hardlinkWarnings');
+  console.warn(`ReMCP runtime: ${label} has ${info.nlink} hard links, so the same file is reachable from outside the allowed roots`);
+}
+
 async function openRegularFileAtPath(absolute, flags, label = absolute) {
   const opened = await openEntryAtPath(absolute, flags);
   try {
     const info = assertRegularFile(await opened.handle.stat(), label);
+    warnOnHardlink(label, info);
     return { handle: opened.handle, info, close: opened.close };
   } catch (error) {
     await opened.close().catch(() => {});
@@ -388,7 +404,7 @@ async function overwriteOpenFile(handle, content) {
 // anywhere, so links are never followed and each collected path is resolved through
 // resolveSafePath again before a tool reads or writes it. `stat` follows links, which is exactly
 // how a symlinked directory inside a root used to expose files outside it.
-async function collectTree(root, { maxFiles = 500, skip = [] } = {}) {
+async function collectTree(root, { maxFiles = 500, skip = [], signal = null } = {}) {
   const found = [];
   const denied = [];
   const skipName = name => skip.some(entry => (entry.endsWith('*') ? name.startsWith(entry.slice(0, -1)) : name === entry));
@@ -401,6 +417,7 @@ async function collectTree(root, { maxFiles = 500, skip = [] } = {}) {
       return;
     }
     for (const entry of entries) {
+      throwIfCancelled(signal);
       if (found.length >= maxFiles) return;
       if (entry.isSymbolicLink() || skipName(entry.name)) continue;
       const childLogical = path.join(logicalBase, entry.name);
@@ -437,6 +454,8 @@ async function collectTree(root, { maxFiles = 500, skip = [] } = {}) {
     directory = await openDirectoryPath(root);
     await visitDirectory(directory, root);
   } catch {
+    // A cancelled walk must not degrade into the "root is a single file" fallback below.
+    throwIfCancelled(signal);
     let opened;
     try {
       opened = await openEntryAtPath(root, READ_NOFOLLOW_NONBLOCK);
@@ -509,11 +528,12 @@ ${page.slice.join('\n')}`);
   return text(`${header}\n${slice.join('\n')}`);
 }
 
-export async function readMultipleFilesTool(args) {
+export async function readMultipleFilesTool(args, extra = {}) {
   if (!Array.isArray(args.paths) || !args.paths.length) fail('paths must be a non-empty array');
   if (args.paths.length > 50) fail('paths accepts at most 50 entries per call');
   const sections = [];
   for (const entry of args.paths) {
+    throwIfCancelled(extra.signal);
     let absolute;
     try {
       absolute = await resolveSafePath(entry, 'paths[]');
@@ -895,7 +915,7 @@ export async function replaceLinesTool(args) {
   return text(`${summary}.`);
 }
 
-export async function replaceInFilesTool(args) {
+export async function replaceInFilesTool(args, extra = {}) {
   const root = await resolveSafePath(args.path);
   const pattern = typeof args.pattern === 'string' && args.pattern ? args.pattern : fail('pattern is required');
   const replacement = typeof args.replacement === 'string' ? args.replacement : fail('replacement must be a string');
@@ -912,12 +932,13 @@ export async function replaceInFilesTool(args) {
     }
   }
   const info = await getPathInfo(root).catch(() => fail(`Path not found: ${displayPath(root)}`));
-  const walk = info.isFile() ? { files: [root], denied: [] } : await collectTree(root, { maxFiles, skip: ['.git', 'node_modules', '.remcp-trash*'] });
+  const walk = info.isFile() ? { files: [root], denied: [] } : await collectTree(root, { maxFiles, skip: ['.git', 'node_modules', '.remcp-trash*'], signal: extra.signal });
   const files = await confineAll(walk.files);
   const glob = filePattern ? globToRegExp(filePattern) : null;
   const changed = [];
   let scanned = 0;
   for (const file of files) {
+    throwIfCancelled(extra.signal);
     if (changed.length >= maxFiles) break;
     if (glob && !glob.test(path.basename(file))) continue;
     let opened;
@@ -1011,7 +1032,7 @@ export async function moveToTrashTool(args) {
   return text(`Moved ${displayPath(source)} to ${displayPath(target)}. Restore it with move_file if this was a mistake.`);
 }
 
-export async function readFilesTool(args) {
+export async function readFilesTool(args, extra = {}) {
   // Glob-first bulk read: one call fills the model's context with every file that matters
   // instead of one round trip per path.
   const root = await resolveSafePath(args.path || '.');
@@ -1027,6 +1048,7 @@ export async function readFilesTool(args) {
     : await collectTree(root, {
       maxFiles: maxFiles + 1,
       skip: includeIgnored ? ['.remcp-trash*'] : ['node_modules', '.git', '.remcp-trash*'],
+      signal: extra.signal,
     });
   const candidates = await confineAll(walk.files);
   const matched = candidates.filter(target => {
@@ -1038,6 +1060,7 @@ export async function readFilesTool(args) {
   const sections = [];
   let skipped = 0;
   for (const file of files.slice(0, maxFiles)) {
+    throwIfCancelled(extra.signal);
     try {
       const { content, encoding } = await readTextFile(file);
       const lines = splitLines(content);
@@ -1057,7 +1080,7 @@ export async function readFilesTool(args) {
   return text(`${header}\n\n${sections.join('\n\n')}`);
 }
 
-export async function writeFilesTool(args) {
+export async function writeFilesTool(args, extra = {}) {
   // Bulk write for scaffolding: one call creates or replaces many files.
   const files = Array.isArray(args.files) ? args.files : fail('files must be an array of { path, content } objects');
   if (!files.length) fail('files must not be empty');
@@ -1065,6 +1088,7 @@ export async function writeFilesTool(args) {
   const results = [];
   let totalBytes = 0;
   for (const entry of files) {
+    throwIfCancelled(extra.signal);
     const target = typeof entry?.path === 'string' ? entry.path : null;
     if (!target) { results.push('skipped: entry without a path'); continue; }
     if (typeof entry.content !== 'string') { results.push(`skipped ${target}: content must be a string`); continue; }
@@ -1104,7 +1128,7 @@ export async function deletePathTool(args) {
   return text(`Deleted ${info.isDirectory() ? 'directory' : 'file'} ${displayPath(absolute)}${info.isDirectory() ? ` and its ${entries.length} top-level entr${entries.length === 1 ? 'y' : 'ies'}` : ''}.`);
 }
 
-export async function deletePathsTool(args) {
+export async function deletePathsTool(args, extra = {}) {
   const paths = Array.isArray(args.paths) ? args.paths : fail('paths must be an array of absolute paths');
   if (!paths.length) fail('paths must not be empty');
   if (paths.length > 500) fail('paths accepts at most 500 entries per call');
@@ -1112,6 +1136,7 @@ export async function deletePathsTool(args) {
   const results = [];
   let deleted = 0;
   for (const entry of paths) {
+    throwIfCancelled(extra.signal);
     try {
       const absolute = await resolveSafePath(entry, 'paths[]');
       if (path.dirname(absolute) === absolute) throw new Error('refusing to delete the filesystem root');
@@ -1135,7 +1160,7 @@ export async function deletePathsTool(args) {
 
 // Recursive copy for files and whole directories, so a project or a backup can be
 // duplicated in one call.
-export async function copyPathsTool(args) {
+export async function copyPathsTool(args, extra = {}) {
   const pairs = Array.isArray(args.paths) ? args.paths : fail('paths must be an array of { source, destination } objects');
   if (!pairs.length) fail('paths must not be empty');
   if (pairs.length > 200) fail('paths accepts at most 200 entries per call');
@@ -1143,6 +1168,7 @@ export async function copyPathsTool(args) {
   const results = [];
   let copied = 0;
   for (const entry of pairs) {
+    throwIfCancelled(extra.signal);
     try {
       const source = await resolveSafePath(entry?.source, 'paths[].source');
       const destination = await resolveSafePath(entry?.destination, 'paths[].destination');
@@ -1150,7 +1176,7 @@ export async function copyPathsTool(args) {
       await withWritableParent(destination, async anchoredDestination => {
         const existing = await lstat(anchoredDestination).catch(() => null);
         if (existing && !overwrite) throw new Error('destination already exists (pass overwrite: true)');
-        await copyTreeContents(source, anchoredDestination, { entries:0, bytes:0, maxBytes:Number.MAX_SAFE_INTEGER });
+        await copyTreeContents(source, anchoredDestination, { entries:0, bytes:0, maxBytes:Number.MAX_SAFE_INTEGER, signal: extra.signal });
       });
       copied += 1;
       results.push(`copied ${displayPath(source)} → ${displayPath(destination)}`);
@@ -1161,7 +1187,7 @@ export async function copyPathsTool(args) {
   return text(`${copied}/${pairs.length} path(s) copied\n${results.join('\n')}`, copied !== pairs.length);
 }
 
-export async function movePathsTool(args) {
+export async function movePathsTool(args, extra = {}) {
   const pairs = Array.isArray(args.paths) ? args.paths : fail('paths must be an array of { source, destination } objects');
   if (!pairs.length) fail('paths must not be empty');
   if (pairs.length > 200) fail('paths accepts at most 200 entries per call');
@@ -1169,6 +1195,7 @@ export async function movePathsTool(args) {
   const results = [];
   let moved = 0;
   for (const entry of pairs) {
+    throwIfCancelled(extra.signal);
     try {
       const source = await resolveSafePath(entry?.source, 'paths[].source');
       const destination = await resolveSafePath(entry?.destination, 'paths[].destination');
@@ -1184,7 +1211,7 @@ export async function movePathsTool(args) {
             await rename(anchoredSource, anchoredDestination);
           } catch (error) {
             if (error?.code !== 'EXDEV') throw error;
-            await copyTreeContents(anchoredSource, anchoredDestination, { entries:0, bytes:0, maxBytes:Number.MAX_SAFE_INTEGER });
+            await copyTreeContents(anchoredSource, anchoredDestination, { entries:0, bytes:0, maxBytes:Number.MAX_SAFE_INTEGER, signal: extra.signal });
             await rm(anchoredSource, { recursive:true, force:true });
           }
         });
@@ -1289,6 +1316,11 @@ export async function setPermissionsTool(args) {
   if (process.platform === 'linux' && constants.O_NOFOLLOW && constants.O_DIRECTORY) {
     changed = await setLinuxPermissions(absolute, mode, uid, gid, recursive, displayPath(absolute), failures);
   } else {
+    // macOS/Windows fallback: Node exposes no directory-fd-relative chmod/chown there, so this
+    // branch re-resolves each path lexically (confineAll) and then acts on the path. Between those
+    // two steps another process can swap a component, so confinement is a guardrail on this
+    // platform rather than a descriptor-bound guarantee — the same residual the archive/document
+    // staging path documents. Linux uses the descriptor-bound path above.
     const info = await stat(absolute).catch(() => fail(`Path not found: ${displayPath(absolute)}`));
     const targets = [absolute];
     if (recursive && info.isDirectory()) {
@@ -1548,6 +1580,7 @@ async function copyOpenRegularFile(sourceHandle, sourceInfo, destinationPath, st
 }
 
 async function copyTreeContents(source, destination, state = { entries: 0, bytes: 0, maxBytes: MAX_ARCHIVE_EXPANDED_BYTES }) {
+  throwIfCancelled(state.signal);
   const initial = await lstat(source);
   if (initial.isSymbolicLink() || (!initial.isDirectory() && !initial.isFile())) fail('Archive contains symbolic links or special files; archive destination is unsafe');
   state.entries += 1;
@@ -1749,12 +1782,15 @@ function archiveTool() {
   return { tar: probe('tar'), zip: probe('zip'), unzip: probe('unzip', ['-v']) };
 }
 
-export async function createArchiveTool(args) {
+export async function createArchiveTool(args, extra = {}) {
   const tools = archiveTool();
   const sources = Array.isArray(args.paths) ? args.paths : [args.paths].filter(Boolean);
   if (!sources.length) fail('paths must list at least one file or directory');
   const resolved = [];
-  for (const entry of sources) resolved.push(await resolveSafePath(entry, 'paths[]'));
+  for (const entry of sources) {
+    throwIfCancelled(extra.signal);
+    resolved.push(await resolveSafePath(entry, 'paths[]'));
+  }
   const destination = await resolveSafePath(args.destination, 'destination');
   const existingDestination = await lstat(destination).catch(() => null);
   if (existingDestination?.isSymbolicLink()) fail('Archive destination cannot be a symbolic link');
@@ -1774,8 +1810,9 @@ export async function createArchiveTool(args) {
    try {
       await ensureDirectoryPath(snapshotRoot, { allowOutside:true });
 
-     const snapshotState = { entries: 0, bytes: 0, maxBytes: MAX_ARCHIVE_EXPANDED_BYTES };
+     const snapshotState = { entries: 0, bytes: 0, maxBytes: MAX_ARCHIVE_EXPANDED_BYTES, signal: extra.signal };
      for (let index = 0; index < resolved.length; index += 1) {
+       throwIfCancelled(extra.signal);
        const snapshotPath = path.join(snapshotRoot, names[index]);
         await ensureDirectoryPath(path.dirname(snapshotPath), { allowOutside:true });
 

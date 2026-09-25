@@ -99,10 +99,10 @@ UI actions and the XDG Screenshot portal remain separate from that low-level inp
 - file writes replace by default (`mode: "append"` to add), moves and copies replace the destination
   (`overwrite: false` refuses instead), `replace_in_files` applies immediately (`dry_run: true`
   previews), and `move_to_trash` is there when you want an undo;
-- the destructive-command guardrail defaults to `warn`: the command runs and the result carries a note
-  when it matches the catastrophic list (`mkfs`, raw device writes, repartitioning, host power
-  control, fork bombs, recursive root deletion). `allow` removes even the note, `block` refuses
-  before running, and `blockedCommands` adds your own deny list;
+- the destructive-command guardrail defaults to `block`: a catastrophic command is refused before it
+  runs when it matches the list (`mkfs`, raw device writes, repartitioning, host power control, fork
+  bombs, recursive root deletion). `warn` downgrades that to a note on the result, `allow` removes
+  even the note, and `blockedCommands` adds your own deny list;
 - `allowedRoots` is empty, so the device reaches everything the agent's account can reach. Set it to
   confine a device to specific directories, enforced against the resolved real path.
 
@@ -169,6 +169,11 @@ in `~/.config/remcp/runtime.json`. `--describe` always reports the current state
   descriptor-bound directory traversal on Linux. macOS and Windows preserve the same bounded snapshot,
   link/special-file rejection, canonical root confinement and atomic staging semantics, while using their
   portable path APIs where Node does not expose directory-fd-relative open/rename/unlink primitives.
+  Two consequences are worth knowing: on macOS and Windows `set_permissions` re-resolves each path
+  and then chmods it, so a component swap between those two steps is not descriptor-bound, and a file
+  with more than one hard link (`st_nlink > 1`) is reachable from outside the allowed roots no matter
+  which path was used. The runtime warns once per hard-linked path instead of refusing it, because
+  backups and dotfile managers create those layouts legitimately.
 - **Crash-resistant sessions.** A bogus shell, a closed stdin, or a dead parent cannot take the
   runtime down; sessions run in their own process group so `force_terminate` stops a whole pipeline;
   the agent restarts the runtime if it ever exits, so a device recovers instead of going silently

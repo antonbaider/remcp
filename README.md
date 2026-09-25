@@ -225,7 +225,8 @@ deletion, and host resource reporting.
 **Nothing is gated.** There is no approval prompt, no "are you sure", and no mandatory dry run: a tool
 call executes with the full rights of the account running the agent — the same trust model as SSH.
 Writes replace by default and moves/copies replace the destination. The catastrophic-command
-guardrail defaults to `warn` (advisory, not blocking); an operator may choose `allow` or `block`.
+guardrail defaults to `block` (a matching command is refused before it runs); an operator may choose
+`warn` or `allow`.
 Files are never written to a local history log, so tool arguments and output are not recorded there.
 
 ## Unrestricted by design
@@ -239,8 +240,8 @@ Files are never written to a local history log, so tool arguments and output are
 - **Optional hardening, explicit security boundaries.** `remcp godmode on` lifts the roots, the
   blocklist and the command guardrail for one computer — and only a person at that computer can turn
   it on; no MCP tool accepts it. `allowedRoots` and `blockedCommands` are empty until an operator
-  configures them. `dangerousCommands` defaults to `warn`: matching catastrophic commands still
-  run, but the result carries an advisory note; `allow` silences it and `block` refuses it. The
+  configures them. `dangerousCommands` defaults to `block`: a matching catastrophic command is refused
+  before it runs; `warn` lets it run with an advisory note and `allow` silences even that. The
   runtime refuses to start — loudly — if `runtime.json` cannot be parsed, so configured safety
   boundaries are never silently dropped.
 - **Crash-resistant.** A bad shell, a closed stdin, or a 40 MB line cannot take the runtime down; the

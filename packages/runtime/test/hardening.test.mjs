@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import process from 'node:process';
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { body, freshWorkspace, isError } from './helpers.mjs';
 
@@ -64,4 +64,23 @@ test('tool output never leaks the full local path of a blocked escape', async ()
   const result = await invokeTool('read_file', { path: join(allowed, 'escape-file.txt') });
   assert.doesNotMatch(body(result), /top-secret/);
   assert.equal(readFileSync(join(outside, 'secret.txt'), 'utf8'), 'top-secret\n');
+});
+
+test('a hard link inside an allowed root warns once and still works', async t => {
+  if (process.platform === 'win32') return t.skip('hard links need extra privileges on Windows');
+  const target = join(allowed, 'linked.txt');
+  writeFileSync(target, 'shared inode\n');
+  linkSync(target, join(allowed, 'linked-again.txt'));
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => { warnings.push(args.join(' ')); };
+  t.after(() => { console.warn = originalWarn; });
+  const read = await invokeTool('read_file', { path: target });
+  assert.equal(isError(read), false, 'a hard link is a legitimate file layout and must not be refused');
+  assert.match(body(read), /shared inode/);
+  const aboutHardlinks = warnings.filter(line => /hard links/.test(line));
+  assert.equal(aboutHardlinks.length, 1, `expected exactly one hard-link warning, got ${JSON.stringify(warnings)}`);
+  assert.match(aboutHardlinks[0], /reachable from outside the allowed roots/);
+  assert.equal(await invokeTool('read_file', { path: target }).then(result => isError(result)), false);
+  assert.equal(warnings.filter(line => /hard links/.test(line)).length, 1, 'the same path must not warn twice');
 });
