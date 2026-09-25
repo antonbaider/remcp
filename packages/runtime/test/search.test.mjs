@@ -63,11 +63,17 @@ async function totalResults(sessionId) {
 }
 
 test('files search matches globs on file names', async () => {
-  const result = body(await invokeTool('start_search', { path: join(root, 'project'), pattern: '*.js', searchType: 'files' }));
+  const started = await invokeTool('start_search', { path: join(root, 'project'), pattern: '*.js', searchType: 'files' });
+  const sessionId = sessionIdOf(started);
+  await waitFor(async () => /status: (completed|capped|failed)/.test(body(await invokeTool('get_more_search_results', { sessionId, offset: 0, length: 100 }))));
+  const result = body(await invokeTool('get_more_search_results', { sessionId, offset: 0, length: 100 }));
   assert.match(result, /alpha\.js/);
   assert.match(result, /beta\.js/);
   assert.doesNotMatch(result, /README\.md/);
-  const ignored = body(await invokeTool('start_search', { path: join(root, 'project'), pattern: '*.js', searchType: 'files', includeIgnored: true }));
+  const ignoredStarted = await invokeTool('start_search', { path: join(root, 'project'), pattern: '*.js', searchType: 'files', includeIgnored: true });
+  const ignoredSessionId = sessionIdOf(ignoredStarted);
+  await waitFor(async () => /status: (completed|capped|failed)/.test(body(await invokeTool('get_more_search_results', { sessionId: ignoredSessionId, offset: 0, length: 100 }))));
+  const ignored = body(await invokeTool('get_more_search_results', { sessionId: ignoredSessionId, offset: 0, length: 100 }));
   assert.match(ignored, /skip-me/);
 });
 
