@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.112 — 2026-09-25
+
+- Linux EIS absolute pointer motion converts desktop-wide coordinates into the selected libei region before dispatch and keeps the current pointer device when it remains valid, eliminating accepted-but-undelivered absolute moves.
+- Wayland portal drag-and-drop uses one region-safe target transition while pressed, then reasserts the final target before release so `pointerdown → pointermove → pointerup` remains intact.
+- The live computer-use smoke is serialized per user to prevent concurrent desktop-input races; the final ASUS GNOME Wayland run passed 82/82 checks. Runtime tool names and schemas are unchanged.
+
 ## 0.2.111 — 2026-09-25
 
 - `read_document` reads `.xlsx` files again while `allowedRoots` confinement is enabled: the reader no longer re-enters its own temp staging path through the allowlist.

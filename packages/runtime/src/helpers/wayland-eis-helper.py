@@ -216,6 +216,8 @@ class EiSender:
         self.lib.ei_device_has_capability.restype = ctypes.c_bool
         self.lib.ei_device_get_region_at.argtypes = [c_void_p, ctypes.c_double, ctypes.c_double]
         self.lib.ei_device_get_region_at.restype = c_void_p
+        self.lib.ei_region_convert_point.argtypes = [c_void_p, ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double)]
+        self.lib.ei_region_convert_point.restype = ctypes.c_bool
         self.lib.ei_device_start_emulating.argtypes = [c_void_p, ctypes.c_uint32]
         self.lib.ei_device_stop_emulating.argtypes = [c_void_p]
         self.lib.ei_device_keyboard_key.argtypes = [c_void_p, ctypes.c_uint32, ctypes.c_bool]
@@ -367,17 +369,46 @@ class EiSender:
                 return state["ptr"]
         raise RuntimeError(f"no resumed EIS device with capability {cap}")
 
+    def _absolute_motion_for_device(self, device, x, y):
+        if not self.lib.ei_device_has_capability(device, EI_CAP_POINTER_ABSOLUTE):
+            return None
+        region = self.lib.ei_device_get_region_at(device, float(x), float(y))
+        if not region:
+            return None
+        motion_x = ctypes.c_double(float(x))
+        motion_y = ctypes.c_double(float(y))
+        if not self.lib.ei_region_convert_point(region, ctypes.byref(motion_x), ctypes.byref(motion_y)):
+            raise RuntimeError(f"failed to convert desktop coordinate ({x}, {y}) into the selected EIS region")
+        return motion_x.value, motion_y.value
+
     def device_for_absolute(self, x, y):
         candidates = []
+
+        # Preserve pointer identity across absolute motion whenever the current
+        # device still covers the destination. This is required for pointer
+        # capture during drags: switching EIS devices mid-gesture can drop the
+        # captured pointer before its button release is observed.
+        preferred = self.devices.get(self.pointer_device_key)
+        if preferred and preferred["resumed"] and preferred["emulating"]:
+            device = preferred["ptr"]
+            if self.lib.ei_device_has_capability(device, EI_CAP_POINTER_ABSOLUTE):
+                candidates.append(device)
+                converted = self._absolute_motion_for_device(device, x, y)
+                if converted is not None:
+                    return device, converted[0], converted[1]
+
         for state in self.devices.values():
             if not state["resumed"] or not state["emulating"]:
                 continue
             device = state["ptr"]
+            if preferred and self._device_key(device) == self.pointer_device_key:
+                continue
             if not self.lib.ei_device_has_capability(device, EI_CAP_POINTER_ABSOLUTE):
                 continue
             candidates.append(device)
-            if self.lib.ei_device_get_region_at(device, float(x), float(y)):
-                return device
+            converted = self._absolute_motion_for_device(device, x, y)
+            if converted is not None:
+                return device, converted[0], converted[1]
         if candidates:
             raise RuntimeError(f"no absolute-pointer EIS region contains desktop coordinate ({x}, {y})")
         raise RuntimeError("no resumed EIS device with absolute-pointer capability")
@@ -424,8 +455,8 @@ class EiSender:
         elif op == "motion_absolute":
             x = float(payload["x"])
             y = float(payload["y"])
-            device = self.device_for_absolute(x, y)
-            self.lib.ei_device_pointer_motion_absolute(device, x, y)
+            device, motion_x, motion_y = self.device_for_absolute(x, y)
+            self.lib.ei_device_pointer_motion_absolute(device, motion_x, motion_y)
             self.remember_pointer(device, (x, y))
             self.frame(device)
         elif op == "button":

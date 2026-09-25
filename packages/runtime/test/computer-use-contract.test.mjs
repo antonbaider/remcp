@@ -240,7 +240,36 @@ test('Wayland EIS helper releases a button through the same device that received
   );
 });
 
-test('Linux Wayland portal drag settles the source and emits intermediate motion before release', async () => {
+test('Wayland EIS absolute pointer converts desktop coordinates into the selected region before motion', async () => {
+  const helper = await readFile(new URL('../src/helpers/wayland-eis-helper.py', import.meta.url), 'utf8');
+  assert.match(
+    helper,
+    /ei_region_convert_point\.argtypes[\s\S]{0,220}ei_region_convert_point\.restype/,
+    'the helper must bind libei region coordinate conversion',
+  );
+  const convertStart = helper.indexOf('def _absolute_motion_for_device');
+  const convertEnd = helper.indexOf('def device_for_absolute', convertStart);
+  const convertBody = convertStart >= 0 && convertEnd > convertStart ? helper.slice(convertStart, convertEnd) : '';
+  assert.ok(convertBody.includes('ei_device_get_region_at(device, float(x), float(y))'));
+  assert.ok(convertBody.includes('ei_region_convert_point(region, ctypes.byref(motion_x), ctypes.byref(motion_y))'));
+  assert.ok(convertBody.includes('return motion_x.value, motion_y.value'));
+  assert.match(
+    helper,
+    /device, motion_x, motion_y = self\.device_for_absolute\(x, y\)[\s\S]{0,180}ei_device_pointer_motion_absolute\(device, motion_x, motion_y\)/,
+    'absolute motion must send converted region-local coordinates, not the original desktop-wide point',
+  );
+  const selectStart = helper.indexOf('def device_for_absolute');
+  const selectEnd = helper.indexOf('def device_for_pointer_context', selectStart);
+  const selectBody = selectStart >= 0 && selectEnd > selectStart ? helper.slice(selectStart, selectEnd) : '';
+  const preferredIndex = selectBody.indexOf('self.pointer_device_key');
+  const scanIndex = selectBody.indexOf('for state in self.devices.values()');
+  assert.ok(
+    preferredIndex >= 0 && scanIndex > preferredIndex,
+    'absolute motion must prefer the current pointer device before scanning other EIS devices so pointer capture survives a drag',
+  );
+});
+
+test('Linux Wayland portal drag settles the source and preserves pressed state through one absolute target move', async () => {
   const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
   const dragBody = linuxSource.match(/export async function dragDrop\(args = \{\}\) \{[\s\S]*?(?=export async function scroll)/)?.[0] || '';
   assert.match(
@@ -248,10 +277,18 @@ test('Linux Wayland portal drag settles the source and emits intermediate motion
     /portalMoveTo\(fromX, fromY, portalOptions\);[\s\S]{0,420}setTimeout\(resolve, 60\)[\s\S]{0,220}portalPointerButton\(button, true, portalOptions\)/,
     'Wayland portal drag must let the target observe the source position before button-down',
   );
-  assert.match(
-    dragBody,
-    /const steps = Math\.max\(4,[\s\S]{0,500}for \(let step = 1; step <= steps; step \+= 1\)[\s\S]{0,500}portalMoveTo\([\s\S]{0,500}portalPointerButton\(button, false, portalOptions\)/,
-    'Wayland portal drag must deliver intermediate pointer motion before button-up',
+  const pressIndex = dragBody.indexOf("await portalPointerButton(button, true, portalOptions);");
+  const moveIndex = dragBody.indexOf("await portalMoveTo(toX, toY, portalOptions);", pressIndex);
+  const releaseIndex = dragBody.indexOf("await portalPointerButton(button, false, portalOptions);", moveIndex);
+  const releaseReassertIndex = dragBody.lastIndexOf("await portalMoveTo(toX, toY, portalOptions);", releaseIndex);
+  assert.ok(
+    pressIndex >= 0 && moveIndex > pressIndex && releaseReassertIndex > moveIndex && releaseIndex > releaseReassertIndex,
+    'Wayland portal drag must reassert the target immediately before release so XWayland emits pointerup on the dragged target',
+  );
+  assert.equal(
+    dragBody.includes('for (let step = 1; step <= steps; step += 1)'),
+    false,
+    'drag must not synthesize an intermediate absolute-motion path across EIS regions',
   );
 });
 

@@ -1270,22 +1270,16 @@ export async function dragDrop(args = {}) {
     await portalPointerButton(button, true, portalOptions);
     await new Promise(resolve => setTimeout(resolve, clamp(args.hold_ms, 120, 60, 5000)));
 
-    // A single absolute jump while the button is held can be coalesced by Mutter/
-    // XWayland and never become a target-visible pointermove. Send a short,
-    // human-like path so drag-aware toolkits observe movement before button-up.
-    const distance = Math.hypot(toX - fromX, toY - fromY);
-    const steps = Math.max(4, Math.min(20, Math.ceil(distance / 24)));
-    const durationMs = clamp(args.duration_ms, 160, 80, 5000);
-    const stepDelay = Math.max(8, Math.round(durationMs / steps));
-    for (let step = 1; step <= steps; step += 1) {
-      const ratio = step / steps;
-      await portalMoveTo(
-        fromX + (toX - fromX) * ratio,
-        fromY + (toY - fromY) * ratio,
-        portalOptions,
-      );
-      await new Promise(resolve => setTimeout(resolve, stepDelay));
-    }
+    // Keep the pressed pointer on a single absolute-motion transition. Repeated
+    // absolute moves can cross EIS region/device contexts and lose the logical
+    // pressed state. The EIS helper converts the desktop target into region-local
+    // coordinates, so one target move is sufficient and preserves buttons=1.
+    await portalMoveTo(toX, toY, portalOptions);
+    await new Promise(resolve => setTimeout(resolve, clamp(args.duration_ms, 160, 80, 5000)));
+    // Reassert the final target immediately before release. On Mutter/XWayland this
+    // mirrors a real pointer-up gesture and ensures the release is delivered as a
+    // pointerup/mouseup at the dragged target instead of only clearing button state.
+    await portalMoveTo(toX, toY, portalOptions);
     await new Promise(resolve => setTimeout(resolve, 40));
     await portalPointerButton(button, false, portalOptions);
     await new Promise(resolve => setTimeout(resolve, 80));
