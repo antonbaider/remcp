@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.111 — 2026-09-25
+
+- `read_document` reads `.xlsx` files again while `allowedRoots` confinement is enabled: the reader no longer re-enters its own temp staging path through the allowlist.
+- Linux window inventory refreshes X11 rows after the AT-SPI walk, window selectors resolve X11/XWayland targets without a full semantic rebuild, and `window_action focus` verifies direct XWayland activation before falling back to portal cycling. Runtime tool names and schemas are unchanged.
+
 ## 0.2.110 — 2026-09-25
 
 - Bulk handlers (`read_multiple_files`, `read_files`, `replace_in_files`, `write_files`, `copy_paths`, `move_paths`, `delete_paths`, `create_archive`) and the directory walk now honour client cancellation between items, so an aborted call stops at the next item boundary instead of finishing on the device; single-file and external-tool (`tar`/`unzip`) operations remain atomic and are not interrupted mid-step.

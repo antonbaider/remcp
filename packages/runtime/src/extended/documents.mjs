@@ -334,10 +334,12 @@ function readWorksheetCells(xml, sharedStrings, maxCells) {
 }
 
 async function readXlsx(filePath, args) {
-  const source = await snapshotDocumentFile(filePath);
   const dir = await tempDir('remcp-xlsx-read-');
   try {
-    await extractZip(source.path, dir);
+    // extractZip already snapshots the user-approved source into a private temp file
+    // before invoking unzip. A second snapshot here used to re-open ReMCP's own temp
+    // path through allowedRoots, so read_document failed whenever confinement was on.
+    await extractZip(filePath, dir);
     const workbook = await readFile(path.join(dir,'xl','workbook.xml'),'utf8');
     const rels = await readFile(path.join(dir,'xl','_rels','workbook.xml.rels'),'utf8');
     const sheet = workbookSheetPath(workbook, rels, optionalString(args.sheet));
@@ -347,7 +349,6 @@ async function readXlsx(filePath, args) {
     const cells = readWorksheetCells(worksheet, shared, clamp(args.max_cells,5000,1,50_000));
     return { kind:'xlsx', sheet:sheet.name, count:cells.length, cells };
   } finally {
-    await removeTemp(source.dir);
     await removeTemp(dir);
   }
 }

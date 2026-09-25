@@ -132,6 +132,38 @@ test('Linux XWayland pixel geometry uses xwininfo absolute client coordinates', 
   assert.equal(linux.parseX11PixelBounds('Width: 0\nHeight: 0'), null);
 });
 
+test('Linux Wayland inventory refreshes X11 rows after AT-SPI and XWayland focus avoids portal cycling when direct activation verifies', async () => {
+  const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
+  const listStart = linuxSource.indexOf('export async function listWindows() {');
+  const listEnd = linuxSource.indexOf('async function windowMatch', listStart);
+  const listBody = listStart >= 0 && listEnd > listStart ? linuxSource.slice(listStart, listEnd) : '';
+  assert.match(
+    listBody,
+    /window inventory refresh[\s\S]{0,240}if \(refreshedWmRows\.length\) wmRows = refreshedWmRows/,
+    'Wayland inventory must refresh wmctrl after the slower AT-SPI walk so late XWayland windows are not misclassified',
+  );
+
+  const focusStart = linuxSource.indexOf("if (action === 'focus') {");
+  const focusEnd = linuxSource.indexOf("else if (nativeWayland)", focusStart);
+  const focusBody = focusStart >= 0 && focusEnd > focusStart ? linuxSource.slice(focusStart, focusEnd) : '';
+  const direct = focusBody.indexOf("runFile('wmctrl', ['-ia', row.wm_id]");
+  const portal = focusBody.indexOf("portalShortcut('ALT+ESC'");
+  assert.ok(direct >= 0, 'Wayland XWayland focus must try the real wm_id directly');
+  assert.ok(portal > direct, 'portal window cycling must remain a fallback after direct XWayland activation');
+  assert.match(
+    focusBody,
+    /targetAccessibilityFocus\(row\)[\s\S]{0,160}verified XWayland activation/,
+    'direct XWayland activation must be verified before success is reported',
+  );
+
+  const matchStart = linuxSource.indexOf('async function windowMatch(args)');
+  const matchEnd = linuxSource.indexOf('async function focusedAccessibilityContext', matchStart);
+  const matchBody = matchStart >= 0 && matchEnd > matchStart ? linuxSource.slice(matchStart, matchEnd) : '';
+  const fastMatch = matchBody.indexOf('fastX11WindowMatch(args)');
+  const fullInventory = matchBody.indexOf('await listWindows()');
+  assert.ok(fastMatch >= 0 && fullInventory > fastMatch, 'window actions must resolve X11/XWayland selectors before rebuilding the full semantic inventory');
+});
+
 test('Linux semantic typing rejects false AT-SPI writes and auto typing fails safely', async () => {
   const linuxSource = await readFile(new URL('../src/extended/desktop-linux.mjs', import.meta.url), 'utf8');
   const desktopSource = await readFile(new URL('../src/extended/desktop.mjs', import.meta.url), 'utf8');
