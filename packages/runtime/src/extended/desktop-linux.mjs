@@ -55,7 +55,7 @@ async function x11PixelBounds(id) {
 }
 
 export async function listWindows() {
-  const wmRows = commandExists('wmctrl')
+  let wmRows = commandExists('wmctrl')
     ? parseWindows((await runFile('wmctrl', ['-lpGx'], { label: 'window inventory', allowFailure:true, timeout:3000 })).stdout)
     : [];
   if (!isWaylandSession()) {
@@ -84,6 +84,15 @@ export async function listWindows() {
         && Number(node.y) > -1000000;
     });
   } catch {}
+
+  // AT-SPI enumeration can take several seconds on a busy desktop. Refresh the cheap
+  // X11 inventory afterwards so an XWayland window that appeared while AT-SPI was
+  // walking the tree is merged with its semantic window instead of being misclassified
+  // as native Wayland for the rest of this call.
+  if (commandExists('wmctrl')) {
+    const refreshedWmRows = parseWindows((await runFile('wmctrl', ['-lpGx'], { label:'window inventory refresh', allowFailure:true, timeout:3000 })).stdout);
+    if (refreshedWmRows.length) wmRows = refreshedWmRows;
+  }
 
   const pixelBounds = new Map();
   if (commandExists('xwininfo')) {
@@ -151,18 +160,50 @@ export async function listWindows() {
   return jsonResult(rows);
 }
 
+function windowSelector(args = {}) {
+  return {
+    id: optionalString(args.id || args.window_id || args.windowId),
+    pid: Number.isInteger(Number(args.pid)) ? Number(args.pid) : null,
+    app: optionalString(args.app),
+    title: optionalString(args.title || args.window_title || args.windowTitle),
+  };
+}
+
+function windowMatchesSelector(item, selector) {
+  return (!selector.id || item.id === selector.id || item.wm_id === selector.id || item.ui_id === selector.id)
+    && (selector.pid == null || Number(item.pid) === selector.pid)
+    && (!selector.app || String(item.app || '').toLowerCase().includes(selector.app.toLowerCase()))
+    && (!selector.title || String(item.title || '').toLowerCase().includes(selector.title.toLowerCase()));
+}
+
+async function fastX11WindowMatch(args) {
+  if (!commandExists('wmctrl')) return null;
+  const selector = windowSelector(args);
+  const rows = parseWindows((await runFile('wmctrl', ['-lpGx'], {
+    label:'window match',
+    allowFailure:true,
+    timeout:2000,
+  })).stdout);
+  const row = rows.find(item => windowMatchesSelector({ ...item, wm_id:item.id, ui_id:null }, selector));
+  if (!row) return null;
+  return {
+    ...row,
+    wm_id:row.id,
+    ui_id:null,
+    backend:isWaylandSession() ? 'xwayland' : 'x11',
+  };
+}
+
 async function windowMatch(args) {
+  // Most desktop actions target an X11/XWayland window. Resolve that cheap native id
+  // first instead of rebuilding the entire AT-SPI inventory before every action.
+  // Native Wayland windows have no wmctrl row and fall through to the semantic inventory.
+  const fast = await fastX11WindowMatch(args);
+  if (fast) return fast;
+
   const rows = JSON.parse((await listWindows()).content[0].text);
-  const id = optionalString(args.id || args.window_id || args.windowId);
-  const pid = Number.isInteger(Number(args.pid)) ? Number(args.pid) : null;
-  const app = optionalString(args.app);
-  const title = optionalString(args.title || args.window_title || args.windowTitle);
-  const row = rows.find(item =>
-    (!id || item.id === id || item.wm_id === id || item.ui_id === id)
-    && (pid == null || item.pid === pid)
-    && (!app || String(item.app || '').toLowerCase().includes(app.toLowerCase()))
-    && (!title || String(item.title || '').toLowerCase().includes(title.toLowerCase()))
-  );
+  const selector = windowSelector(args);
+  const row = rows.find(item => windowMatchesSelector(item, selector));
   if (!row) throw new Error('No matching window found');
   return row;
 }
@@ -502,7 +543,24 @@ export async function windowAction(args) {
           if (focusState.exact) return text('Window action focus completed via verified AT-SPI focus.');
         } catch {}
       }
-      if (backend === 'x11') unavailable('Wayland window focus', 'AT-SPI focus did not take effect and X11 focus cannot target this Wayland window; use backend=portal');
+      // XWayland windows have a real X11 wm_id even inside a Wayland session. Prefer
+      // direct activation for those windows, verify the result through accessibility,
+      // and only fall back to compositor-level cycling if direct activation did not take.
+      // This avoids dozens of Alt+Esc/AT-SPI round trips on busy desktops.
+      if (row.wm_id && backend !== 'portal' && commandExists('wmctrl')) {
+        const activated = await runFile('wmctrl', ['-ia', row.wm_id], { label:'XWayland window focus', allowFailure:true, timeout:2000 });
+        if (activated.code === 0) {
+          if (commandExists('xdotool')) {
+            await runFile('xdotool', ['windowactivate','--sync',row.wm_id], { label:'XWayland window focus sync', allowFailure:true, timeout:3000 });
+          }
+          await new Promise(resolve => setTimeout(resolve, 80));
+          const focusState = await targetAccessibilityFocus(row);
+          if (focusState.exact) return text('Window action focus completed via verified XWayland activation.');
+        }
+      }
+      if (backend === 'x11') unavailable('Wayland window focus', row.wm_id
+        ? 'direct XWayland activation did not produce verifiable focus'
+        : 'the target is native Wayland and has no X11 window id; use backend=portal');
       if (!waylandPortalCandidate()) unavailable('Wayland window focus', 'no XDG RemoteDesktop portal is available');
       if (backend === 'auto' && !hasWaylandRemoteDesktopGrant()) portalPermissionHint('Wayland window focus');
       const portalOptions = { timeoutMs: backend === 'portal' ? 120_000 : 2500 };
