@@ -76,7 +76,7 @@ jobs:
   publish:
     name: publish to npm and open a release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: test
+    needs: [test, publish-mcp-registry]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -220,20 +220,41 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          name="$(node -p "require('./server.json').name")"
-          version="$(node -p "require('./server.json').version")"
-          remote="$(node -p "require('./server.json').remotes[0].url")"
-          encode() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$1"; }
+           name="$(node -p "require('./server.json').name")"
+           version="$(node -p "require('./server.json').version")"
+           title="$(node -p "require('./server.json').title")"
+           description="$(node -p "require('./server.json').description")"
+           website="$(node -p "require('./server.json').websiteUrl")"
+           repository="$(node -p "require('./server.json').repository.url")"
+           repository_source="$(node -p "require('./server.json').repository.source")"
+           remote="$(node -p "require('./server.json').remotes[0].url")"
+           remote_type="$(node -p "require('./server.json').remotes[0].type")"
+           encode() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$1"; }
+           verify_record() {
+             node - "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" <<'NODE'
+          const fs = require('node:fs');
+          const [name, version, title, description, website, repository, repositorySource, remote, remoteType] = process.argv.slice(2);
+          const record = JSON.parse(fs.readFileSync('/tmp/remcp-registry-current.json', 'utf8'));
+          const server = record.server || {};
+          const official = record._meta?.['io.modelcontextprotocol.registry/official'];
+          if (server.name !== name || server.version !== version || server.title !== title || server.description !== description
+            || server.websiteUrl !== website || server.repository?.url !== repository || server.repository?.source !== repositorySource
+            || !Array.isArray(server.remotes) || server.remotes.length !== 1
+            || server.remotes[0]?.url !== remote || server.remotes[0]?.type !== remoteType
+            || official?.status !== 'active' || official?.isLatest !== true) {
+            throw new Error(`Registry record does not match local metadata or is not active/latest: ${JSON.stringify(record)}`);
+          }
+          NODE
+          }
+
 
           encoded="$(encode "$name")"
           current_url="https://registry.modelcontextprotocol.io/v0/servers/$encoded/versions/$version"
           current_status="$(curl --silent --show-error --output /tmp/remcp-registry-current.json --write-out '%{http_code}' "$current_url")"
           if [[ "$current_status" == 200 ]]; then
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "$name@$version is already present in the Official MCP Registry"
-            exit 0
-          fi
-          if [[ "$current_status" != 404 ]]; then
+             verify_record "$name" "$version" "$title" "$description" "$website" "$repository" "$repository_source" "$remote" "$remote_type"
+
+          elif [[ "$current_status" != 404 ]]; then
             cat /tmp/remcp-registry-current.json >&2 || true
             echo "Registry preflight failed with HTTP $current_status" >&2
             exit 1
@@ -261,10 +282,57 @@ jobs:
             fi
           fi
 
-          echo "publish=true" >> "$GITHUB_OUTPUT"
+          if [[ "$current_status" == 200 ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "$name@$version is already present and matches the Official MCP Registry"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Authenticate with GitHub Actions OIDC
         if: steps.registry-preflight.outputs.publish == 'true'
         run: /tmp/mcp-publisher login github-oidc
       - name: Publish current ReMCP version
         if: steps.registry-preflight.outputs.publish == 'true'
         run: /tmp/mcp-publisher publish server.json
+      - name: Verify published MCP Registry version
+        if: steps.registry-preflight.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+           name="$(node -p "require('./server.json').name")"
+           version="$(node -p "require('./server.json').version")"
+           title="$(node -p "require('./server.json').title")"
+           description="$(node -p "require('./server.json').description")"
+           website="$(node -p "require('./server.json').websiteUrl")"
+           repository="$(node -p "require('./server.json').repository.url")"
+           repository_source="$(node -p "require('./server.json').repository.source")"
+           remote="$(node -p "require('./server.json').remotes[0].url")"
+           remote_type="$(node -p "require('./server.json').remotes[0].type")"
+           encoded="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$name")"
+           url="https://registry.modelcontextprotocol.io/v0/servers/$encoded/versions/$version"
+           for attempt in {1..30}; do
+             status="$(curl --silent --show-error --output /tmp/remcp-registry-published.json --write-out '%{http_code}' "$url")"
+             if [[ "$status" == 200 ]]; then
+               node - "$name" "$version" "$title" "$description" "$website" "$repository" "$repository_source" "$remote" "$remote_type" <<'NODE'
+          const fs = require('node:fs');
+          const [name, version, title, description, website, repository, repositorySource, remote, remoteType] = process.argv.slice(2);
+          const record = JSON.parse(fs.readFileSync('/tmp/remcp-registry-published.json', 'utf8'));
+          const server = record.server || {};
+          const official = record._meta?.['io.modelcontextprotocol.registry/official'];
+          if (server.name !== name || server.version !== version || server.title !== title || server.description !== description
+            || server.websiteUrl !== website || server.repository?.url !== repository || server.repository?.source !== repositorySource
+            || !Array.isArray(server.remotes) || server.remotes.length !== 1
+            || server.remotes[0]?.url !== remote || server.remotes[0]?.type !== remoteType
+            || official?.status !== 'active' || official?.isLatest !== true) {
+            throw new Error(`Published Registry record is invalid: ${JSON.stringify(record)}`);
+          }
+          NODE
+              echo "MCP Registry publication verified: $name@$version"
+              exit 0
+            fi
+
+            [[ "$status" == 404 ]] || { cat /tmp/remcp-registry-published.json >&2 || true; exit 1; }
+            sleep 10
+          done
+          echo "MCP Registry publication did not become visible in time" >&2
+          exit 1

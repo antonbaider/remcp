@@ -3,7 +3,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { access, chmod, chown, copyFile, cp, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, chown, copyFile, cp, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, unlink } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { liveConfig, runtimeConfig } from '../config.mjs';
 import { documentKind, readDocxText, readPdfText } from '../documents.mjs';
@@ -49,6 +49,70 @@ const WRITE_CREATE_NOFOLLOW = constants.O_WRONLY | constants.O_CREAT | constants
 const WRITE_TRUNCATE_NOFOLLOW = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | NOFOLLOW | NONBLOCK;
 const DIRECTORY_READ_NOFOLLOW = constants.O_RDONLY | (constants.O_DIRECTORY || 0) | NOFOLLOW | NONBLOCK;
 
+async function openDirectoryPath(absolute, { create = false } = {}) {
+  const descriptorBound = process.platform === 'linux' && Boolean(constants.O_NOFOLLOW) && Boolean(constants.O_DIRECTORY);
+  if (!descriptorBound) {
+    if (create) await mkdir(absolute, { recursive:true, mode:0o700 });
+    const info = await lstat(absolute);
+    if (info.isSymbolicLink() || !info.isDirectory()) fail('Filesystem path component is not a safe directory');
+    const handle = {
+      stat: () => stat(absolute),
+      chmod: mode => chmod(absolute, mode),
+      close: async () => {},
+    };
+    return { handle, anchor:absolute, descriptorBound:false, close: handle.close };
+  }
+  if (absolute.startsWith('/proc/self/fd/')) {
+    const handle = await open(absolute, DIRECTORY_READ_NOFOLLOW);
+    return { handle, anchor: `/proc/self/fd/${handle.fd}`, close: () => handle.close() };
+  }
+  const root = path.parse(absolute).root;
+  const parts = absolute.slice(root.length).split(path.sep).filter(Boolean);
+  if (!parts.length) {
+    const handle = await open(root, DIRECTORY_READ_NOFOLLOW);
+    return { handle, anchor: `/proc/self/fd/${handle.fd}`, close: () => handle.close() };
+  }
+  const directories = [];
+  let current = root;
+  const closeDirectories = async () => {
+    for (const handle of directories.reverse()) await handle.close().catch(() => {});
+  };
+  try {
+    for (const part of parts) {
+      const candidate = path.join(current, part);
+      let handle;
+      try {
+        handle = await open(candidate, DIRECTORY_READ_NOFOLLOW);
+      } catch (error) {
+        if (!create || error?.code !== 'ENOENT') throw error;
+        await mkdir(candidate, { mode:0o700 }).catch(mkdirError => {
+          if (mkdirError?.code !== 'EEXIST') throw mkdirError;
+        });
+        handle = await open(candidate, DIRECTORY_READ_NOFOLLOW);
+      }
+      const info = await handle.stat();
+      if (!info.isDirectory()) {
+        await handle.close().catch(() => {});
+        fail('Filesystem path component is not a directory');
+      }
+      directories.push(handle);
+      current = `/proc/self/fd/${handle.fd}`;
+    }
+    const handle = directories.pop();
+    return {
+      handle,
+      anchor: current,
+      close: async () => {
+        try { await handle.close(); }
+        finally { await closeDirectories(); }
+      },
+    };
+  } catch (error) {
+    await closeDirectories();
+    throw error;
+  }
+}
+
 async function openRegularFile(absolute, flags = READ_NOFOLLOW) {
   const handle = await open(absolute, flags);
   try {
@@ -58,6 +122,51 @@ async function openRegularFile(absolute, flags = READ_NOFOLLOW) {
     await handle.close().catch(() => {});
     throw error;
   }
+}
+
+async function openWritableParent(absolute) {
+  if (process.platform === 'linux' && constants.O_NOFOLLOW && constants.O_DIRECTORY) {
+    return openDirectoryPath(absolute, { create:true });
+  }
+  await mkdir(absolute, { recursive:true });
+  const info = await lstat(absolute);
+  if (info.isSymbolicLink() || !info.isDirectory()) fail('Filesystem path component is not a directory');
+  return { anchor:absolute, close:async() => {} };
+}
+
+async function writeResolvedFile(absolute, content, { append = false } = {}) {
+  const parent = await openWritableParent(path.dirname(absolute));
+  let handle;
+  try {
+    const flags = append
+      ? constants.O_WRONLY | constants.O_CREAT | (constants.O_APPEND || 0) | NOFOLLOW | NONBLOCK
+      : WRITE_TRUNCATE_NOFOLLOW;
+    handle = await open(path.join(parent.anchor, path.basename(absolute)), flags, 0o600);
+    await handle.writeFile(content);
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    await parent.close().catch(() => {});
+  }
+}
+
+async function withWritableParent(absolute, callback) {
+  const parent = await openWritableParent(path.dirname(absolute));
+  try {
+    return await callback(path.join(parent.anchor, path.basename(absolute)));
+  } finally {
+    await parent.close().catch(() => {});
+  }
+}
+
+async function ensureDirectoryPath(absolute) {
+  if (process.platform === 'linux' && constants.O_NOFOLLOW && constants.O_DIRECTORY) {
+    const directory = await openDirectoryPath(absolute, { create:true });
+    await directory.close();
+    return;
+  }
+  await mkdir(absolute, { recursive:true });
+  const info = await lstat(absolute);
+  if (info.isSymbolicLink() || !info.isDirectory()) fail('Filesystem path component is not a directory');
 }
 
 async function readRegularBuffer(absolute, maxBytes = Infinity) {
@@ -331,8 +440,7 @@ export async function writeFileTool(args) {
       fail(`Appending ${bytes} bytes would grow ${displayPath(absolute)} to ${existingSize + bytes} bytes, above the ${runtimeConfig.maxWriteBytes}-byte write limit for this device`);
     }
   }
-  await mkdir(path.dirname(absolute), { recursive: true });
-  await writeFile(absolute, content, mode === 'append' ? { encoding: 'utf8', flag: 'a' } : 'utf8');
+  await writeResolvedFile(absolute, content, { append: mode === 'append' });
   countEvent('bytesWritten', bytes);
   return text(`${mode === 'append' ? 'Appended' : 'Wrote'} ${bytes} bytes to ${displayPath(absolute)}.`);
 }
@@ -387,8 +495,7 @@ export async function writeBinaryTool(args) {
     recordEvent('write_denied', { reason: 'size_limit' });
     fail(`Decoded content is ${buffer.length} bytes, above the ${runtimeConfig.maxWriteBytes}-byte write limit for this device`);
   }
-  await mkdir(path.dirname(absolute), { recursive: true });
-  await writeFile(absolute, buffer, mode === 'append' ? { flag: 'a' } : undefined);
+  await writeResolvedFile(absolute, buffer, { append: mode === 'append' });
   countEvent('bytesWritten', buffer.length);
   return text(`${mode === 'append' ? 'Appended' : 'Wrote'} ${buffer.length} bytes to ${displayPath(absolute)}.`);
 }
@@ -435,7 +542,7 @@ export async function editBlockTool(args) {
   if (occurrences === expected) {
     const updated = content.split(oldString).join(newString);
     assertWritableSize(updated);
-    if (!dryRun) await writeFile(absolute, updated, 'utf8');
+    if (!dryRun) await writeResolvedFile(absolute, updated);
     return text(present(updated, `Replaced ${occurrences} occurrence(s)`));
   }
   if (occurrences > 0) {
@@ -457,7 +564,7 @@ export async function editBlockTool(args) {
   // file to LF and turned a one-line change into a whole-file diff on Windows.
   const updated = `${lines.join(eol)}${endsWithNewline && lines.length ? eol : ''}`;
   assertWritableSize(updated);
-  if (!dryRun) await writeFile(absolute, updated, 'utf8');
+  if (!dryRun) await writeResolvedFile(absolute, updated);
   return text(present(updated, `Replaced ${starts.length} occurrence(s) using whitespace-tolerant matching (line endings kept as ${eol === '\r\n' ? 'CRLF' : 'LF'})`));
 }
 
@@ -482,7 +589,7 @@ export async function replaceLinesTool(args) {
   if (dryRun) {
     return text(`${summary}\n(dry run: nothing was written)\n${unifiedDiff(original, updatedText, { oldLabel: displayPath(absolute), newLabel: 'after' })}`);
   }
-  await writeFile(absolute, updatedText, 'utf8');
+  await writeResolvedFile(absolute, updatedText);
   return text(`${summary}.`);
 }
 
@@ -577,7 +684,7 @@ export async function moveToTrashTool(args) {
   const existingDestination = await lstat(destination).catch(() => null);
   if (existingDestination?.isSymbolicLink()) fail('Refusing to use a symlink as the trash directory');
   if (existingDestination && !existingDestination.isDirectory()) fail('Trash destination is not a directory');
-  await mkdir(destination, { recursive: true, mode: 0o700 });
+  await ensureDirectoryPath(destination);
   destination = await resolveSafePath(destination, 'trash');
   const destinationInfo = await lstat(destination);
   if (!destinationInfo.isDirectory() || destinationInfo.isSymbolicLink()) fail('Refusing to use a symlink as the trash directory');
@@ -588,11 +695,13 @@ export async function moveToTrashTool(args) {
     target = path.join(destination, `${stamp}-${counter}-${path.basename(source)}`);
     counter += 1;
   }
-  await rename(source, target).catch(async error => {
-    if (error?.code !== 'EXDEV') throw error;
-    if (info.isDirectory()) fail('Moving a directory to the trash across filesystems is not supported');
-    await copyFile(source, target);
-    await unlink(source);
+  await withWritableParent(target, async anchoredTarget => {
+    await rename(source, anchoredTarget).catch(async error => {
+      if (error?.code !== 'EXDEV') throw error;
+      if (info.isDirectory()) fail('Moving a directory to the trash across filesystems is not supported');
+      await copyFile(source, anchoredTarget);
+      await unlink(source);
+    });
   });
   return text(`Moved ${displayPath(source)} to ${displayPath(target)}. Restore it with move_file if this was a mistake.`);
 }
@@ -661,8 +770,7 @@ export async function writeFilesTool(args) {
       const bytes = assertWritableSize(content);
       totalBytes += bytes;
       if (totalBytes > runtimeConfig.maxWriteBytes * 4) fail(`This call would write ${totalBytes} bytes, above the ${runtimeConfig.maxWriteBytes * 4}-byte batch limit`);
-      await mkdir(path.dirname(absolute), { recursive: true });
-      await writeFile(absolute, content, entry.mode === 'append' ? { encoding: 'utf8', flag: 'a' } : 'utf8');
+      await writeResolvedFile(absolute, content, { append: entry.mode === 'append' });
       results.push(`${entry.mode === 'append' ? 'appended' : 'wrote'} ${displayPath(absolute)} (${bytes} bytes)`);
     } catch (error) {
       results.push(`failed ${target}: ${describeFilesystemFailure(error, { path: error?.path })}`);
@@ -732,8 +840,7 @@ export async function copyPathsTool(args) {
       if (!info) throw new Error('source not found');
       const existing = await stat(destination).catch(() => null);
       if (existing && !overwrite) throw new Error('destination already exists (pass overwrite: true)');
-      await mkdir(path.dirname(destination), { recursive: true });
-      await cp(source, destination, { recursive: true, force: overwrite, errorOnExist: !overwrite });
+      await withWritableParent(destination, anchoredDestination => cp(source, anchoredDestination, { recursive: true, force: overwrite, errorOnExist: !overwrite }));
       copied += 1;
       results.push(`copied ${displayPath(source)} → ${displayPath(destination)}`);
     } catch (error) {
@@ -759,14 +866,15 @@ export async function movePathsTool(args) {
       if (!info) throw new Error('source not found');
       const existing = await stat(destination).catch(() => null);
       if (existing && !overwrite) throw new Error('destination already exists (pass overwrite: true)');
-      await mkdir(path.dirname(destination), { recursive: true });
-      try {
-        await rename(source, destination);
-      } catch (error) {
-        if (error?.code !== 'EXDEV') throw error;
-        await cp(source, destination, { recursive: true, force: overwrite, errorOnExist: !overwrite });
-        await rm(source, { recursive: true, force: true });
-      }
+      await withWritableParent(destination, async anchoredDestination => {
+        try {
+          await rename(source, anchoredDestination);
+        } catch (error) {
+          if (error?.code !== 'EXDEV') throw error;
+          await cp(source, anchoredDestination, { recursive: true, force: overwrite, errorOnExist: !overwrite });
+          await rm(source, { recursive: true, force: true });
+        }
+      });
       moved += 1;
       results.push(`moved ${displayPath(source)} → ${displayPath(destination)}`);
     } catch (error) {
@@ -801,8 +909,7 @@ export async function applyPatchTool(args) {
       const stats = diffStats(original, updated);
       if (!dryRun) {
         assertWritableSize(updated);
-        await mkdir(path.dirname(absolute), { recursive: true });
-        await writeFile(absolute, updated, 'utf8');
+        await writeResolvedFile(absolute, updated);
       }
       changed += 1;
       const fuzzy = applied.filter(entry => entry.fuzz > 0).length;
@@ -867,7 +974,7 @@ export async function createDirectoryTool(args) {
   for (const entry of list) {
     try {
       const absolute = await resolveSafePath(entry);
-      await mkdir(absolute, { recursive: true });
+      await ensureDirectoryPath(absolute);
       created.push(displayPath(absolute));
     } catch (error) {
       failed.push(`${entry}: ${describeFilesystemFailure(error, { path: error?.path })}`);
@@ -893,16 +1000,17 @@ export async function moveFileTool(args) {
     const entries = await readdir(destination).catch(() => []);
     if (entries.length) fail(`Destination is a non-empty directory: ${displayPath(destination)}. Move it aside or pick another name.`);
   }
-  await mkdir(path.dirname(destination), { recursive: true });
-  try {
-    await rename(source, destination);
-  } catch (error) {
-    if (error?.code !== 'EXDEV') throw error;
-    const info = await stat(source);
-    if (info.isDirectory()) fail('Moving a directory across filesystems is not supported; copy it manually or move within one volume');
-    await copyFile(source, destination);
-    await unlink(source);
-  }
+  await withWritableParent(destination, async anchoredDestination => {
+    try {
+      await rename(source, anchoredDestination);
+    } catch (error) {
+      if (error?.code !== 'EXDEV') throw error;
+      const info = await stat(source);
+      if (info.isDirectory()) fail('Moving a directory across filesystems is not supported; copy it manually or move within one volume');
+      await copyFile(source, anchoredDestination);
+      await unlink(source);
+    }
+  });
   return text(`Moved ${displayPath(source)} to ${displayPath(destination)}.`);
 }
 
@@ -914,27 +1022,11 @@ export async function copyFileTool(args) {
   if (info.isDirectory()) fail('copy_file copies single files only; create the directory and copy its files individually');
   const overwrite = args.overwrite !== false;
   if (!overwrite && await pathExists(destination)) fail(`Destination already exists: ${displayPath(destination)}. Pass overwrite: true to replace it.`);
-  await mkdir(path.dirname(destination), { recursive: true });
-  await copyFile(source, destination, overwrite ? 0 : constants.COPYFILE_EXCL);
+  await withWritableParent(destination, anchoredDestination => copyFile(source, anchoredDestination, overwrite ? 0 : constants.COPYFILE_EXCL));
   return text(`Copied ${displayPath(source)} to ${displayPath(destination)} (${info.size} bytes).`);
 }
 
 // --- archives -------------------------------------------------------------------------
-async function assertNoSymlinkTree(root, state = { entries: 0 }) {
-  const info = await lstat(root);
-  if (info.isSymbolicLink()) fail(`Archive sources cannot contain symbolic links: ${displayPath(root)}`);
-  if (!info.isDirectory() && !info.isFile()) fail(`Archive sources cannot contain special files: ${displayPath(root)}`);
-  state.entries += 1;
-  if (state.entries > 100_000) fail('Archive source contains too many entries');
-  if (state.maxBytes !== undefined && info.isFile()) {
-    state.bytes = (state.bytes || 0) + info.size;
-    if (state.bytes > state.maxBytes) fail('Archive source exceeds the safety limit');
-  }
-  if (!info.isDirectory()) return;
-  const entries = await readdir(root, { withFileTypes: true });
-  for (const entry of entries) await assertNoSymlinkTree(path.join(root, entry.name), state);
-}
-
 const MAX_ARCHIVE_EXPANDED_BYTES = Math.min(
   4 * 1024 * 1024 * 1024,
   Math.max(64 * 1024 * 1024, Number(process.env.REMCP_MAX_ARCHIVE_EXPANDED_BYTES) || 512 * 1024 * 1024),
@@ -1007,7 +1099,7 @@ async function assertExtractedTree(root, state = { entries: 0, bytes: 0 }) {
 }
 
 async function openArchiveSource(absolute) {
-  if (process.platform !== 'linux') {
+  if (process.platform !== 'linux' || !constants.O_NOFOLLOW || !constants.O_DIRECTORY) {
     const opened = await openRegularFile(absolute, READ_NOFOLLOW_NONBLOCK);
     return { ...opened, close: () => opened.handle.close() };
   }
@@ -1127,29 +1219,29 @@ async function copyOpenRegularFile(sourceHandle, sourceInfo, destinationPath, st
 
 async function copyTreeContents(source, destination, state = { entries: 0, bytes: 0, maxBytes: MAX_ARCHIVE_EXPANDED_BYTES }) {
   const initial = await lstat(source);
-  if (initial.isSymbolicLink() || (!initial.isDirectory() && !initial.isFile())) fail('Archive contains a link or special file; archive destination is unsafe');
+  if (initial.isSymbolicLink() || (!initial.isDirectory() && !initial.isFile())) fail('Archive contains symbolic links or special files; archive destination is unsafe');
   state.entries += 1;
   if (state.entries > 100_000) fail('Archive contains too many entries');
   if (initial.isFile()) {
-    const opened = await openRegularFile(source, READ_NOFOLLOW_NONBLOCK);
+    const opened = source.startsWith('/proc/self/fd/')
+      ? await openRegularFile(source, READ_NOFOLLOW_NONBLOCK)
+      : await openArchiveSource(source);
     try { await copyOpenRegularFile(opened.handle, opened.info, destination, state); }
-    finally { await opened.handle.close(); }
+    finally { if (opened.close) await opened.close(); else await opened.handle.close(); }
     return;
   }
   let directoryHandle = null;
   let sourcePath = source;
   let info = initial;
   try {
-    if (process.platform === 'linux') {
-      try {
-        directoryHandle = await open(source, DIRECTORY_READ_NOFOLLOW);
-        info = await directoryHandle.stat();
-        if (!info.isDirectory()) fail('Archive contains a link or special file; archive destination is unsafe');
-        sourcePath = `/proc/self/fd/${directoryHandle.fd}`;
-      } catch (error) {
-        if (['ELOOP', 'ENOTDIR'].includes(error?.code)) fail('Archive contains a link or special file; archive destination is unsafe');
-        throw error;
-      }
+    try {
+      directoryHandle = await openDirectoryPath(source);
+      info = await directoryHandle.handle.stat();
+      if (!info.isDirectory()) fail('Archive contains a link or special file; archive destination is unsafe');
+      sourcePath = directoryHandle.anchor;
+    } catch (error) {
+      if (['ELOOP', 'ENOTDIR'].includes(error?.code)) fail('Archive contains a link or special file; archive destination is unsafe');
+      throw error;
     }
     const mode = info.mode & 0o777;
     const existing = await lstat(destination).catch(() => null);
@@ -1160,14 +1252,15 @@ async function copyTreeContents(source, destination, state = { entries: 0, bytes
     if (!destinationInfo.isDirectory() || destinationInfo.isSymbolicLink()) fail('Archive contains a link or special file; archive destination is unsafe');
     let destinationHandle;
     try {
-      destinationHandle = await open(destination, DIRECTORY_READ_NOFOLLOW);
-      const openedDestination = await destinationHandle.stat();
+      destinationHandle = await openDirectoryPath(destination);
+      const openedDestination = await destinationHandle.handle.stat();
       if (!openedDestination.isDirectory()) fail('Archive contains a link or special file; archive destination is unsafe');
-      await destinationHandle.chmod(mode | 0o700);
+      await destinationHandle.handle.chmod(mode | 0o700);
+      const destinationAnchor = destinationHandle.anchor;
       for (const name of await readdir(sourcePath)) {
-        await copyTreeContents(path.join(sourcePath, name), path.join(destination, name), state);
+        await copyTreeContents(path.join(sourcePath, name), path.join(destinationAnchor, name), state);
       }
-      await destinationHandle.chmod(mode);
+      await destinationHandle.handle.chmod(mode);
     } finally {
       if (destinationHandle) await destinationHandle.close().catch(() => {});
     }
@@ -1184,32 +1277,39 @@ async function removeExtractionArtifact(target) {
 }
 
 async function recoverExtractionArtifacts(parent, destination, prefix) {
-  const entries = await readdir(parent, { withFileTypes: true });
-  const staleBefore = Date.now() - 60 * 60 * 1000;
-  for (const entry of entries) {
-    if (!entry.name.startsWith('.remcp-extract-txn-')) continue;
-    const candidate = path.join(parent, entry.name);
-    const info = await lstat(candidate).catch(() => null);
-    if (info && info.mtimeMs < staleBefore) await removeExtractionArtifact(candidate);
-  }
-  const backups = entries.filter(entry => entry.name.startsWith(prefix)).map(entry => path.join(parent, entry.name));
-  for (const backup of backups) {
-    const destinationInfo = await lstat(destination).catch(() => null);
-    if (destinationInfo) {
-      await removeExtractionArtifact(backup);
-      continue;
+  const parentDirectory = await openDirectoryPath(parent, { create:true });
+  const anchor = parentDirectory.anchor;
+  const destinationPath = path.join(anchor, path.basename(destination));
+  try {
+    const entries = await readdir(anchor, { withFileTypes: true });
+    const staleBefore = Date.now() - 60 * 60 * 1000;
+    for (const entry of entries) {
+      if (!entry.name.startsWith('.remcp-extract-txn-')) continue;
+      const candidate = path.join(anchor, entry.name);
+      const info = await lstat(candidate).catch(() => null);
+      if (info && info.mtimeMs < staleBefore) await removeExtractionArtifact(candidate);
     }
-    const backupInfo = await lstat(backup).catch(() => null);
-    if (!backupInfo) continue;
-    if (backupInfo.isSymbolicLink() || !backupInfo.isDirectory()) {
-      await removeExtractionArtifact(backup);
-      continue;
+    const backups = entries.filter(entry => entry.name.startsWith(prefix)).map(entry => path.join(anchor, entry.name));
+    for (const backup of backups) {
+      const destinationInfo = await lstat(destinationPath).catch(() => null);
+      if (destinationInfo) {
+        await removeExtractionArtifact(backup);
+        continue;
+      }
+      const backupInfo = await lstat(backup).catch(() => null);
+      if (!backupInfo) continue;
+      if (backupInfo.isSymbolicLink() || !backupInfo.isDirectory()) {
+        await removeExtractionArtifact(backup);
+        continue;
+      }
+      try {
+        await rename(backup, destinationPath);
+      } catch {
+        continue;
+      }
     }
-    try {
-      await rename(backup, destination);
-    } catch {
-      continue;
-    }
+  } finally {
+    await parentDirectory.close().catch(() => {});
   }
 }
 
@@ -1232,20 +1332,23 @@ async function restoreExtractionBackup(backup, destination) {
 async function installExtractedTree(source, destination) {
   const parent = path.dirname(destination);
   if (destination === path.parse(destination).root) fail('Archive destination cannot be a filesystem root');
-  await mkdir(parent, { recursive: true, mode: 0o700 });
   const backupPrefix = `.remcp-extract-backup-${createHash('sha256').update(destination).digest('hex').slice(0, 16)}-`;
   await recoverExtractionArtifacts(parent, destination, backupPrefix);
-  const existing = await lstat(destination).catch(() => null);
+  const parentDirectory = await openDirectoryPath(parent, { create:true });
+  const parentAnchor = parentDirectory.anchor;
+  const destinationPath = path.join(parentAnchor, path.basename(destination));
+  const existing = await lstat(destinationPath).catch(() => null);
   const destinationMode = existing?.isDirectory() ? existing.mode & 0o777 : 0o700;
-  const transaction = await mkdtemp(path.join(parent, '.remcp-extract-txn-'));
+  let transaction = '';
   let backup = '';
   let backupOwned = false;
   let preserveBackup = false;
   try {
+    transaction = await mkdtemp(path.join(parentAnchor, '.remcp-extract-txn-'));
     if (existing) {
-      backup = path.join(parent, `${backupPrefix}${randomUUID()}`);
+      backup = path.join(parentAnchor, `${backupPrefix}${randomUUID()}`);
       try {
-        await rename(destination, backup);
+        await rename(destinationPath, backup);
         backupOwned = true;
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
@@ -1259,7 +1362,7 @@ async function installExtractedTree(source, destination) {
     }
     await copyTreeContents(source, transaction);
     await chmod(transaction, destinationMode);
-    await rename(transaction, destination);
+    await rename(transaction, destinationPath);
     if (backupOwned) {
       await removeExtractionArtifact(backup);
       backupOwned = false;
@@ -1267,7 +1370,7 @@ async function installExtractedTree(source, destination) {
   } catch (error) {
     if (backupOwned) {
       try {
-        await restoreExtractionBackup(backup, destination);
+        await restoreExtractionBackup(backup, destinationPath);
         if (!await lstat(backup).catch(() => null)) backupOwned = false;
         else preserveBackup = true;
       } catch (restoreError) {
@@ -1277,24 +1380,32 @@ async function installExtractedTree(source, destination) {
     }
     throw error;
   } finally {
-    await rm(transaction, { recursive: true, force: true });
+    if (transaction) await rm(transaction, { recursive: true, force: true });
     if (backupOwned && !preserveBackup) await removeExtractionArtifact(backup);
+    await parentDirectory.close().catch(() => {});
   }
 }
 
 async function moveArchiveFile(source, destination) {
+  const parent = path.dirname(destination);
+  const parentDirectory = await openDirectoryPath(parent, { create:true });
+  const destinationPath = path.join(parentDirectory.anchor, path.basename(destination));
   try {
-    await rename(source, destination);
-  } catch (error) {
-    if (!['EXDEV', 'EPERM'].includes(error?.code)) throw error;
-    const temporary = path.join(path.dirname(destination), `.${path.basename(destination)}.remcp-${randomUUID()}.tmp`);
     try {
-      await copyFile(source, temporary, constants.COPYFILE_EXCL);
-      await rename(temporary, destination);
-    } finally {
-      await unlink(temporary).catch(() => {});
+      await rename(source, destinationPath);
+    } catch (error) {
+      if (!['EXDEV', 'EPERM'].includes(error?.code)) throw error;
+      const temporary = path.join(parentDirectory.anchor, `.${path.basename(destination)}.remcp-${randomUUID()}.tmp`);
+      try {
+        await copyFile(source, temporary, constants.COPYFILE_EXCL);
+        await rename(temporary, destinationPath);
+      } finally {
+        await unlink(temporary).catch(() => {});
+      }
+      await unlink(source);
     }
-    await unlink(source);
+  } finally {
+    await parentDirectory.close().catch(() => {});
   }
 }
 
@@ -1314,13 +1425,10 @@ export async function createArchiveTool(args) {
   if (!sources.length) fail('paths must list at least one file or directory');
   const resolved = [];
   for (const entry of sources) resolved.push(await resolveSafePath(entry, 'paths[]'));
-  const sourceState = { entries: 0, bytes: 0, maxBytes: MAX_ARCHIVE_EXPANDED_BYTES };
-  for (const entry of resolved) await assertNoSymlinkTree(entry, sourceState);
   const destination = await resolveSafePath(args.destination, 'destination');
   const existingDestination = await lstat(destination).catch(() => null);
   if (existingDestination?.isSymbolicLink()) fail('Archive destination cannot be a symbolic link');
   const format = String(args.format || (destination.endsWith('.zip') ? 'zip' : 'tar.gz')).toLowerCase();
-  await mkdir(path.dirname(destination), { recursive: true });
   const baseDir = path.dirname(resolved[0]);
   const names = resolved.map(entry => path.relative(baseDir, entry));
   if (names.some(name => !name || name.startsWith('..') || path.isAbsolute(name))) fail('Archive sources must share one parent directory');
@@ -1334,11 +1442,13 @@ export async function createArchiveTool(args) {
    const staging = path.join(stagingDirectory, `payload${suffix}`);
    const snapshotRoot = path.join(stagingDirectory, 'source');
    try {
-     await mkdir(snapshotRoot, { mode: 0o700 });
+      await ensureDirectoryPath(snapshotRoot);
+
      const snapshotState = { entries: 0, bytes: 0, maxBytes: MAX_ARCHIVE_EXPANDED_BYTES };
      for (let index = 0; index < resolved.length; index += 1) {
        const snapshotPath = path.join(snapshotRoot, names[index]);
-       await mkdir(path.dirname(snapshotPath), { recursive: true, mode: 0o700 });
+        await ensureDirectoryPath(path.dirname(snapshotPath));
+
        await copyTreeContents(resolved[index], snapshotPath, snapshotState);
      }
      if (format === 'zip') {
@@ -1353,11 +1463,11 @@ export async function createArchiveTool(args) {
      } else {
        fail('format must be tar, tar.gz, or zip');
      }
-     const stagedInfo = await stat(staging);
-     assertArchiveExpandedSize(stagedInfo.size, 'archive output');
-     await mkdir(path.dirname(destination), { recursive: true });
+      const stagedInfo = await stat(staging);
+      assertArchiveExpandedSize(stagedInfo.size, 'archive output');
 
-     await moveArchiveFile(staging, destination);
+      await moveArchiveFile(staging, destination);
+
      const info = await stat(destination).catch(() => null);
      const note = ' (built outside the tree in temporary staging and committed atomically)';
 
@@ -1397,7 +1507,6 @@ export async function extractArchiveTool(args) {
   try {
     await mkdir(staging, { mode: 0o700 });
     await snapshotRegularFile(archive, archiveSnapshot, MAX_ARCHIVE_EXPANDED_BYTES);
-    await mkdir(parent, { recursive: true, mode: 0o700 });
     await recoverExtractionArtifacts(parent, destination, backupPrefix);
     const existingDestination = await lstat(destination).catch(() => null);
     if (existingDestination?.isSymbolicLink() || (existingDestination && !existingDestination.isDirectory())) fail('Archive destination is not a safe directory');
@@ -1493,8 +1602,17 @@ export async function takeScreenshotTool(args) {
   const requestedDirectory = args.directory ? await resolveSafePath(args.directory, 'directory') : '';
   const temporaryDirectory = requestedDirectory ? '' : await mkdtemp(path.join(os.tmpdir(), 'remcp-screenshot-'));
   const directory = requestedDirectory || temporaryDirectory;
-  if (requestedDirectory) await mkdir(directory, { recursive: true });
-  const file = path.join(directory, `capture-${randomUUID()}.png`);
+  let outputDirectory = null;
+  if (requestedDirectory) {
+    await ensureDirectoryPath(directory);
+    outputDirectory = await openWritableParent(directory);
+  }
+  const outputAnchor = outputDirectory
+    ? outputDirectory.anchor.replace('/proc/self/fd/', `/proc/${process.pid}/fd/`)
+    : directory;
+  const fileName = `capture-${randomUUID()}.png`;
+  const file = path.join(outputAnchor, fileName);
+  const displayFile = path.join(directory, fileName);
   const attempts = [];
   let preserveCapture = false;
   try {
@@ -1530,12 +1648,12 @@ export async function takeScreenshotTool(args) {
         const buffer = await handle.readFile();
         preserveCapture = args.keep === true;
         return multi([
-          { type: 'text', text: `Screenshot of ${os.hostname()} (${info.size} bytes)${preserveCapture ? (' saved at ' + displayPath(file)) : ''}` },
+          { type: 'text', text: `Screenshot of ${os.hostname()} (${info.size} bytes)${preserveCapture ? (' saved at ' + displayPath(displayFile)) : ''}` },
           image(buffer.toString('base64'), 'image/png'),
         ]);
       }
       preserveCapture = true;
-      return text(`Screenshot of ${os.hostname()} captured: ${info.size} bytes, above the ${MAX_IMAGE_BYTES}-byte inline limit, so it is saved at ${displayPath(file)} instead of being returned as an image. Fetch it with read_binary using chunks of up to ${MAX_BINARY_CHUNK_BYTES} bytes (offset_bytes and length_bytes), or ask for a smaller region.`);
+      return text(`Screenshot of ${os.hostname()} captured: ${info.size} bytes, above the ${MAX_IMAGE_BYTES}-byte inline limit, so it is saved at ${displayPath(displayFile)} instead of being returned as an image. Fetch it with read_binary using chunks of up to ${MAX_BINARY_CHUNK_BYTES} bytes (offset_bytes and length_bytes), or ask for a smaller region.`);
     } finally {
       await handle.close();
     }
@@ -1544,6 +1662,7 @@ export async function takeScreenshotTool(args) {
       if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => {});
       else await rm(file, { force: true }).catch(() => {});
     }
+    if (outputDirectory) await outputDirectory.close().catch(() => {});
   }
 }
 export const fileToolHandlers = {

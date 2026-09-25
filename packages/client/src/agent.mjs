@@ -155,6 +155,9 @@ export async function runAgent(options) {
     // process.env here is what gives the runtime its REMCP_RUNTIME_* configuration, PATH,
     // HOME and the telemetry opt-out.
     const env = { ...process.env };
+    // The paired agent is the trusted local launcher. Keep standalone runtimes fail-closed,
+    // while explicitly enabling browser control for runtimes spawned by an authenticated device.
+    if (!Object.hasOwn(env, 'REMCP_BROWSER_REMOTE_ENABLED')) env.REMCP_BROWSER_REMOTE_ENABLED = '1';
     if (!telemetryEnabled) env.REMCP_RUNTIME_DISABLE_TELEMETRY = '1';
     return env;
   }

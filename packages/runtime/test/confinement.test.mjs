@@ -43,6 +43,14 @@ test('write_file refuses a dangling final symlink', async () => {
   assert.equal(existsSync(outsideFile), false);
 });
 
+test('write_file refuses a symlinked parent while creating a new file', async () => {
+  const parentLink = join(inside, 'parent-link');
+  symlinkSync(outside, parentLink);
+  const result = await invokeTool('write_file', { path: join(parentLink, 'created.txt'), content: 'PWNED' });
+  assert.equal(isError(result), true);
+  assert.equal(existsSync(join(outside, 'created.txt')), false);
+});
+
 test('a direct call on a symlink outside the root is refused', async () => {
   const read = await invokeTool('read_file', { path: join(inside, 'escape', 'secret.txt') });
   assert.equal(isError(read), true, 'resolving the link lands outside the allowed roots');

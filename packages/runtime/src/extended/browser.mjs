@@ -2,6 +2,7 @@ import process from 'node:process';
 import os from 'node:os';
 import path from 'node:path';
 import { isIP } from 'node:net';
+import { lookup } from 'node:dns/promises';
 import { existsSync, mkdirSync } from 'node:fs';
 import { resolveSafePath } from '../util.mjs';
 import { clamp, commandExists, jsonResult, optionalString, requireEnum, spawnDetached, unavailable } from './common.mjs';
@@ -11,7 +12,10 @@ const MAX_DISCOVERY_BYTES = 8 * 1024 * 1024;
 const MAX_CDP_MESSAGE_BYTES = 16 * 1024 * 1024;
 const MAX_EVALUATION_BYTES = 256 * 1024;
 const BROWSER_PROTOCOLS = new Set(['http:', 'https:']);
-const BLOCKED_BROWSER_SCHEME = /(?:^|[\s"'`(=])(?:file|chrome|devtools|view-source|filesystem|blob):/i;
+const BLOCKED_BROWSER_SCHEME = /(?:^|[\s"'`(=])(?:file|chrome|devtools|view-source|filesystem|blob|wss?):/i;
+const BLOCKED_BROWSER_NETWORK_API = /\b(?:fetch|WebSocket|EventSource|XMLHttpRequest|sendBeacon)\b/;
+const PRODUCTION_SESSION_IDLE_MS = 10 * 60 * 1000;
+const productionBrowserSessions = new Map();
 
 let browserLaunchPromise = null;
 
@@ -38,6 +42,16 @@ export function browserAutoLaunchAvailable() {
   return Boolean(browserExecutable());
 }
 
+export function browserRemoteEnabled() {
+  const configured = String(process.env.REMCP_BROWSER_REMOTE_ENABLED || '').trim().toLowerCase();
+  if (configured) return ['1', 'true', 'yes', 'on'].includes(configured);
+  return ['development', 'test'].includes(String(process.env.NODE_ENV || '').trim().toLowerCase());
+}
+
+function assertBrowserRemoteEnabled() {
+  if (!browserRemoteEnabled()) throw new Error('Browser control is disabled for remote runtime; set REMCP_BROWSER_REMOTE_ENABLED=1 only on a trusted local runtime');
+}
+
 function browserDataDir() {
   const configured = optionalString(process.env.REMCP_BROWSER_DATA_DIR);
   if (configured) return configured;
@@ -56,6 +70,7 @@ async function waitForBrowserEndpoint(timeoutMs = 5000) {
 }
 
 async function ensureBrowserEndpoint(endpoint) {
+  assertBrowserRemoteEnabled();
   if (endpoint || process.env.REMCP_CDP_URL) return;
   if (await browserCapabilityAvailable(undefined, 250)) return;
   if (!browserLaunchPromise) {
@@ -81,6 +96,8 @@ async function ensureBrowserEndpoint(endpoint) {
 }
 
 export async function browserControlAvailable(endpoint, timeoutMs = 500) {
+  if (!browserRemoteEnabled()) return false;
+  if (process.env.NODE_ENV === 'production' && !productionBrowserPolicyReady()) return false;
   if (await browserCapabilityAvailable(endpoint, timeoutMs)) return true;
   if (endpoint || process.env.REMCP_CDP_URL) return false;
   return browserAutoLaunchAvailable();
@@ -101,6 +118,7 @@ function isLoopbackHost(hostname) {
 }
 
 function localBrowserNavigationAllowed() {
+  if (process.env.NODE_ENV === 'production') return false;
   return ['REMCP_BROWSER_ALLOW_LOCAL_NAVIGATION', 'REMCP_BROWSER_ALLOW_LOCAL', 'REMCP_ALLOW_LOCAL_BROWSER_NAVIGATION']
     .some(name => ['1', 'true', 'yes', 'on'].includes(String(process.env[name] || '').trim().toLowerCase()));
 }
@@ -161,6 +179,11 @@ function endpointUrl(value) {
   return url;
 }
 
+function endpointAuthority(url) {
+  const port = url.port || ((url.protocol === 'https:' || url.protocol === 'wss:') ? '443' : '80');
+  return `${normalizedHost(url.hostname)}:${port}`;
+}
+
 function safeBrowserUrl(value, field = 'url') {
   let url;
   try { url = new URL(String(value || '')); }
@@ -178,8 +201,55 @@ function safePageUrl(value, field = 'browser page URL') {
   return safeBrowserUrl(value, field);
 }
 
+function configuredBrowserHosts() {
+  return String(process.env.REMCP_BROWSER_ALLOWED_HOSTS || '')
+    .split(/[,\s]+/)
+    .map(normalizedHost)
+    .filter(Boolean);
+}
+
+function browserHostAllowlisted(host) {
+  return configuredBrowserHosts().some(pattern => pattern === host
+    || (pattern.startsWith('*.') && host.endsWith(pattern.slice(1)) && host.length > pattern.length - 1));
+}
+
+function browserDnsRebindingExplicitlyAllowed() {
+  return ['1', 'true', 'yes', 'on'].includes(String(process.env.REMCP_BROWSER_ALLOW_DNS_REBIND || '').trim().toLowerCase());
+}
+
+function productionBrowserPolicyReady() {
+  const hosts = configuredBrowserHosts();
+  return (hosts.length > 0 && hosts.some(isIP))
+    || (browserDnsRebindingExplicitlyAllowed() && hosts.length > 0);
+}
+
+async function assertResolvedBrowserUrl(value, field = 'browser URL') {
+  const safe = safeBrowserUrl(value, field);
+  if (localBrowserNavigationAllowed() && process.env.NODE_ENV !== 'production') return safe;
+  const host = normalizedHost(new URL(safe).hostname);
+  if (process.env.NODE_ENV === 'production' && !browserHostAllowlisted(host)) {
+    throw new Error(`${field} host is not in REMCP_BROWSER_ALLOWED_HOSTS`);
+  }
+  if (isIP(host) || (host.endsWith('.test') && process.env.NODE_ENV !== 'production')) return safe;
+  if (process.env.NODE_ENV === 'production' && !isIP(host) && !browserDnsRebindingExplicitlyAllowed()) {
+    throw new Error(`${field} requires an IP-literal allowlist in production; set REMCP_BROWSER_ALLOW_DNS_REBIND=1 only with a DNS/egress boundary`);
+  }
+  let addresses;
+  try { addresses = await lookup(host, { all:true, verbatim:true }); }
+  catch (error) { throw new Error(`${field} host could not be resolved safely: ${error instanceof Error ? error.message : String(error)}`); }
+  if (addresses.some(address => isPrivateBrowserHost(address.address))) {
+    throw new Error(`${field} must not resolve to loopback, private, or link-local addresses`);
+  }
+  return safe;
+}
+
+async function assertResolvedPageUrl(value, field = 'browser page URL') {
+  if (String(value || '') === 'about:blank') return value;
+  return assertResolvedBrowserUrl(value, field);
+}
+
 function expressionHasPrivateDestination(expression) {
-  const urls = expression.match(/https?:\/\/[^\s"'`<>]+/gi) || [];
+  const urls = expression.match(/(?:https?|wss?):\/\/[^\s"'`<>]+/gi) || [];
   return urls.some(value => {
     try { return isPrivateBrowserHost(new URL(value).hostname); }
     catch { return false; }
@@ -193,9 +263,16 @@ function safeEvaluationExpression(value) {
     throw new Error(`expression must be at most ${MAX_EVALUATION_BYTES} bytes`);
   }
   if (BLOCKED_BROWSER_SCHEME.test(expression)) throw new Error('expression contains a blocked local browser scheme');
-  if (!localBrowserNavigationAllowed() && expressionHasPrivateDestination(expression)) {
-    throw new Error('expression contains a blocked private browser destination');
+  if (!localBrowserNavigationAllowed() && (expressionHasPrivateDestination(expression) || BLOCKED_BROWSER_NETWORK_API.test(expression))) {
+    throw new Error('expression contains a blocked private browser destination or network API');
   }
+  return expression;
+}
+
+async function assertSafeEvaluationExpression(value) {
+  const expression = safeEvaluationExpression(value);
+  const urls = expression.match(/(?:https?|wss?):\/\/[^\s"'`<>]+/gi) || [];
+  await Promise.all(urls.map(url => assertResolvedBrowserUrl(url, 'expression destination')));
   return expression;
 }
 
@@ -241,13 +318,33 @@ export async function browserCapabilityAvailable(endpoint, timeoutMs = 500) {
 }
 
 export async function listBrowserTargets(endpoint) {
+  assertBrowserRemoteEnabled();
   await ensureBrowserEndpoint(endpoint);
   const list = await requestJson('/json/list', endpoint);
   if (!Array.isArray(list)) return [];
-  return list.filter(item => {
-    if (!item || item.type !== 'page' || !item.webSocketDebuggerUrl) return false;
-    try { safePageUrl(item.url); return true; } catch { return false; }
-  });
+  const targets = [];
+  for (const item of list) {
+    if (!item || item.type !== 'page' || !item.webSocketDebuggerUrl) continue;
+    try {
+      await assertResolvedPageUrl(item.url);
+      targets.push(item);
+    } catch {}
+  }
+  return targets;
+}
+
+function validatedTargetWebSocketUrl(target, endpoint) {
+  let socketUrl;
+  try { socketUrl = new URL(String(target?.webSocketDebuggerUrl)); }
+  catch { throw new Error('Browser returned an invalid CDP WebSocket URL'); }
+  if (!['ws:', 'wss:'].includes(socketUrl.protocol) || !isLoopbackHost(socketUrl.hostname)) {
+    throw new Error('Browser CDP WebSocket target must be loopback-only');
+  }
+  if (endpointAuthority(socketUrl) !== endpointAuthority(endpoint)
+    || socketUrl.pathname !== `/devtools/page/${encodeURIComponent(String(target.id))}`) {
+    throw new Error('Browser CDP WebSocket target must match the configured loopback page endpoint');
+  }
+  return socketUrl.href;
 }
 
 async function chooseTarget(args = {}) {
@@ -266,13 +363,8 @@ async function chooseTarget(args = {}) {
     if (hasSelector) throw new Error('No browser page target matched the requested selector');
     unavailable('Browser control', 'no debuggable page target is available');
   }
-  let socketUrl;
-  try { socketUrl = new URL(String(target.webSocketDebuggerUrl)); }
-  catch { throw new Error('Browser returned an invalid CDP WebSocket URL'); }
-  if (!['ws:', 'wss:'].includes(socketUrl.protocol) || !isLoopbackHost(socketUrl.hostname)) {
-    throw new Error('Browser CDP WebSocket target must be loopback-only');
-  }
-  return { ...target, webSocketDebuggerUrl: socketUrl.href };
+  const endpoint = endpointUrl(args.endpoint);
+  return { ...target, webSocketDebuggerUrl: validatedTargetWebSocketUrl(target, endpoint) };
 }
 
 class CdpSession {
@@ -284,15 +376,19 @@ class CdpSession {
     this.pending = new Map();
     this.waiters = new Map();
     this.observers = new Map();
+    this.closed = true;
   }
 
   async open() {
     if (typeof WebSocket !== 'function') throw new Error('This Node.js runtime does not provide WebSocket support');
     await new Promise((resolve, reject) => {
       const socket = new WebSocket(this.url);
-      const timer = setTimeout(() => reject(new Error('CDP websocket connection timed out')), this.timeoutMs);
-      socket.addEventListener('open', () => { clearTimeout(timer); this.socket = socket; resolve(); }, { once: true });
-      socket.addEventListener('error', event => { clearTimeout(timer); reject(new Error(event?.message || 'CDP websocket error')); }, { once: true });
+      const timer = setTimeout(() => {
+        try { socket.close(); } catch {}
+        reject(new Error('CDP websocket connection timed out'));
+      }, this.timeoutMs);
+      socket.addEventListener('open', () => { clearTimeout(timer); this.socket = socket; this.closed = false; resolve(); }, { once: true });
+      socket.addEventListener('error', event => { clearTimeout(timer); try { socket.close(); } catch {}; reject(new Error(event?.message || 'CDP websocket error')); }, { once: true });
       socket.addEventListener('message', event => this.onMessage(event));
       socket.addEventListener('close', () => this.onClose());
     });
@@ -307,9 +403,11 @@ class CdpSession {
     }
     let message;
     try { message = JSON.parse(raw); } catch { return; }
-    if (message.id && this.pending.has(message.id)) {
-      const pending = this.pending.get(message.id);
-      this.pending.delete(message.id);
+    const sessionId = String(message.sessionId || '');
+    const pendingKey = message.id ? `${sessionId}:${message.id}` : '';
+    if (message.id && this.pending.has(pendingKey)) {
+      const pending = this.pending.get(pendingKey);
+      this.pending.delete(pendingKey);
       clearTimeout(pending.timer);
       if (message.error) pending.reject(new Error(message.error.message || JSON.stringify(message.error)));
       else pending.resolve(message.result || {});
@@ -318,7 +416,7 @@ class CdpSession {
     const observers = this.observers.get(message.method);
     if (observers) {
       for (const observer of [...observers]) {
-        try { observer(message.params || {}); } catch {}
+        try { observer(message.params || {}, sessionId); } catch {}
       }
     }
     const listeners = this.waiters.get(message.method);
@@ -331,6 +429,7 @@ class CdpSession {
   }
 
   onClose() {
+    this.closed = true;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(new Error('CDP websocket closed'));
@@ -358,15 +457,19 @@ class CdpSession {
     };
   }
 
-  send(method, params = {}) {
+  send(method, params = {}, sessionId = '', timeoutMs = this.timeoutMs) {
+    if (this.closed || !this.socket || this.socket.readyState !== 1) {
+      return Promise.reject(new Error('CDP websocket is not open'));
+    }
     const id = this.nextId++;
+    const key = `${sessionId}:${id}`;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id);
+        this.pending.delete(key);
         reject(new Error(`${method} timed out`));
-      }, this.timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
-      this.socket.send(JSON.stringify({ id, method, params }));
+      }, timeoutMs);
+      this.pending.set(key, { resolve, reject, timer });
+      this.socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
   }
 
@@ -385,18 +488,181 @@ class CdpSession {
     });
   }
 
-  close() { try { this.socket?.close(); } catch {} }
+  close() {
+    if (this.closed) return;
+    try { this.socket?.close(); } catch {}
+    this.onClose();
+  }
+}
+
+async function installBrowserRequestGuard(session) {
+  const guardedSessions = new Set();
+  const childSetup = new Map();
+  const enableSession = async sessionId => {
+    if (guardedSessions.has(sessionId)) return;
+    try {
+      await session.send('Network.enable', {}, sessionId, 2000);
+      await session.send('Network.setBlockedURLs', { urls:['ws://*', 'wss://*'] }, sessionId, 2000);
+      await session.send('Fetch.enable', { patterns:[{ urlPattern:'*' }] }, sessionId, 2000);
+      guardedSessions.add(sessionId);
+    } catch (error) {
+      await session.send('Fetch.disable', {}, sessionId, 1000).catch(() => {});
+      throw error;
+    }
+  };
+  const guardChild = params => {
+    const childSessionId = String(params?.sessionId || '');
+    if (!childSessionId) return Promise.resolve();
+    if (childSetup.has(childSessionId)) return childSetup.get(childSessionId);
+    const setup = (async () => {
+      try {
+        await enableSession(childSessionId);
+        await session.send('Runtime.runIfWaitingForDebugger', {}, childSessionId, 2000);
+      } catch {
+        const targetId = params?.targetInfo?.targetId;
+        if (targetId) await session.send('Target.closeTarget', { targetId }, '', 2000).catch(() => {});
+      }
+    })();
+    childSetup.set(childSessionId, setup);
+    return setup;
+  };
+  const removePaused = session.observe('Fetch.requestPaused', (params, eventSessionId) => {
+    const requestId = params?.requestId;
+    const requestUrl = params?.request?.url || '';
+    void (async () => {
+      let allowed = requestUrl === 'about:blank';
+      if (!allowed) {
+        try { await assertResolvedBrowserUrl(requestUrl, 'browser request'); allowed = true; }
+        catch {}
+      }
+      if (!requestId) return;
+      try {
+        if (allowed) await session.send('Fetch.continueRequest', { requestId }, eventSessionId);
+        else await session.send('Fetch.failRequest', { requestId, errorReason:'BlockedByClient' }, eventSessionId);
+      } catch {}
+    })();
+  });
+  const removeAttached = session.observe('Target.attachedToTarget', params => {
+    void guardChild(params);
+  });
+  await enableSession('');
+  if (process.env.NODE_ENV === 'production') {
+    await session.send('Target.setAutoAttach', { autoAttach:true, waitForDebuggerOnStart:true, flatten:true }, '', 2000);
+    const existing = await session.send('Target.getTargets').catch(() => ({ targetInfos:[] }));
+    for (const targetInfo of existing.targetInfos || []) {
+      if (!['worker', 'service_worker', 'shared_worker', 'iframe', 'webview'].includes(targetInfo.type)) continue;
+      const attached = await session.send('Target.attachToTarget', { targetId:targetInfo.targetId, flatten:true }, '', 2000).catch(() => null);
+      if (attached?.sessionId) await guardChild({ sessionId:attached.sessionId, targetInfo });
+    }
+  }
+  return () => {
+    childSetup.clear();
+    removePaused();
+    removeAttached();
+  };
+}
+
+function productionSessionKey(endpoint, target) {
+  return `${endpoint.origin}|${String(target.id)}`;
+}
+
+function closeProductionSession(key, record) {
+  if (!record) return;
+  if (record.timer) clearTimeout(record.timer);
+  record.removeGuard();
+  record.session.send('Fetch.disable').catch(() => {});
+  record.session.close();
+  if (productionBrowserSessions.get(key) === record) productionBrowserSessions.delete(key);
+}
+
+function retainProductionSession(key, session, removeGuard) {
+  const existing = productionBrowserSessions.get(key);
+  if (existing) closeProductionSession(key, existing);
+  const record = { session, removeGuard, timer:null };
+  productionBrowserSessions.set(key, record);
+  const schedule = () => {
+    if (record.timer) clearTimeout(record.timer);
+    record.timer = setTimeout(() => closeProductionSession(key, record), PRODUCTION_SESSION_IDLE_MS);
+    record.timer.unref?.();
+  };
+  record.schedule = schedule;
+  schedule();
+  return record;
+}
+
+async function createGuardedNewTab(url, args) {
+  await ensureBrowserEndpoint(args.endpoint);
+  const created = await requestJson('/json/new', args.endpoint, { method:'PUT', timeout_ms:args.timeout_ms });
+  if (!created?.id) throw new Error('Browser did not return a new page target');
+  const endpoint = endpointUrl(args.endpoint);
+  const target = { ...created, webSocketDebuggerUrl: validatedTargetWebSocketUrl(created, endpoint) };
+  const session = await new CdpSession(target.webSocketDebuggerUrl, clamp(args.timeout_ms, 10_000, 100, 120_000)).open();
+  let removeGuard = () => {};
+  let productionRecord = null;
+  let productionKey = '';
+  try {
+    removeGuard = await installBrowserRequestGuard(session);
+    if (process.env.NODE_ENV === 'production') {
+      productionKey = productionSessionKey(endpoint, target);
+      productionRecord = retainProductionSession(productionKey, session, removeGuard);
+    }
+    await session.send('Page.enable');
+    const loaded = session.waitFor('Page.loadEventFired', clamp(args.timeout_ms, 15_000, 500, 120_000)).catch(() => null);
+    const navigation = await session.send('Page.navigate', { url });
+    if (loaded) await loaded;
+    const finalUrl = await evaluate(session, 'location.href').catch(() => url);
+    await assertResolvedPageUrl(finalUrl);
+    return { target, navigation, finalUrl };
+  } finally {
+    if (productionRecord) productionRecord.schedule();
+    else {
+      removeGuard();
+      await session.send('Fetch.disable').catch(() => {});
+      session.close();
+    }
+  }
 }
 
 async function withTarget(args, callback) {
   const target = await chooseTarget(args);
-  safePageUrl(target.url);
-  const session = await new CdpSession(target.webSocketDebuggerUrl, clamp(args.timeout_ms, 10_000, 100, 120_000)).open();
+  await assertResolvedPageUrl(target.url);
+  const endpoint = endpointUrl(args.endpoint);
+  const production = process.env.NODE_ENV === 'production';
+  const key = production ? productionSessionKey(endpoint, target) : '';
+  let record = production ? productionBrowserSessions.get(key) : null;
+  if (record?.session?.closed || (record?.session?.socket && record.session.socket.readyState !== 1)) {
+    closeProductionSession(key, record);
+    record = null;
+  }
+  let session = record?.session;
+  let removeGuard = record?.removeGuard || (() => {});
+  if (!session) {
+    session = await new CdpSession(target.webSocketDebuggerUrl, clamp(args.timeout_ms, 10_000, 100, 120_000)).open();
+    try {
+      removeGuard = await installBrowserRequestGuard(session);
+      if (production) record = retainProductionSession(key, session, removeGuard);
+    } catch (error) {
+      removeGuard();
+      await session.send('Fetch.disable').catch(() => {});
+      session.close();
+      throw error;
+    }
+  }
   try {
     const currentUrl = await evaluate(session, 'location.href').catch(() => target.url);
-    safePageUrl(currentUrl);
-    return await callback(session, target);
-  } finally { session.close(); }
+    await assertResolvedPageUrl(currentUrl);
+    const result = await callback(session, target);
+    const finalUrl = await evaluate(session, 'location.href').catch(() => { throw new Error('Browser page URL could not be verified after the operation'); });
+    await assertResolvedPageUrl(finalUrl);
+    return result;
+  } finally {
+    if (production && record) record.schedule();
+    else {
+      removeGuard();
+      await session.send('Fetch.disable').catch(() => {});
+      session.close();
+    }
+  }
 }
 
 async function evaluate(session, expression, awaitPromise = true) {
@@ -458,15 +724,25 @@ async function waitForHistoryReady(session, expectedUrl, timeoutMs) {
 export async function browserNavigate(args = {}) {
   const requestedUrl = optionalString(args.url);
   const action = requireEnum(args.action || (requestedUrl ? 'url' : 'reload'), 'action', ['url','new_tab','back','forward','reload']);
-  const url = ['url','new_tab'].includes(action) ? safeBrowserUrl(requestedUrl) : null;
+  const url = ['url','new_tab'].includes(action) ? await assertResolvedBrowserUrl(requestedUrl, 'url') : null;
   if (['url','new_tab'].includes(action) && !url) throw new Error('url is required when action=url or new_tab');
   if (action === 'new_tab') {
+    if (process.env.NODE_ENV === 'production') {
+      const opened = await createGuardedNewTab(url, args);
+      return jsonResult({
+        target_id: opened.target.id,
+        action,
+        url: opened.finalUrl,
+        title: opened.target.title || '',
+        error_text: opened.navigation?.errorText || null,
+      });
+    }
     await ensureBrowserEndpoint(args.endpoint);
     const created = await requestJson(`/json/new?${encodeURIComponent(url)}`, args.endpoint, { method:'PUT', timeout_ms:args.timeout_ms });
     return jsonResult({
       target_id:created?.id || null,
       action,
-      url:created?.url ? safePageUrl(created.url) : url,
+      url:created?.url ? await assertResolvedPageUrl(created.url) : url,
       title:created?.title || '',
     });
   }
@@ -491,7 +767,7 @@ export async function browserNavigate(args = {}) {
       const nextIndex = action === 'back' ? current - 1 : current + 1;
       const entry = Array.isArray(history.entries) ? history.entries[nextIndex] : null;
       if (!entry) throw new Error(`Cannot navigate ${action}: no history entry is available`);
-      historyUrl = entry.url ? safePageUrl(entry.url, 'history URL') : null;
+      historyUrl = entry.url ? await assertResolvedPageUrl(entry.url, 'history URL') : null;
       await session.send('Page.navigateToHistoryEntry', { entryId: entry.id });
     }
     if (loaded) await loaded;
@@ -499,7 +775,7 @@ export async function browserNavigate(args = {}) {
       await waitForHistoryReady(session, historyUrl, timeoutMs);
     }
     const currentUrl = await evaluate(session, 'location.href').catch(() => url || target.url || null);
-    if (currentUrl) safePageUrl(currentUrl);
+    if (currentUrl) await assertResolvedPageUrl(currentUrl);
     return jsonResult({ target_id: target.id, action, url: currentUrl, frame_id: frameId, error_text: errorText });
   });
 }
@@ -821,7 +1097,7 @@ export async function browserWait(args = {}) {
   const idleMs = clamp(args.idle_ms, 500, 100, 10_000);
   const wanted = optionalString(args.selector || args.text || args.value || args.expression);
   if (['selector','text','url_contains','expression'].includes(condition) && !wanted) throw new Error('selector/text/value/expression is required for this condition');
-  if (condition === 'expression') safeEvaluationExpression(wanted);
+  if (condition === 'expression') await assertSafeEvaluationExpression(wanted);
   return withTarget(args, async (session, target) => {
     const started = Date.now();
     const initialUrl = await evaluate(session, 'location.href').catch(() => target.url || '');
@@ -891,7 +1167,8 @@ export async function browserWait(args = {}) {
 }
 
 export async function browserEvaluate(args) {
-  const expression = safeEvaluationExpression(args.expression);
+  assertBrowserRemoteEnabled();
+  const expression = await assertSafeEvaluationExpression(args.expression);
   return withTarget(args, async (session, target) => jsonResult({ target_id: target.id, value: await evaluate(session, expression, args.await_promise !== false) }));
 }
 

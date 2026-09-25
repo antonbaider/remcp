@@ -2,7 +2,7 @@
 import process from 'node:process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { advertisedTools as advertisedCoreTools, toolDefinitions as coreToolDefinitions } from './catalog.mjs';
+import { advertisedTools as advertisedCoreTools, supportedCoreTools, toolDefinitions as coreToolDefinitions } from './catalog.mjs';
 import { allExtendedTools, advertisedExtendedTools, extendedToolDefinitions } from './extended/catalog.mjs';
 import { describeConfig, configurationError, runtimeConfigDir } from './config.mjs';
 import { shutdownSessions, startSessionSweeper } from './sessions.mjs';
@@ -13,7 +13,7 @@ const args = process.argv.slice(2);
 const allToolDefinitions = [...coreToolDefinitions, ...extendedToolDefinitions];
 
 async function advertisedRuntimeTools() {
-  return [...advertisedCoreTools(), ...await advertisedExtendedTools()];
+  return [...supportedCoreTools(), ...await advertisedExtendedTools()];
 }
 
 async function writeStdout(value) {

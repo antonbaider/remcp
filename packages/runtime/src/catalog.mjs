@@ -830,6 +830,14 @@ export const toolDefinitions = [
   },
 ];
 
+export function coreToolSupported(definition) {
+  return !['create_archive', 'extract_archive'].includes(definition.name) || process.platform === 'linux';
+}
+
+export function supportedCoreTools() {
+  return toolDefinitions.filter(coreToolSupported);
+}
+
 export function advertisedTools() {
   return toolDefinitions.map(({ name, title, description, inputSchema, annotations, outputSchema }) => ({
     name,

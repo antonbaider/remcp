@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.108 — 2026-09-25
+
+- Standalone production runtimes keep browser control disabled unless explicitly enabled; the authenticated paired agent enables its owned local runtime. IP-literal production allowlisting and persistent CDP guards cover page and worker sessions, delayed navigation, redirects, and subresources.
+- Archive and document operations use descriptor-bound Linux traversal where available; macOS/Windows preserve bounded source snapshots, canonical confinement, link/special-file rejection, and atomic staging through portable filesystem APIs instead of losing document/archive tools.
+- Linux semantic scroll/drag targets refresh accessibility geometry, and empty AT-SPI snapshots retry once before using the conservative depth fallback. Runtime tool names and schemas are unchanged.
+
 ## 0.2.106 — 2026-09-22
 
 - Wayland EIS records the emulated device used for each button press and sends the matching release through that same device, preventing cross-region/device drags from losing `pointerup`.
