@@ -190,6 +190,7 @@ export function createSearchSession({ type, pattern, path, filePattern }) {
     error: null,
     warning: null,
     cancel: null,
+    release: null,
     waiters: [],
     lastActivityAt: Date.now(),
   };
@@ -209,6 +210,9 @@ export function finishSearchSession(session, status, error = null) {
   session.error = error ? String(error) : null;
   session.finishedAt = Date.now();
   session.cancel = null;
+  const release = session.release;
+  session.release = null;
+  if (release) void Promise.resolve(release()).catch(() => {});
   notify(session);
 }
 

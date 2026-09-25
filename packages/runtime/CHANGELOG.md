@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.109 — 2026-09-25
+
+- Linux file reads and recursive permission changes retain descriptor-bound parent traversal for the full operation; proc-fd anchored captures remain readable without reopening the path lexically.
+- Linux directory walks, listings, and search sessions pin allowed roots and parent descriptors, including bulk reads and edits, so ancestor swaps cannot redirect traversal.
+- `record_screen` publishes from private staging and anchors Linux destination parents; XDG portal screenshots use no-follow copying, reject symlink source/destination paths, and no longer delete an untrusted portal-returned URI.
+- Production CDP sessions reject dead sockets, recursively guard child targets and evict failed guarded new-tab sessions. Runtime tool names and schemas are unchanged.
+
 ## 0.2.108 — 2026-09-25
 
 - Standalone production runtimes keep browser control disabled unless explicitly enabled; the authenticated paired agent enables its owned local runtime. IP-literal production allowlisting and persistent CDP guards cover page and worker sessions, delayed navigation, redirects, and subresources.

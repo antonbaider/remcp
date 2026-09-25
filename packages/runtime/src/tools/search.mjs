@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { constants } from 'node:fs';
-import { open, readdir, stat } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { spawn, spawnSync } from 'node:child_process';
-import { runtimeConfig } from '../config.mjs';
+import { openDirectoryPath, openRegularFile } from './files.mjs';
 import { countEvent, recordEvent } from '../telemetry.mjs';
 import {
   appendSearchResults,
@@ -76,6 +76,12 @@ function rememberSearchWarning(session, warning) {
   session.warning = warning instanceof Error ? warning.message : String(warning);
 }
 
+function displayRipgrepLine(line, target) {
+  if (line === target.anchor) return target.displayPath;
+  if (line.startsWith(`${target.anchor}/`)) return `${target.displayPath}${line.slice(target.anchor.length)}`;
+  return line;
+}
+
 function ripgrepTraversalWarnings(stderr, target) {
   const lines = String(stderr || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   if (!lines.length) return null;
@@ -90,19 +96,50 @@ function ripgrepTraversalWarnings(stderr, target) {
   return lines;
 }
 
-async function walk(target, options, onFile, isRoot = true) {
-  let info;
+const SEARCH_READ_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0);
+
+function onceAsync(callback) {
+  let called = false;
+  return async () => {
+    if (called) return;
+    called = true;
+    await callback();
+  };
+}
+
+async function openSearchTarget(absolute) {
+  let directory;
+  let directoryError;
   try {
-    info = await stat(target);
+    directory = await openDirectoryPath(absolute);
+    const info = await directory.handle.stat();
+    if (!info.isDirectory()) fail('Search path is not a directory');
+    const close = onceAsync(directory.close);
+    const anchor = directory.anchor.replace(/^\/proc\/self\/fd\//, `/proc/${process.pid}/fd/`);
+    return { kind:'directory', anchor, displayPath:absolute, close };
   } catch (error) {
-    if (isRoot) fail(`Search path not found: ${displayPath(target)}`);
-    options.onWarning?.(error);
+    directoryError = error;
+    if (directory) await directory.close().catch(() => {});
+  }
+  try {
+    const opened = await openRegularFile(absolute, SEARCH_READ_FLAGS);
+    const close = onceAsync(opened.close);
+    const anchor = process.platform === 'linux' ? `/proc/${process.pid}/fd/${opened.handle.fd}` : absolute;
+    return { kind:'file', anchor, displayPath:absolute, handle:opened.handle, info:opened.info, close };
+  } catch (error) {
+    if (directoryError?.code === 'ENOENT' || error?.code === 'ENOENT') fail(`Search path not found: ${displayPath(absolute)}`);
+    throw error;
+  }
+}
+
+async function walk(node, options, onFile, isRoot = true) {
+  if (node.kind === 'file') {
+    await onFile(node);
     return;
   }
-  if (info.isFile()) { await onFile(target); return; }
   let entries;
   try {
-    entries = await readdir(target, { withFileTypes: true });
+    entries = await readdir(node.anchor, { withFileTypes: true });
   } catch (error) {
     if (isRoot) throw error;
     options.onWarning?.(error);
@@ -111,20 +148,40 @@ async function walk(target, options, onFile, isRoot = true) {
   for (const entry of entries) {
     if (options.stopped()) return;
     if (!options.includeHidden && entry.name.startsWith('.')) continue;
-    const child = path.join(target, entry.name);
+    const childDisplay = path.join(node.displayPath, entry.name);
+    const childAnchor = path.join(node.anchor, entry.name);
     if (entry.isDirectory()) {
       if (options.skipDirectories.has(entry.name)) continue;
-      await walk(child, options, onFile, false);
+      let child;
+      try {
+        child = await openDirectoryPath(childAnchor);
+        const info = await child.handle.stat();
+        if (!info.isDirectory()) fail('Filesystem path component is not a directory');
+        await walk({ kind:'directory', anchor:child.anchor, displayPath:childDisplay, close:child.close }, options, onFile, false);
+      } catch (error) {
+        options.onWarning?.(error);
+      } finally {
+        if (child) await child.close().catch(() => {});
+      }
     } else if (entry.isFile()) {
-      await onFile(child);
+      let child;
+      try {
+        child = await openRegularFile(childAnchor, SEARCH_READ_FLAGS);
+        await onFile({ kind:'file', displayPath:childDisplay, handle:child.handle, info:child.info });
+      } catch (error) {
+        options.onWarning?.(error);
+      } finally {
+        if (child) await child.close().catch(() => {});
+      }
     }
   }
 }
 
-function runRipgrep(session, { path: target, pattern, searchType, filePattern, ignoreCase, includeHidden, includeIgnored, contextLines, maxResults, patternIsLiteral }) {
+function runRipgrep(session, { target, pattern, searchType, filePattern, ignoreCase, includeHidden, includeIgnored, contextLines, maxResults, patternIsLiteral }) {
   // Flags must come before the `--` separator: anything after it is treated as a path,
   // which silently turned `--hidden` into a search target.
   const args = ['--no-heading', '--color', 'never'];
+  const searchTarget = target.anchor;
   if (ignoreCase) args.push('--ignore-case');
   if (includeHidden) args.push('--hidden');
   if (!includeIgnored) for (const glob of SKIP_GLOBS) args.push('-g', glob);
@@ -134,12 +191,12 @@ function runRipgrep(session, { path: target, pattern, searchType, filePattern, i
     // Globs are case-sensitive even under --ignore-case, so a case-insensitive file
     // search needs --iglob.
     args.push(ignoreCase ? '--iglob' : '-g', fileNameGlob(pattern));
-    args.push('--', target);
+    args.push('--', searchTarget);
   } else {
     args.push('--line-number', '--with-filename');
     if (patternIsLiteral) args.push('--fixed-strings');
     if (contextLines) args.push('-C', String(contextLines));
-    args.push('--', pattern, target);
+    args.push('--', pattern, searchTarget);
   }
   const child = spawn(ripgrep(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
   session.cancel = () => child.kill('SIGTERM');
@@ -154,7 +211,7 @@ function runRipgrep(session, { path: target, pattern, searchType, filePattern, i
     const batch = [];
     for (const line of lines) {
       if (!line.trim()) continue;
-      batch.push(line);
+      batch.push(displayRipgrepLine(line, target));
       collected += 1;
       if (collected >= maxResults) { capped = true; child.kill('SIGTERM'); break; }
     }
@@ -167,7 +224,7 @@ function runRipgrep(session, { path: target, pattern, searchType, filePattern, i
     // ripgrep exits 2 both for fatal invocation errors and for partial traversal errors.
     // Descendant OS errors are recoverable: preserve readable matches and surface a warning.
     if (code === 2 && stderr.trim()) {
-      const warnings = ripgrepTraversalWarnings(stderr, target);
+      const warnings = ripgrepTraversalWarnings(stderr, searchTarget);
       if (!warnings) { finishSearchSession(session, 'failed', stderr.trim().split(/\r?\n/)[0]); return; }
       rememberSearchWarning(session, warnings.length === 1 ? warnings[0] : `${warnings[0]} (+${warnings.length - 1} more)`);
     }
@@ -175,7 +232,7 @@ function runRipgrep(session, { path: target, pattern, searchType, filePattern, i
   });
 }
 
-async function runFallback(session, { path: target, matcher, searchType, filePattern, ignoreCase, contextLines, maxResults, includeHidden, includeIgnored }) {
+async function runFallback(session, { target, matcher, searchType, filePattern, ignoreCase, contextLines, maxResults, includeHidden, includeIgnored }) {
   const fileGlobs = splitGlobs(filePattern).map(globToRegExp);
   const nameGlob = searchType === 'files' ? globToRegExp(fileNameGlob(session.pattern)) : null;
   const nameLiteral = searchType === 'files' && !/[*?[\]{}]/.test(session.pattern) ? session.pattern : null;
@@ -187,30 +244,17 @@ async function runFallback(session, { path: target, matcher, searchType, filePat
     onWarning: warning => rememberSearchWarning(session, warning),
   }, async file => {
     if (session.status !== 'running' || collected >= maxResults) return;
-    if (fileGlobs.length && !fileGlobs.some(glob => glob.test(path.basename(file)))) return;
+    if (fileGlobs.length && !fileGlobs.some(glob => glob.test(path.basename(file.displayPath)))) return;
     if (searchType === 'files') {
-      const base = path.basename(file);
+      const base = path.basename(file.displayPath);
       const matches = (nameGlob && nameGlob.test(base)) || (nameLiteral && (ignoreCase ? base.toLowerCase().includes(nameLiteral.toLowerCase()) : base.includes(nameLiteral)));
       if (!matches) return;
       collected += 1;
-      appendSearchResults(session, [displayPath(file)]);
+      appendSearchResults(session, [displayPath(file.displayPath)]);
       return;
     }
-    let handle;
-    try {
-      handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
-    } catch (error) {
-      rememberSearchWarning(session, error);
-      return;
-    }
-    let buffer;
-    try {
-      const info = await handle.stat();
-      if (!info.isFile() || info.size > MAX_FALLBACK_FILE_BYTES) return;
-      buffer = await handle.readFile();
-    } finally {
-      await handle.close();
-    }
+    if (!file.info.isFile() || file.info.size > MAX_FALLBACK_FILE_BYTES) return;
+    const buffer = await file.handle.readFile();
     if (looksBinary(buffer)) return;
     const lines = splitLines(buffer.toString('utf8'));
     for (let index = 0; index < lines.length; index += 1) {
@@ -224,7 +268,7 @@ async function runFallback(session, { path: target, matcher, searchType, filePat
         }
       }
       collected += 1;
-      appendSearchResults(session, [formatContentResult(file, index + 1, lines[index], context)]);
+      appendSearchResults(session, [formatContentResult(file.displayPath, index + 1, lines[index], context)]);
     }
   });
   finishSearchSession(session, session.status === 'running' ? (collected >= maxResults ? 'capped' : 'completed') : session.status);
@@ -232,7 +276,6 @@ async function runFallback(session, { path: target, matcher, searchType, filePat
 
 export async function startSearchTool(args) {
   const target = await resolveSafePath(args.path);
-  await stat(target).catch(() => fail(`Search path not found: ${displayPath(target)}`));
   const pattern = requireString(args.pattern, 'pattern');
   const searchType = String(args.searchType || 'content').toLowerCase();
   if (!['content', 'files'].includes(searchType)) fail('searchType must be content or files');
@@ -244,12 +287,12 @@ export async function startSearchTool(args) {
   const contextLines = clampInteger(args.contextLines, 0, 0, 10);
   const maxResults = clampInteger(args.maxResults, 200, 1, 5000);
   const matcher = searchType === 'content' ? normalizePattern(pattern, args.literalSearch === true, ignoreCase) : { regex: null, literal: pattern, patternIsLiteral: false };
+  const openedTarget = await openSearchTarget(target);
   const session = createSearchSession({ type: searchType, pattern, path: target, filePattern });
+  session.release = openedTarget.close;
   countEvent('searchesStarted');
   recordEvent('session_started', { sessionKind: 'search', success: true });
-  const options = { path: target, pattern, searchType, filePattern, ignoreCase, includeHidden, includeIgnored, contextLines, maxResults, matcher, patternIsLiteral: matcher.patternIsLiteral === true };
-  // Literal searches also go to ripgrep through --fixed-strings; the JavaScript fallback
-  // only runs when ripgrep is unavailable.
+  const options = { target: openedTarget, pattern, searchType, filePattern, ignoreCase, includeHidden, includeIgnored, contextLines, maxResults, matcher, patternIsLiteral: matcher.patternIsLiteral === true };
   if (ripgrep()) runRipgrep(session, options);
   else void runFallback(session, options).catch(error => finishSearchSession(session, 'failed', error instanceof Error ? error.message : String(error)));
   await waitForSearchResults(session, 1, 800);

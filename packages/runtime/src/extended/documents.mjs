@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { copyFile, link, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { readDocxText, readPdfText } from '../documents.mjs';
+import { openDirectoryPath } from '../tools/files.mjs';
 import { resolveSafePath, text } from '../util.mjs';
 import {
   clamp,
@@ -30,7 +31,6 @@ const MAX_OOXML_ENTRIES = 10_000;
 const MAX_OOXML_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
 const MAX_DOCUMENT_BYTES = 128 * 1024 * 1024;
 const DOCUMENT_READ_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0);
-const DOCUMENT_DIRECTORY_FLAGS = constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0);
 
 function descriptorAnchorsAvailable() {
   return process.platform === 'linux' && Boolean(constants.O_NOFOLLOW) && Boolean(constants.O_DIRECTORY);
@@ -48,93 +48,29 @@ async function openDocumentSource(filePath) {
       throw error;
     }
   }
-  const root = path.parse(filePath).root;
-  const parts = filePath.slice(root.length).split(path.sep).filter(Boolean);
-  if (!parts.length) throw new Error('Document path must be a regular file');
-  const directories = [];
-  let current = root;
-  const closeDirectories = async () => {
-    for (const handle of directories.reverse()) await handle.close().catch(() => {});
-  };
+  const parent = await openDirectoryPath(path.dirname(filePath));
+  let handle;
   try {
-    for (const part of parts.slice(0, -1)) {
-      const handle = await open(path.join(current, part), DOCUMENT_DIRECTORY_FLAGS);
-      const info = await handle.stat();
-      if (!info.isDirectory()) {
-        await handle.close().catch(() => {});
-        throw new Error('Document path parent is not a directory');
-      }
-      directories.push(handle);
-      current = `/proc/self/fd/${handle.fd}`;
-    }
-    const handle = await open(path.join(current, parts.at(-1)), DOCUMENT_READ_FLAGS);
+    handle = await open(path.join(parent.anchor, path.basename(filePath)), DOCUMENT_READ_FLAGS);
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error('Document path must be a regular file');
     return {
       handle,
       close: async () => {
         try { await handle.close(); }
-        finally { await closeDirectories(); }
+        finally { await parent.close().catch(() => {}); }
       },
     };
   } catch (error) {
-    await closeDirectories();
+    if (handle) await handle.close().catch(() => {});
+    await parent.close().catch(() => {});
     throw error;
   }
 }
 
 async function openDocumentDirectoryPath(directory, { create = false } = {}) {
-  if (!descriptorAnchorsAvailable()) {
-    if (create) await mkdir(directory, { recursive:true, mode:0o700 });
-    const handle = await open(directory, DOCUMENT_DIRECTORY_FLAGS);
-    try {
-      const info = await handle.stat();
-      if (!info.isDirectory()) throw new Error('Document path parent is not a directory');
-      return { handle, anchor:directory, descriptorBound:false, close: () => handle.close() };
-    } catch (error) {
-      await handle.close().catch(() => {});
-      throw error;
-    }
-  }
-  const root = path.parse(directory).root;
-  const parts = directory.slice(root.length).split(path.sep).filter(Boolean);
-  if (!parts.length) {
-    const handle = await open(root, DOCUMENT_DIRECTORY_FLAGS);
-    return { anchor: `/proc/self/fd/${handle.fd}`, close: () => handle.close() };
-  }
-  const directories = [];
-  let current = root;
-  const closeDirectories = async () => {
-    for (const handle of directories.reverse()) await handle.close().catch(() => {});
-  };
-  try {
-    for (const part of parts) {
-      const candidate = path.join(current, part);
-      if (create) {
-        await mkdir(candidate, { mode:0o700 }).catch(error => {
-          if (error?.code !== 'EEXIST') throw error;
-        });
-      }
-      const handle = await open(candidate, DOCUMENT_DIRECTORY_FLAGS);
-      const info = await handle.stat();
-      if (!info.isDirectory()) {
-        await handle.close().catch(() => {});
-        throw new Error('Document path parent is not a directory');
-      }
-      directories.push(handle);
-      current = `/proc/self/fd/${handle.fd}`;
-    }
-    const handle = directories.pop();
-    if (!handle) throw new Error('Document directory path is empty');
-    return {
-      anchor: current,
-      close: async () => {
-        try { await handle.close(); }
-        finally { await closeDirectories(); }
-      },
-    };
-  } catch (error) {
-    await closeDirectories();
-    throw error;
-  }
+  const opened = await openDirectoryPath(directory, { create });
+  return { ...opened, descriptorBound:opened.anchor !== directory || process.platform === 'linux' };
 }
 
 async function createAnchoredTempDirectory(parent, prefix) {

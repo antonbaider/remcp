@@ -3,10 +3,12 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { existsSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { constants, existsSync } from 'node:fs';
+import { lstat, mkdtemp, open, rename, rm, stat, unlink } from 'node:fs/promises';
 import { assertAllowedCommand } from '../policy.mjs';
 import { isWaylandSession } from '../screenshot-portal.mjs';
+import { openDirectoryPath } from '../tools/files.mjs';
 import { resolveSafePath, text } from '../util.mjs';
 import {
   clamp,
@@ -297,38 +299,97 @@ export function recordScreenAvailable({
   return false;
 }
 
+async function openRecordingParent(destination) {
+  return openDirectoryPath(path.dirname(destination));
+}
+
+async function copyRecordingFile(source, destination) {
+  let input;
+  let output;
+  let parent;
+  let temporary;
+  try {
+    input = await open(source, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    const sourceInfo = await input.stat();
+    if (!sourceInfo.isFile()) throw new Error('Screen recording staging path is not a regular file');
+    parent = await openRecordingParent(destination);
+    const anchoredDestination = path.join(parent.anchor, path.basename(destination));
+    const existing = await lstat(anchoredDestination).catch(() => null);
+    if (existing?.isSymbolicLink()) throw new Error('Screen recording destination cannot be a symbolic link');
+    if (existing && !existing.isFile()) throw new Error('Screen recording destination is not a regular file');
+    temporary = path.join(parent.anchor, `.${path.basename(destination)}.${randomUUID()}.tmp`);
+    output = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0), 0o600);
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let offset = 0;
+    for (;;) {
+      const { bytesRead } = await input.read(buffer, 0, buffer.length, offset);
+      if (!bytesRead) break;
+      let written = 0;
+      while (written < bytesRead) {
+        const result = await output.write(buffer, written, bytesRead - written, offset + written);
+        if (!result.bytesWritten) throw new Error('Could not finish writing the screen recording');
+        written += result.bytesWritten;
+      }
+      offset += bytesRead;
+    }
+    await output.sync();
+    await output.close();
+    output = null;
+    await rename(temporary, anchoredDestination);
+    temporary = null;
+  } finally {
+    if (output) await output.close().catch(() => {});
+    if (temporary) await unlink(temporary).catch(() => {});
+    if (input) await input.close().catch(() => {});
+    if (parent) await parent.close().catch(() => {});
+  }
+}
+
 export async function recordScreen(args) {
   const seconds = clamp(args.duration_seconds, 5, 1, 120);
   const fps = clamp(args.fps, 15, 1, 60);
-  const destination = args.destination ? await resolveSafePath(args.destination, 'destination') : path.join(os.tmpdir(), `remcp-screen-${Date.now()}.mp4`);
-  const wayland = process.platform === 'linux' && isWaylandSession();
-  if (wayland && commandExists('wf-recorder') && commandExists('timeout')) {
-    const result = await runFile('timeout', ['--signal=INT', `${seconds}s`, 'wf-recorder', '-f',destination,'-r',String(fps),'-c','libx264'], { label:'screen recording', timeout:(seconds+10)*1000, allowFailure:true });
-    if (![0, 124, 130].includes(Number(result.code))) throw new Error(result.stderr.trim() || `wf-recorder exited ${result.code}`);
-  } else {
-    const ffmpeg = resolveRecordScreenFfmpeg();
-    if (wayland) {
-      unavailable('Screen recording', 'wf-recorder and timeout are required on Wayland');
-    }
-    if (process.platform === 'linux' && !String(process.env.DISPLAY || '').trim()) {
-      unavailable('Screen recording', 'an active X11 DISPLAY is required on Linux X11');
-    }
-    if (!ffmpeg) {
-      if (process.platform === 'darwin') unavailable('Screen recording', 'ffmpeg is required on macOS');
-      if (process.platform === 'win32') unavailable('Screen recording', 'ffmpeg is required on Windows');
-      unavailable('Screen recording', 'ffmpeg is required on X11');
-    }
-    let argv;
-    if (process.platform === 'win32') argv=['-y','-f','gdigrab','-framerate',String(fps),'-i','desktop','-t',String(seconds),'-pix_fmt','yuv420p',destination];
-    else if (process.platform === 'darwin') {
-      const input = await avfoundationScreenInput(ffmpeg);
-      argv=['-y','-f','avfoundation','-framerate',String(fps),'-i',`${input}:none`,'-t',String(seconds),'-pix_fmt','yuv420p',destination];
-    }
-    else argv=['-y','-f','x11grab','-framerate',String(fps),'-i',process.env.DISPLAY,'-t',String(seconds),'-pix_fmt','yuv420p',destination];
-    await runFile(ffmpeg, argv, { label:'screen recording', timeout:(seconds+20)*1000, maxBuffer:8*1024*1024 });
+  const requestedDestination = args.destination ? await resolveSafePath(args.destination, 'destination') : '';
+  if (requestedDestination) {
+    const existing = await lstat(requestedDestination).catch(() => null);
+    if (existing?.isSymbolicLink()) throw new Error('Screen recording destination cannot be a symbolic link');
+    if (existing && !existing.isFile()) throw new Error('Screen recording destination is not a regular file');
   }
-  const info = await stat(destination);
-  return jsonResult({ path:destination, bytes:info.size, duration_seconds:seconds, format:path.extname(destination).slice(1) || 'mp4' });
+  const stagingDirectory = await mkdtemp(path.join(os.tmpdir(), 'remcp-screen-'));
+  const staged = path.join(stagingDirectory, `capture-${randomUUID()}.mp4`);
+  const wayland = process.platform === 'linux' && isWaylandSession();
+  let keepStaging = false;
+  try {
+    if (wayland && commandExists('wf-recorder') && commandExists('timeout')) {
+      const result = await runFile('timeout', ['--signal=INT', `${seconds}s`, 'wf-recorder', '-f',staged,'-r',String(fps),'-c','libx264'], { label:'screen recording', timeout:(seconds+10)*1000, allowFailure:true });
+      if (![0, 124, 130].includes(Number(result.code))) throw new Error(result.stderr.trim() || `wf-recorder exited ${result.code}`);
+    } else {
+      const ffmpeg = resolveRecordScreenFfmpeg();
+      if (wayland) unavailable('Screen recording', 'wf-recorder and timeout are required on Wayland');
+      if (process.platform === 'linux' && !String(process.env.DISPLAY || '').trim()) unavailable('Screen recording', 'an active X11 DISPLAY is required on Linux X11');
+      if (!ffmpeg) {
+        if (process.platform === 'darwin') unavailable('Screen recording', 'ffmpeg is required on macOS');
+        if (process.platform === 'win32') unavailable('Screen recording', 'ffmpeg is required on Windows');
+        unavailable('Screen recording', 'ffmpeg is required on X11');
+      }
+      let argv;
+      if (process.platform === 'win32') argv=['-y','-f','gdigrab','-framerate',String(fps),'-i','desktop','-t',String(seconds),'-pix_fmt','yuv420p',staged];
+      else if (process.platform === 'darwin') {
+        const input = await avfoundationScreenInput(ffmpeg);
+        argv=['-y','-f','avfoundation','-framerate',String(fps),'-i',`${input}:none`,'-t',String(seconds),'-pix_fmt','yuv420p',staged];
+      } else argv=['-y','-f','x11grab','-framerate',String(fps),'-i',process.env.DISPLAY,'-t',String(seconds),'-pix_fmt','yuv420p',staged];
+      await runFile(ffmpeg, argv, { label:'screen recording', timeout:(seconds+20)*1000, maxBuffer:8*1024*1024 });
+    }
+    if (requestedDestination) {
+      await copyRecordingFile(staged, requestedDestination);
+      await rm(stagingDirectory, { recursive:true, force:true });
+    }
+    const output = requestedDestination || staged;
+    const info = await stat(output);
+    keepStaging = !requestedDestination;
+    return jsonResult({ path:output, bytes:info.size, duration_seconds:seconds, format:path.extname(output).slice(1) || 'mp4' });
+  } finally {
+    if (!keepStaging) await rm(stagingDirectory, { recursive:true, force:true }).catch(() => {});
+  }
 }
 
 export const diagnosticHandlers = {
