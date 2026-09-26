@@ -27,7 +27,7 @@ const POST_CONNECT_UPDATE_RECHECK_DELAYS_MS = Object.freeze([60_000, 5 * 60_000,
 const POST_CONNECT_UPDATE_RECHECK_JITTER_MS = 30_000;
 // A version that failed to install is retried after this cooldown instead of on every reconnect.
 const UPDATE_RETRY_COOLDOWN_MS = 30 * 60 * 1000;
-const METRICS_INTERVAL_MS = 60_000;
+const METRICS_INTERVAL_MS = 5 * 60_000;
 const TELEMETRY_QUEUE_LIMIT = 500;
 const TELEMETRY_BATCH_LIMIT = 100;
 const TELEMETRY_SEND_INTERVAL_MS = 5_000;
@@ -71,6 +71,12 @@ function jitter(ms) {
   return Math.round(ms * (0.75 + Math.random() * 0.5));
 }
 
+function boundedReconnectDelay(value, fallbackMs = 150) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallbackMs;
+  return Math.max(100, Math.min(60_000, Math.floor(parsed)));
+}
+
 // Device health is sampled locally and is the only thing ReMCP stores about the machine
 // beyond its name, platform and last-seen time. No process list, no file names.
 function deviceMetrics(extra = {}) {
@@ -98,6 +104,7 @@ export async function runAgent(options) {
   const agentUrl = serverUrl.replace(/^http/, 'ws') + '/agent';
   const callTimeoutMs = Math.max(5_000, Number(options.rpcTimeoutMs || 120000) - CALL_TIMEOUT_MARGIN_MS);
   const telemetryEnabled = options.telemetryEnabled !== false;
+  const metricsIntervalMs = Math.max(60_000, Number(options.metricsIntervalMs || process.env.REMCP_AGENT_METRICS_INTERVAL_MS) || METRICS_INTERVAL_MS);
   const persistState = typeof options.persistState === 'function' ? options.persistState : () => {};
   const postConnectUpdateRecheckDelaysMs = (Array.isArray(options.updateRecheckDelaysMs)
     ? options.updateRecheckDelaysMs
@@ -117,6 +124,7 @@ export async function runAgent(options) {
   let postConnectUpdateTimers = [];
   // Set when a replica asks this agent to move before it is replaced; the close handler reads it.
   let askedToReconnect = false;
+  let requestedReconnectDelayMs = 0;
   let pendingRequests = 0;
   let runtimeVersion = 'unknown';
   let runtimeRestarts = 0;
@@ -127,6 +135,7 @@ export async function runAgent(options) {
   let runtimeError = '';
   const telemetryQueue = [];
   let telemetryTimer = null;
+  let lastMetricsSentAt = 0;
   // A device whose runtime is missing or unreadable must still run the agent: the agent is what
   // installs and repairs the runtime, so failing here would remove the only path back.
   let runtimeEntry = '';
@@ -310,6 +319,28 @@ export async function runAgent(options) {
     if (!send({ type: 'telemetry', runtimeVersion, agentVersion: VERSION, events: batch })) telemetryQueue.unshift(...batch);
   }
 
+  function sendMetricsSample({ force = false } = {}) {
+    if (activeSocket?.readyState !== 1) return false;
+    const at = Date.now();
+    // Reconnects during a deploy reuse the same agent process. Do not turn every socket move into
+    // another PostgreSQL metrics write; the regular jittered sample is enough.
+    if (!force && lastMetricsSentAt && at - lastMetricsSentAt < Math.floor(metricsIntervalMs / 2)) return false;
+    const sent = send({ type: 'metrics', runtimeState: runtimeDown ? 'down' : 'ready', runtimeError, metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown, queueDepth: telemetryQueue.length }) });
+    if (sent) lastMetricsSentAt = at;
+    return sent;
+  }
+
+  function scheduleMetricsSample() {
+    if (stopping) return;
+    telemetryTimer = setTimeout(() => {
+      telemetryTimer = null;
+      sendMetricsSample();
+      flushTelemetry();
+      scheduleMetricsSample();
+    }, jitter(metricsIntervalMs));
+    telemetryTimer.unref?.();
+  }
+
   function queueEvent(event) {
     if (!telemetryEnabled) return;
     if (telemetryQueue.length >= TELEMETRY_QUEUE_LIMIT) telemetryQueue.shift();
@@ -436,7 +467,7 @@ export async function runAgent(options) {
         reconnects,
       });
       console.log(`Connected to ${serverUrl} as ${deviceName}`);
-      send({ type: 'metrics', metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown }), runtimeState: runtimeDown ? 'down' : 'ready', runtimeError });
+      sendMetricsSample();
       reportInstallOnce();
       flushTelemetry();
       void checkForUpdate();
@@ -447,6 +478,7 @@ export async function runAgent(options) {
       try { message = JSON.parse(raw.toString()); } catch { return; }
       if (message?.type === 'reconnect') {
         askedToReconnect = true;
+        requestedReconnectDelayMs = boundedReconnectDelay(message.delayMs, 150);
         return;
       }
       if (message?.type === 'request') void respond(ws, message);
@@ -463,10 +495,12 @@ export async function runAgent(options) {
       // is not down, it is moving: reconnect at once and forget the backoff, so the person and the
       // model see nothing at all.
       if (code === 1013 || askedToReconnect) {
+        const delayMs = requestedReconnectDelayMs || 150;
         askedToReconnect = false;
+        requestedReconnectDelayMs = 0;
         reconnects = 0;
-        console.log('ReMCP relay is being redeployed; reconnecting now.');
-        scheduleReconnect(150);
+        console.log(`ReMCP relay is being redeployed; reconnecting in ${delayMs}ms.`);
+        scheduleReconnect(delayMs);
         return;
       }
       if (code === 1008 || revoked) {
@@ -619,13 +653,7 @@ export async function runAgent(options) {
     }
   }
 
-  telemetryTimer = setInterval(() => {
-    if (activeSocket?.readyState === 1) {
-      send({ type: 'metrics', runtimeState: runtimeDown ? 'down' : 'ready', runtimeError, metrics: deviceMetrics({ reconnects, pendingRequests, runtimeVersion, runtimeRestarts, runtimeDown, queueDepth: telemetryQueue.length }) });
-      flushTelemetry();
-    }
-  }, METRICS_INTERVAL_MS);
-  telemetryTimer.unref?.();
+  scheduleMetricsSample();
   const telemetryFlushTimer = setInterval(flushTelemetry, TELEMETRY_SEND_INTERVAL_MS);
   telemetryFlushTimer.unref?.();
   const updateTimer = setInterval(() => void checkForUpdate(), UPDATE_CHECK_INTERVAL_MS);
@@ -640,7 +668,7 @@ export async function runAgent(options) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
     clearPostConnectUpdateChecks();
-    if (telemetryTimer) clearInterval(telemetryTimer);
+    if (telemetryTimer) clearTimeout(telemetryTimer);
     clearInterval(telemetryFlushTimer);
     clearInterval(updateTimer);
     for (const controller of inFlight.values()) controller.abort();

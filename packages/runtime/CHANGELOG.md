@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.113 — 2026-09-26
+
+- No runtime tool names, schemas, or device-side tool implementations change in this release. The runtime package version remains in lockstep with the hosted/client release while relay heartbeat, reconnect admission, telemetry cadence, gateway capacity, and production load-safety are hardened.
+
 ## 0.2.112 — 2026-09-25
 
 - Linux EIS absolute pointer motion converts desktop-wide coordinates into the selected libei region before dispatch and keeps the current pointer device when it remains valid, eliminating accepted-but-undelivered absolute moves.
